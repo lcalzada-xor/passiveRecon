@@ -5,24 +5,69 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestNormalizeDomain(t *testing.T) {
+	t.Parallel()
+
 	cases := map[string]string{
 		"example.com":                        "example.com",
-		"https://www.Example.com/path":       "example.com",
+		" https://www.Example.com/path ":     "example.com",
 		"sub.example.com:8080/other":         "sub.example.com",
 		"http://www.example.com:443/foo/bar": "example.com",
 		"":                                   "",
 	}
 	for input, expected := range cases {
-		if got := normalizeDomain(input); got != expected {
-			t.Fatalf("normalizeDomain(%q) = %q, want %q", input, got, expected)
-		}
+		input, expected := input, expected
+		t.Run(input, func(t *testing.T) {
+			t.Parallel()
+			if got := normalizeDomain(input); got != expected {
+				t.Fatalf("normalizeDomain(%q) = %q, want %q", input, got, expected)
+			}
+		})
 	}
 }
 
+func TestNormalizeURL(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"example.com":            "http://example.com",
+		"https://secure.example": "https://secure.example",
+		" http://foo.bar/baz ":   "http://foo.bar/baz",
+		"":                       "",
+		"//relative/path":        "http:////relative/path",
+	}
+	for input, expected := range cases {
+		input, expected := input, expected
+		t.Run(input, func(t *testing.T) {
+			t.Parallel()
+			if got := normalizeURL(input); got != expected {
+				t.Fatalf("normalizeURL(%q) = %q, want %q", input, got, expected)
+			}
+		})
+	}
+}
+
+func readLines(t *testing.T, path string) []string {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", path, err)
+	}
+	contents := strings.TrimSpace(string(data))
+	if contents == "" {
+		return nil
+	}
+	return strings.Split(contents, "\n")
+}
+
 func TestWriteDomain(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	w, err := New(dir, "domains.passive")
 	if err != nil {
@@ -44,23 +89,16 @@ func TestWriteDomain(t *testing.T) {
 		}
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "domains.passive"))
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	got := strings.Split(strings.TrimSpace(string(data)), "\n")
+	got := readLines(t, filepath.Join(dir, "domains.passive"))
 	want := []string{"example.com", "sub.example.com"}
-	if len(got) != len(want) {
-		t.Fatalf("WriteDomain produced %d lines, want %d: %q", len(got), len(want), got)
-	}
-	for i, line := range want {
-		if got[i] != line {
-			t.Fatalf("line %d = %q, want %q", i, got[i], line)
-		}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("unexpected domains (-want +got):\n%s", diff)
 	}
 }
 
 func TestWriteURL(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	w, err := New(dir, "routes.passive")
 	if err != nil {
@@ -81,27 +119,19 @@ func TestWriteURL(t *testing.T) {
 		}
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "routes.passive"))
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-
+	got := readLines(t, filepath.Join(dir, "routes.passive"))
 	want := []string{
 		"http://example.com/path",
 		"https://secure.example.com",
 	}
-	if len(lines) != len(want) {
-		t.Fatalf("WriteURL produced %d lines, want %d: %q", len(lines), len(want), lines)
-	}
-	for i, line := range want {
-		if lines[i] != line {
-			t.Fatalf("line %d = %q, want %q", i, lines[i], line)
-		}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("unexpected urls (-want +got):\n%s", diff)
 	}
 }
 
 func TestWriteRaw(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	w, err := New(dir, "meta.passive")
 	if err != nil {
@@ -116,18 +146,9 @@ func TestWriteRaw(t *testing.T) {
 		}
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "meta.passive"))
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	got := readLines(t, filepath.Join(dir, "meta.passive"))
 	want := []string{"line1", "line2"}
-	if len(lines) != len(want) {
-		t.Fatalf("WriteRaw produced %d lines, want %d: %q", len(lines), len(want), lines)
-	}
-	for i, line := range want {
-		if lines[i] != line {
-			t.Fatalf("line %d = %q, want %q", i, lines[i], line)
-		}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("unexpected raw lines (-want +got):\n%s", diff)
 	}
 }
