@@ -1,0 +1,8 @@
+# External CLI tools required by passiveRecon
+# Install these binaries and ensure they are available on your PATH.
+amass
+assetfinder
+gau
+httpx
+subfinder
+waybackurls
