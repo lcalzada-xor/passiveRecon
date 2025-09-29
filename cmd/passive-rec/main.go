@@ -1,0 +1,30 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"os"
+
+	"passive-rec/internal/app"
+	"passive-rec/internal/config"
+	"passive-rec/internal/logx"
+)
+
+func main() {
+	cfg := config.ParseFlags()
+
+	logx.SetVerbosity(cfg.Verbosity)
+	logx.V(1, "Iniciando passive-rec target=%s outdir=%s tools=%v workers=%d active=%v",
+		cfg.Target, cfg.OutDir, cfg.Tools, cfg.Workers, cfg.Active)
+
+	if cfg.Target == "" {
+		fmt.Fprintln(os.Stderr, "uso: -target example.com")
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+	if err := app.Run(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	logx.V(1, "Listo. Archivos .passive creados en: %s", cfg.OutDir)
+}
