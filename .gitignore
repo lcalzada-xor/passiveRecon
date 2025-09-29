@@ -24,6 +24,10 @@ profile.cov
 go.work
 go.work.sum
 
+# Passive Recon build artifacts
+*.passive
+passive-rec
+
 # env file
 .env
 
