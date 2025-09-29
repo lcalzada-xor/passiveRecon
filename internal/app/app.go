@@ -25,44 +25,48 @@ func Run(cfg *config.Config) error {
 	ctx := context.Background()
 
 	// lanzar fuentes según tools
+	bar := newProgressBar(len(cfg.Tools))
 	var wg runnerWaitGroup
 	for _, t := range cfg.Tools {
-		switch strings.ToLower(strings.TrimSpace(t)) {
+		toolName := strings.TrimSpace(t)
+		switch strings.ToLower(toolName) {
 		case "subfinder":
-			wg.Go(runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
+			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
 				return sources.Subfinder(c, cfg.Target, sink.In())
-			}))
+			})))
 		case "assetfinder":
-			wg.Go(runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
+			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
 				return sources.Assetfinder(c, cfg.Target, sink.In())
-			}))
+			})))
 		case "amass":
-			wg.Go(runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
+			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
 				return sources.Amass(c, cfg.Target, sink.In())
-			}))
+			})))
 		case "waybackurls":
-			wg.Go(runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
+			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
 				return sources.Wayback(c, cfg.Target, sink.In())
-			}))
+			})))
 		case "gau":
-			wg.Go(runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
+			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
 				return sources.GAU(c, cfg.Target, sink.In())
-			}))
+			})))
 		case "crtsh":
-			wg.Go(runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
+			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
 				return sources.CRTSH(c, cfg.Target, sink.In())
-			}))
+			})))
 		case "httpx":
 			if cfg.Active {
-				wg.Go(runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
+				wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
 					// leer de domains.passive generado
 					return sources.HTTPX(c, "domains.passive", cfg.OutDir, sink.In())
-				}))
+				})))
 			} else {
 				sink.In() <- "meta: httpx skipped (requires --active)"
+				bar.StepDone(toolName, "omitido")
 			}
 		default:
 			sink.In() <- fmt.Sprintf("meta: unknown tool: %s", t)
+			bar.StepDone(toolName, "desconocido")
 		}
 	}
 
