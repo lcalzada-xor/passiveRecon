@@ -8,11 +8,12 @@ import (
 )
 
 func HTTPX(ctx context.Context, domainsFile, outdir string, out chan<- string) error {
-	if !runner.HasBin("httpx") {
+	bin, err := runner.HTTPXBin()
+	if err != nil {
 		out <- "meta: httpx not found in PATH"
-		return runner.ErrMissingBinary
+		return err
 	}
-	return runner.RunCommand(ctx, "httpx", []string{
+	return runner.RunCommand(ctx, bin, []string{
 		"-sc",
 		"-title",
 		"-silent",

@@ -13,6 +13,39 @@ import (
 
 var ErrMissingBinary = errors.New("missing binary")
 
+// findBinaryMatchingVersion iterates over candidate binary names and returns the
+// first one whose `-version` output contains the provided substring. The
+// comparison is performed using a case-insensitive match. If no binary matches
+// the search criteria ErrMissingBinary is returned.
+func findBinaryMatchingVersion(match string, candidates ...string) (string, error) {
+	match = strings.ToLower(match)
+	for _, candidate := range candidates {
+		path, err := exec.LookPath(candidate)
+		if err != nil {
+			continue
+		}
+
+		cmd := exec.Command(path, "-version")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			continue
+		}
+
+		if strings.Contains(strings.ToLower(string(output)), match) {
+			return path, nil
+		}
+	}
+
+	return "", ErrMissingBinary
+}
+
+// HTTPXBin attempts to locate the ProjectDiscovery httpx binary. This avoids
+// accidentally picking the Python `httpx` CLI, which is incompatible with the
+// flags used by passive-rec.
+func HTTPXBin() (string, error) {
+	return findBinaryMatchingVersion("projectdiscovery", "httpx", "httpx-toolkit")
+}
+
 func HasBin(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
