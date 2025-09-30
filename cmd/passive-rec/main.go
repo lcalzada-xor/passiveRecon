@@ -14,7 +14,7 @@ func main() {
 	cfg := config.ParseFlags()
 
 	logx.SetVerbosity(cfg.Verbosity)
-	logx.V(1, "Iniciando passive-rec target=%s outdir=%s tools=%v workers=%d active=%v",
+	logx.Infof("Iniciando passive-rec target=%s outdir=%s tools=%v workers=%d active=%v",
 		cfg.Target, cfg.OutDir, cfg.Tools, cfg.Workers, cfg.Active)
 
 	if cfg.Target == "" {
@@ -23,8 +23,8 @@ func main() {
 		os.Exit(1)
 	}
 	if err := app.Run(cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		logx.Errorf("%v", err)
 		os.Exit(1)
 	}
-	logx.V(1, "Listo. Archivos .passive creados en: %s", cfg.OutDir)
+	logx.Infof("Listo. Archivos .passive creados en: %s", cfg.OutDir)
 }
