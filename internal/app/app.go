@@ -66,8 +66,8 @@ func Run(cfg *config.Config) error {
 		case "httpx":
 			if cfg.Active {
 				deferreds = append(deferreds, bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
-					// leer de domains.passive generado
-					return sources.HTTPX(c, "domains.passive", cfg.OutDir, sink.In())
+					// leer de domains/routes.passive generado
+					return sources.HTTPX(c, []string{"domains.passive", "routes.passive"}, cfg.OutDir, sink.In())
 				})))
 			} else {
 				sink.In() <- "meta: httpx skipped (requires --active)"
