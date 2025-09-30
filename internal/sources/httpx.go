@@ -13,7 +13,7 @@ func HTTPX(ctx context.Context, domainsFile, outdir string, out chan<- string) e
 		return runner.ErrMissingBinary
 	}
 	return runner.RunCommand(ctx, "httpx", []string{
-		"-status",
+		"-sc",
 		"-title",
 		"-silent",
 		"-l",
