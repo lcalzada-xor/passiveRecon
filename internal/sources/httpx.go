@@ -2,7 +2,6 @@ package sources
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 
 	"passive-rec/internal/runner"
@@ -13,9 +12,11 @@ func HTTPX(ctx context.Context, domainsFile, outdir string, out chan<- string) e
 		out <- "meta: httpx not found in PATH"
 		return runner.ErrMissingBinary
 	}
-	return runner.RunCommand(ctx, "sh",
-		[]string{"-c", fmt.Sprintf("cat %s | httpx -status -title -silent",
-			filepath.Join(outdir, domainsFile))},
-		out,
-	)
+	return runner.RunCommand(ctx, "httpx", []string{
+		"-status",
+		"-title",
+		"-silent",
+		"-l",
+		filepath.Join(outdir, domainsFile),
+	}, out)
 }

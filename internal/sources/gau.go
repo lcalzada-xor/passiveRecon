@@ -2,7 +2,6 @@ package sources
 
 import (
 	"context"
-	"fmt"
 
 	"passive-rec/internal/runner"
 )
@@ -12,5 +11,5 @@ func GAU(ctx context.Context, target string, out chan<- string) error {
 		out <- "meta: gau not found in PATH"
 		return runner.ErrMissingBinary
 	}
-	return runner.RunCommand(ctx, "sh", []string{"-c", fmt.Sprintf("echo %s | gau", target)}, out)
+	return runner.RunCommand(ctx, "gau", []string{target}, out)
 }
