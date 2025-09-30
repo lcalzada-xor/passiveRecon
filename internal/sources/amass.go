@@ -9,7 +9,7 @@ import (
 func Amass(ctx context.Context, target string, out chan<- string) error {
 	if !runner.HasBin("amass") {
 		out <- "meta: amass not found in PATH"
-		return nil
+		return runner.ErrMissingBinary
 	}
 	return runner.RunCommand(ctx, "amass", []string{"enum", "-passive", "-d", target}, out)
 }

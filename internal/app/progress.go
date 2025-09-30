@@ -1,10 +1,14 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"sync"
+
+	"passive-rec/internal/runner"
 )
 
 type progressBar struct {
@@ -42,7 +46,14 @@ func (p *progressBar) Wrap(tool string, fn func() error) func() error {
 		err := fn()
 		status := "ok"
 		if err != nil {
-			status = "error"
+			switch {
+			case errors.Is(err, runner.ErrMissingBinary):
+				status = "faltante"
+			case errors.Is(err, context.DeadlineExceeded):
+				status = "timeout"
+			default:
+				status = "error"
+			}
 		}
 		p.StepDone(tool, status)
 		return err

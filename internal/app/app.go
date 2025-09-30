@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"passive-rec/internal/config"
 	"passive-rec/internal/logx"
 	"passive-rec/internal/pipeline"
+	"passive-rec/internal/runner"
 	"passive-rec/internal/sources"
 )
 
@@ -88,6 +90,9 @@ func (w *runnerWaitGroup) Go(fn func() error) {
 func (w *runnerWaitGroup) Wait() {
 	for _, ch := range w.ch {
 		if err := <-ch; err != nil {
+			if errors.Is(err, runner.ErrMissingBinary) {
+				continue
+			}
 			logx.Warnf("source error: %v", err)
 		}
 	}
