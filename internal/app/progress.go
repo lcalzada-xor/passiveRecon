@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -12,16 +13,22 @@ import (
 )
 
 type progressBar struct {
-	mu          sync.Mutex
-	total       int
-	current     int
-	width       int
-	lastLineLen int
-	done        bool
+	mu           sync.Mutex
+	total        int
+	current      int
+	width        int
+	lastLineLen  int
+	done         bool
+	out          io.Writer
+	lastRendered string
+	missing      []string
 }
 
-func newProgressBar(total int) *progressBar {
-	pb := &progressBar{total: total, width: 30}
+func newProgressBar(total int, out io.Writer) *progressBar {
+	if out == nil {
+		out = os.Stderr
+	}
+	pb := &progressBar{total: total, width: 30, out: out}
 	if total > 0 {
 		pb.renderInitial()
 	}
@@ -34,8 +41,9 @@ func (p *progressBar) renderInitial() {
 
 	bar := strings.Repeat("░", p.width)
 	line := fmt.Sprintf("[%s] 0/%d iniciando...", bar, p.total)
-	fmt.Fprint(os.Stderr, line)
+	fmt.Fprint(p.out, line)
 	p.lastLineLen = len(line)
+	p.lastRendered = line
 }
 
 func (p *progressBar) Wrap(tool string, fn func() error) func() error {
@@ -76,11 +84,28 @@ func (p *progressBar) StepDone(tool, status string) {
 		p.current = p.total
 	}
 
+	if status == "faltante" {
+		toolName := strings.TrimSpace(tool)
+		if toolName != "" {
+			found := false
+			for _, existing := range p.missing {
+				if strings.EqualFold(existing, toolName) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				p.missing = append(p.missing, toolName)
+			}
+		}
+	}
+
 	p.renderLocked(tool, status)
 	if p.current == p.total {
-		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(p.out)
 		p.lastLineLen = 0
 		p.done = true
+		p.lastRendered = ""
 	}
 }
 
@@ -111,6 +136,65 @@ func (p *progressBar) renderLocked(tool, status string) {
 	if padding > 0 {
 		line += strings.Repeat(" ", padding)
 	}
-	fmt.Fprint(os.Stderr, line)
+	fmt.Fprint(p.out, line)
 	p.lastLineLen = len(line)
+	p.lastRendered = line
+}
+
+func (p *progressBar) Writer() io.Writer {
+	return &progressWriter{pb: p}
+}
+
+func (p *progressBar) MissingTools() []string {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if len(p.missing) == 0 {
+		return nil
+	}
+
+	out := make([]string, len(p.missing))
+	copy(out, p.missing)
+	return out
+}
+
+type progressWriter struct {
+	pb *progressBar
+}
+
+func (w *progressWriter) Write(data []byte) (int, error) {
+	if w == nil || w.pb == nil {
+		return os.Stderr.Write(data)
+	}
+
+	p := w.pb
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	out := p.out
+	if out == nil {
+		out = os.Stderr
+	}
+
+	if p.lastLineLen > 0 && !p.done {
+		clear := "\r" + strings.Repeat(" ", p.lastLineLen) + "\r"
+		if _, err := fmt.Fprint(out, clear); err != nil {
+			return 0, err
+		}
+	}
+
+	if _, err := out.Write(data); err != nil {
+		return 0, err
+	}
+
+	if p.lastRendered != "" && !p.done {
+		if _, err := fmt.Fprint(out, p.lastRendered); err != nil {
+			return 0, err
+		}
+	}
+
+	return len(data), nil
 }

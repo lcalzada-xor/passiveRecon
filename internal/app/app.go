@@ -27,7 +27,11 @@ func Run(cfg *config.Config) error {
 	ctx := context.Background()
 
 	// lanzar fuentes según tools
-	bar := newProgressBar(len(cfg.Tools))
+	bar := newProgressBar(len(cfg.Tools), nil)
+	if bar != nil && len(cfg.Tools) > 0 {
+		logx.SetOutput(bar.Writer())
+		defer logx.SetOutput(nil)
+	}
 	var wg runnerWaitGroup
 	for _, t := range cfg.Tools {
 		toolName := strings.TrimSpace(t)
@@ -73,6 +77,9 @@ func Run(cfg *config.Config) error {
 	}
 
 	wg.Wait()
+	if missing := bar.MissingTools(); len(missing) > 0 {
+		logx.Infof("Herramientas faltantes en el sistema: %s", strings.Join(missing, ", "))
+	}
 	logx.Infof("modo active=%v; terminado", cfg.Active)
 	return nil
 }
