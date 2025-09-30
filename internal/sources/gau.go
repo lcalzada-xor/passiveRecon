@@ -7,9 +7,11 @@ import (
 )
 
 func GAU(ctx context.Context, target string, out chan<- string) error {
-	if !runner.HasBin("gau") {
-		out <- "meta: gau not found in PATH"
+	bin, ok := runner.FindBin("gau", "getallurls")
+	if !ok {
+		out <- "meta: gau/getallurls not found in PATH"
 		return runner.ErrMissingBinary
 	}
 	return runner.RunCommand(ctx, "gau", []string{target}, out)
+
 }

@@ -18,6 +18,18 @@ func HasBin(name string) bool {
 	return err == nil
 }
 
+// FindBin returns the first binary name from the provided list that is available
+// on the current PATH. If none of the binaries are found the returned string is
+// empty and the second boolean value is false.
+func FindBin(names ...string) (string, bool) {
+	for _, name := range names {
+		if HasBin(name) {
+			return name, true
+		}
+	}
+	return "", false
+}
+
 func RunCommand(ctx context.Context, name string, args []string, out chan<- string) error {
 	logx.Debugf("run: %s %s", name, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, name, args...)
