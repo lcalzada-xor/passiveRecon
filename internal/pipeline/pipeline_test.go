@@ -3,6 +3,7 @@ package pipeline
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -67,6 +68,36 @@ func TestSinkClassification(t *testing.T) {
 	wantMeta := []string{"run started"}
 	if diff := cmp.Diff(wantMeta, meta); diff != "" {
 		t.Fatalf("unexpected meta (-want +got):\n%s", diff)
+	}
+}
+
+func TestSinkFlush(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir)
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(2)
+
+	sink.In() <- "one.example.com"
+	sink.In() <- "two.example.com"
+
+	sink.Flush()
+
+	domains := readLines(t, filepath.Join(dir, "domains.passive"))
+	wantDomains := []string{"one.example.com", "two.example.com"}
+	sort.Strings(domains)
+	if diff := cmp.Diff(wantDomains, domains); diff != "" {
+		t.Fatalf("unexpected domains after flush (-want +got):\n%s", diff)
+	}
+
+	sink.In() <- "meta: later"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
 	}
 }
 

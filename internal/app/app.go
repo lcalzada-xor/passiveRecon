@@ -80,6 +80,7 @@ func Run(cfg *config.Config) error {
 	}
 
 	wg.Wait()
+	sink.Flush()
 	for _, task := range deferreds {
 		if err := task(); err != nil {
 			if errors.Is(err, runner.ErrMissingBinary) {
