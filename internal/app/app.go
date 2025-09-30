@@ -32,7 +32,10 @@ func Run(cfg *config.Config) error {
 		logx.SetOutput(bar.Writer())
 		defer logx.SetOutput(nil)
 	}
-	var wg runnerWaitGroup
+	var (
+		wg        runnerWaitGroup
+		deferreds []func() error
+	)
 	for _, t := range cfg.Tools {
 		toolName := strings.TrimSpace(t)
 		switch strings.ToLower(toolName) {
@@ -62,7 +65,7 @@ func Run(cfg *config.Config) error {
 			})))
 		case "httpx":
 			if cfg.Active {
-				wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
+				deferreds = append(deferreds, bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
 					// leer de domains.passive generado
 					return sources.HTTPX(c, "domains.passive", cfg.OutDir, sink.In())
 				})))
@@ -77,6 +80,14 @@ func Run(cfg *config.Config) error {
 	}
 
 	wg.Wait()
+	for _, task := range deferreds {
+		if err := task(); err != nil {
+			if errors.Is(err, runner.ErrMissingBinary) {
+				continue
+			}
+			logx.Warnf("source error: %v", err)
+		}
+	}
 	if missing := bar.MissingTools(); len(missing) > 0 {
 		logx.Infof("Herramientas faltantes en el sistema: %s", strings.Join(missing, ", "))
 	}
