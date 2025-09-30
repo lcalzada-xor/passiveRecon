@@ -91,3 +91,17 @@ func TestParseFlagsCustom(t *testing.T) {
 		t.Fatalf("expected verbosity 2, got %d", cfg.Verbosity)
 	}
 }
+
+func TestParseFlagsTraceVerbosity(t *testing.T) {
+	prepareFlags(t)
+
+	os.Args = append(os.Args, []string{
+		"-v", "3",
+	}...)
+
+	cfg := ParseFlags()
+
+	if cfg.Verbosity != 3 {
+		t.Fatalf("expected verbosity 3, got %d", cfg.Verbosity)
+	}
+}
