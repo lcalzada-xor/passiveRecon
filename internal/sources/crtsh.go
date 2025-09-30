@@ -7,17 +7,21 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"passive-rec/internal/logx"
 )
 
 func CRTSH(ctx context.Context, domain string, out chan<- string) error {
 	logx.V(2, "crtsh query %s", domain)
-	client := &http.Client{Timeout: 30 * time.Second}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		"https://crt.sh/?q=%25."+domain+"&output=json", nil)
-	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "passive-rec/1.0 (+https://github.com/llvch/passiveRecon)")
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		logx.V(1, "crtsh http: %v", err)
 		return err
@@ -39,7 +43,10 @@ func CRTSH(ctx context.Context, domain string, out chan<- string) error {
 	for _, o := range arr {
 		if v, ok := o["name_value"].(string); ok {
 			for _, p := range strings.Split(v, "\n") {
-				out <- p
+				p = strings.TrimSpace(p)
+				if p != "" {
+					out <- p
+				}
 			}
 		}
 	}
