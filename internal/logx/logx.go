@@ -15,6 +15,7 @@ const (
 	LevelWarn
 	LevelInfo
 	LevelDebug
+	LevelTrace
 )
 
 type levelInfo struct {
@@ -32,10 +33,11 @@ var (
 		LevelWarn:  {label: "[WARN]", color: "\x1b[33m"},
 		LevelInfo:  {label: "[INFO]", color: "\x1b[36m"},
 		LevelDebug: {label: "[DEBUG]", color: "\x1b[35m"},
+		LevelTrace: {label: "[TRACE]", color: "\x1b[90m"},
 	}
 )
 
-// SetVerbosity configura el nivel máximo de detalle a imprimir (0=errores, 1=info, 2=debug).
+// SetVerbosity configura el nivel máximo de detalle a imprimir (0=errores, 1=info, 2=debug, 3=trace).
 func SetVerbosity(v int) {
 	mu.Lock()
 	verbosity = v
@@ -72,16 +74,21 @@ func Infof(format string, a ...interface{}) { logf(LevelInfo, format, a...) }
 // Debugf requiere verbosidad >=2.
 func Debugf(format string, a ...interface{}) { logf(LevelDebug, format, a...) }
 
+// Tracef requiere verbosidad >=3.
+func Tracef(format string, a ...interface{}) { logf(LevelTrace, format, a...) }
+
 // V mantiene compatibilidad con la API anterior.
-// level>=1 equivale a Info, >=2 a Debug. Valores <=0 se consideran advertencias.
+// level>=1 equivale a Info, >=2 a Debug, >=3 a Trace. Valores <=0 se consideran advertencias.
 func V(level int, format string, a ...interface{}) {
 	switch {
 	case level <= 0:
 		Warnf(format, a...)
 	case level == 1:
 		Infof(format, a...)
-	default:
+	case level == 2:
 		Debugf(format, a...)
+	default:
+		Tracef(format, a...)
 	}
 }
 
@@ -114,6 +121,8 @@ func shouldLog(level Level) bool {
 		return v >= 1
 	case LevelDebug:
 		return v >= 2
+	case LevelTrace:
+		return v >= 3
 	default:
 		return false
 	}

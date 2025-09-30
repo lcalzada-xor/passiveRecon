@@ -22,7 +22,7 @@ func ParseFlags() *Config {
 	active := flag.Bool("active", false, "Comprobaciones superficiales activas (httpx)")
 	tools := flag.String("tools", "subfinder,assetfinder,amass,waybackurls,gau,crtsh,httpx", "Herramientas, CSV")
 	timeout := flag.Int("timeout", 120, "Timeout por herramienta (segundos)")
-	verbosity := flag.Int("v", 0, "Verbosity (0=silent,1=info,2=debug)")
+	verbosity := flag.Int("v", 0, "Verbosity (0=silent,1=info,2=debug,3=trace)")
 	flag.Parse()
 
 	list := []string{}

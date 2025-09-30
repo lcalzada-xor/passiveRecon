@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"strings"
 	"time"
@@ -64,8 +65,36 @@ func FindBin(names ...string) (string, bool) {
 }
 
 func RunCommand(ctx context.Context, name string, args []string, out chan<- string) error {
-	logx.Debugf("run: %s %s", name, strings.Join(args, " "))
+	resolvedPath, lookErr := exec.LookPath(name)
+	if lookErr != nil {
+		logx.Tracef("lookup %s: %v", name, lookErr)
+	}
+
 	cmd := exec.CommandContext(ctx, name, args...)
+
+	if resolvedPath != "" {
+		cmd.Path = resolvedPath
+	}
+
+	argsJoined := strings.Join(args, " ")
+	if argsJoined == "" {
+		argsJoined = "<none>"
+	}
+
+	deadline, hasDeadline := ctx.Deadline()
+	deadlineInfo := "none"
+	if hasDeadline {
+		remaining := time.Until(deadline)
+		deadlineInfo = fmt.Sprintf("%s (~%s)", deadline.Format(time.RFC3339), remaining.Round(time.Millisecond))
+	}
+
+	envInfo := "inherit"
+	if cmd.Env != nil {
+		envInfo = fmt.Sprintf("custom (%d vars)", len(cmd.Env))
+	}
+
+	logx.Debugf("run: %s %s", name, argsJoined)
+	logx.Tracef("command details name=%s path=%q args=%q dir=%q deadline=%s env=%s", name, cmd.Path, args, cmd.Dir, deadlineInfo, envInfo)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -73,6 +102,8 @@ func RunCommand(ctx context.Context, name string, args []string, out chan<- stri
 		return err
 	}
 	stderr, _ := cmd.StderrPipe()
+
+	start := time.Now()
 
 	if err := cmd.Start(); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
@@ -91,12 +122,14 @@ func RunCommand(ctx context.Context, name string, args []string, out chan<- stri
 	}()
 
 	s := bufio.NewScanner(stdout)
+	lines := 0
 	for s.Scan() {
 		select {
 		case <-ctx.Done():
 			logx.Warnf("ctx cancel %s", name)
 			return ctx.Err()
 		default:
+			lines++
 			out <- s.Text()
 		}
 	}
@@ -108,7 +141,13 @@ func RunCommand(ctx context.Context, name string, args []string, out chan<- stri
 		logx.Errorf("wait %s: %v", name, err)
 		return err
 	}
+	duration := time.Since(start)
+	exitCode := 0
+	if state := cmd.ProcessState; state != nil {
+		exitCode = state.ExitCode()
+	}
 	logx.Debugf("done: %s", name)
+	logx.Tracef("command finished name=%s exit=%d duration=%s lines=%d", name, exitCode, duration.Round(time.Millisecond), lines)
 	return nil
 }
 
