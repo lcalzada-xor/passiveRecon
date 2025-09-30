@@ -19,6 +19,9 @@ type Sink struct {
 	seenDomains map[string]struct{}
 	seenRoutes  map[string]struct{}
 	seenCerts   map[string]struct{}
+	procMu      sync.Mutex
+	processing  int
+	cond        *sync.Cond
 }
 
 func NewSink(outdir string) (*Sink, error) {
@@ -46,6 +49,7 @@ func NewSink(outdir string) (*Sink, error) {
 		seenRoutes:  make(map[string]struct{}),
 		seenCerts:   make(map[string]struct{}),
 	}
+	s.cond = sync.NewCond(&s.procMu)
 	return s, nil
 }
 
@@ -58,60 +62,89 @@ func (s *Sink) Start(workers int) {
 		go func() {
 			defer s.wg.Done()
 			for ln := range s.lines {
-				l := strings.TrimSpace(ln)
-				if l == "" {
-					continue
-				}
-
-				// meta: prefijo "meta: ..."
-				if strings.HasPrefix(l, "meta: ") {
-					_ = s.Meta.WriteRaw(strings.TrimPrefix(l, "meta: "))
-					continue
-				}
-
-				if strings.Contains(l, "-->") || strings.Contains(l, " (") {
-					_ = s.Meta.WriteRaw(l)
-					continue
-				}
-
-				// Clasificación simple: URLs/rutas si contiene esquema o '/'
-				if strings.Contains(l, "http://") || strings.Contains(l, "https://") || strings.Contains(l, "/") {
-					if s.markSeen(s.seenRoutes, l) {
-						continue
-					}
-					_ = s.Routes.WriteURL(l)
-					continue
-				}
-
-				// crt.sh name_value puede venir con commas/nuevas líneas ya partidos aguas arriba.
-				if strings.Contains(l, ",") || strings.Contains(l, "\n") {
-					parts := strings.FieldsFunc(l, func(r rune) bool { return r == ',' || r == '\n' })
-					for _, p := range parts {
-						p = strings.TrimSpace(p)
-						if p == "" {
-							continue
-						}
-						key := strings.ToLower(p)
-						if s.markSeen(s.seenCerts, key) {
-							continue
-						}
-						_ = s.Certs.WriteRaw(p)
-					}
-					continue
-				}
-
-				// defecto: dominio
-				key := strings.ToLower(l)
-				if s.markSeen(s.seenDomains, key) {
-					continue
-				}
-				_ = s.Domains.WriteDomain(l)
+				s.beginLine()
+				s.processLine(ln)
+				s.finishLine()
 			}
 		}()
 	}
 }
 
 func (s *Sink) In() chan<- string { return s.lines }
+
+func (s *Sink) beginLine() {
+	s.procMu.Lock()
+	s.processing++
+	s.procMu.Unlock()
+}
+
+func (s *Sink) finishLine() {
+	s.procMu.Lock()
+	s.processing--
+	if s.processing == 0 && len(s.lines) == 0 {
+		s.cond.Broadcast()
+	}
+	s.procMu.Unlock()
+}
+
+func (s *Sink) processLine(ln string) {
+	l := strings.TrimSpace(ln)
+	if l == "" {
+		return
+	}
+
+	// meta: prefijo "meta: ..."
+	if strings.HasPrefix(l, "meta: ") {
+		_ = s.Meta.WriteRaw(strings.TrimPrefix(l, "meta: "))
+		return
+	}
+
+	if strings.Contains(l, "-->") || strings.Contains(l, " (") {
+		_ = s.Meta.WriteRaw(l)
+		return
+	}
+
+	// Clasificación simple: URLs/rutas si contiene esquema o '/'
+	if strings.Contains(l, "http://") || strings.Contains(l, "https://") || strings.Contains(l, "/") {
+		if s.markSeen(s.seenRoutes, l) {
+			return
+		}
+		_ = s.Routes.WriteURL(l)
+		return
+	}
+
+	// crt.sh name_value puede venir con commas/nuevas líneas ya partidos aguas arriba.
+	if strings.Contains(l, ",") || strings.Contains(l, "\n") {
+		parts := strings.FieldsFunc(l, func(r rune) bool { return r == ',' || r == '\n' })
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			key := strings.ToLower(p)
+			if s.markSeen(s.seenCerts, key) {
+				continue
+			}
+			_ = s.Certs.WriteRaw(p)
+		}
+		return
+	}
+
+	// defecto: dominio
+	key := strings.ToLower(l)
+	if s.markSeen(s.seenDomains, key) {
+		return
+	}
+	_ = s.Domains.WriteDomain(l)
+}
+
+func (s *Sink) Flush() {
+	s.procMu.Lock()
+	for len(s.lines) > 0 || s.processing > 0 {
+		s.cond.Wait()
+	}
+	s.procMu.Unlock()
+}
 
 func (s *Sink) Close() error {
 	close(s.lines)
