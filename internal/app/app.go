@@ -71,7 +71,7 @@ func Run(cfg *config.Config) error {
 	}
 
 	wg.Wait()
-	logx.V(1, "modo active=%v; terminado", cfg.Active)
+	logx.Infof("modo active=%v; terminado", cfg.Active)
 	return nil
 }
 
@@ -88,7 +88,7 @@ func (w *runnerWaitGroup) Go(fn func() error) {
 func (w *runnerWaitGroup) Wait() {
 	for _, ch := range w.ch {
 		if err := <-ch; err != nil {
-			logx.V(1, "source error: %v", err)
+			logx.Warnf("source error: %v", err)
 		}
 	}
 }

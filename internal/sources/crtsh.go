@@ -12,7 +12,7 @@ import (
 )
 
 func CRTSH(ctx context.Context, domain string, out chan<- string) error {
-	logx.V(2, "crtsh query %s", domain)
+	logx.Debugf("crtsh query %s", domain)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		"https://crt.sh/?q=%25."+domain+"&output=json", nil)
@@ -23,12 +23,12 @@ func CRTSH(ctx context.Context, domain string, out chan<- string) error {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		logx.V(1, "crtsh http: %v", err)
+		logx.Errorf("crtsh http: %v", err)
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		logx.V(1, "crtsh non-200: %d", resp.StatusCode)
+		logx.Errorf("crtsh non-200: %d", resp.StatusCode)
 		return errors.New("crt.sh non-200")
 	}
 	body, err := io.ReadAll(resp.Body)
@@ -37,7 +37,7 @@ func CRTSH(ctx context.Context, domain string, out chan<- string) error {
 	}
 	var arr []map[string]any
 	if err := json.Unmarshal(body, &arr); err != nil {
-		logx.V(1, "crtsh json: %v", err)
+		logx.Errorf("crtsh json: %v", err)
 		return err
 	}
 	for _, o := range arr {
