@@ -3,12 +3,15 @@ package runner
 import (
 	"bufio"
 	"context"
+	"errors"
 	"os/exec"
 	"strings"
 	"time"
 
 	"passive-rec/internal/logx"
 )
+
+var ErrMissingBinary = errors.New("missing binary")
 
 func HasBin(name string) bool {
 	_, err := exec.LookPath(name)
@@ -27,6 +30,9 @@ func RunCommand(ctx context.Context, name string, args []string, out chan<- stri
 	stderr, _ := cmd.StderrPipe()
 
 	if err := cmd.Start(); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return ErrMissingBinary
+		}
 		logx.Errorf("start %s: %v", name, err)
 		return err
 	}
