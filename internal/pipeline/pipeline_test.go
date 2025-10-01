@@ -101,6 +101,38 @@ func TestSinkFlush(t *testing.T) {
 	}
 }
 
+func TestNewSinkClosesWritersOnError(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	// Force the second writer creation to fail by pre-creating a directory with
+	// the same name. os.OpenFile will return an error because the path points to
+	// a directory instead of a regular file.
+	if err := os.Mkdir(filepath.Join(dir, "routes.passive"), 0o755); err != nil {
+		t.Fatalf("Mkdir routes.passive: %v", err)
+	}
+
+	domainPath := filepath.Join(dir, "domains.passive")
+	if got := countOpenFDs(t, domainPath); got != 0 {
+		t.Fatalf("unexpected open descriptors before NewSink: %d", got)
+	}
+
+	sink, err := NewSink(dir)
+	if err == nil {
+		// Close to ensure no resources leak in this unexpected success case.
+		_ = sink.Close()
+		t.Fatalf("expected NewSink to fail")
+	}
+
+	if _, err := os.Stat(domainPath); err != nil {
+		t.Fatalf("expected %q to exist: %v", domainPath, err)
+	}
+
+	if got := countOpenFDs(t, domainPath); got != 0 {
+		t.Fatalf("domains writer file descriptor leaked: %d", got)
+	}
+}
+
 func readLines(t *testing.T, path string) []string {
 	t.Helper()
 
@@ -113,4 +145,25 @@ func readLines(t *testing.T, path string) []string {
 		return nil
 	}
 	return strings.Split(contents, "\n")
+}
+
+func countOpenFDs(t *testing.T, path string) int {
+	t.Helper()
+
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatalf("ReadDir(/proc/self/fd): %v", err)
+	}
+
+	count := 0
+	for _, e := range entries {
+		target, err := os.Readlink(filepath.Join("/proc/self/fd", e.Name()))
+		if err != nil {
+			continue
+		}
+		if strings.HasPrefix(target, path) {
+			count++
+		}
+	}
+	return count
 }

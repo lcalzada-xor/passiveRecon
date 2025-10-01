@@ -25,19 +25,32 @@ type Sink struct {
 }
 
 func NewSink(outdir string) (*Sink, error) {
-	d, err := out.New(outdir, "domains.passive")
+	var opened []*out.Writer
+	newWriter := func(name string) (*out.Writer, error) {
+		w, err := out.New(outdir, name)
+		if err != nil {
+			for _, ow := range opened {
+				_ = ow.Close()
+			}
+			return nil, err
+		}
+		opened = append(opened, w)
+		return w, nil
+	}
+
+	d, err := newWriter("domains.passive")
 	if err != nil {
 		return nil, err
 	}
-	r, err := out.New(outdir, "routes.passive")
+	r, err := newWriter("routes.passive")
 	if err != nil {
 		return nil, err
 	}
-	c, err := out.New(outdir, "certs.passive")
+	c, err := newWriter("certs.passive")
 	if err != nil {
 		return nil, err
 	}
-	m, err := out.New(outdir, "meta.passive")
+	m, err := newWriter("meta.passive")
 	if err != nil {
 		return nil, err
 	}
