@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"testing"
 )
 
@@ -147,5 +148,65 @@ func TestCensysDeduplicatesCaseInsensitive(t *testing.T) {
 	}
 	if !seen["example.com"] || !seen["www.example.com"] {
 		t.Fatalf("expected example.com and www.example.com, got %#v", results)
+	}
+}
+
+func TestCensysRelativeNextLink(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch r.URL.Query().Get("page") {
+		case "", "1":
+			w.Write([]byte(`{
+  "result": {
+    "hits": [
+      {"name": "page1.example.com"}
+    ],
+    "links": {"next": "/api/v2/certificates/search?page=2"}
+  }
+}`))
+		case "2":
+			w.Write([]byte(`{
+  "result": {
+    "hits": [
+      {"name": "page2.example.com"}
+    ],
+    "links": {"next": ""}
+  }
+}`))
+		default:
+			t.Fatalf("unexpected page requested: %s", r.URL.Query().Get("page"))
+		}
+	}))
+	defer srv.Close()
+
+	oldURL := censysBaseURL
+	oldClient := censysHTTPClient
+	censysBaseURL = srv.URL + "/api/v2/certificates/search"
+	censysHTTPClient = srv.Client()
+	defer func() {
+		censysBaseURL = oldURL
+		censysHTTPClient = oldClient
+	}()
+
+	out := make(chan string, 4)
+	if err := Censys(context.Background(), "example.com", "id", "secret", out); err != nil {
+		t.Fatalf("censys returned error: %v", err)
+	}
+
+	var results []string
+	for len(out) > 0 {
+		results = append(results, <-out)
+	}
+
+	sort.Strings(results)
+	want := []string{"page1.example.com", "page2.example.com"}
+	if len(results) != len(want) {
+		t.Fatalf("unexpected result length %d (want %d)", len(results), len(want))
+	}
+	for i, v := range want {
+		if results[i] != v {
+			t.Fatalf("unexpected result set: got %#v want %#v", results, want)
+		}
 	}
 }
