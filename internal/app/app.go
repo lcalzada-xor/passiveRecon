@@ -15,9 +15,30 @@ import (
 	"passive-rec/internal/sources"
 )
 
+type sink interface {
+	Start(workers int)
+	In() chan<- string
+	Flush()
+	Close() error
+}
+
+var (
+	sinkFactory = func(outdir string) (sink, error) {
+		return pipeline.NewSink(outdir)
+	}
+	sourceSubfinder   = sources.Subfinder
+	sourceAssetfinder = sources.Assetfinder
+	sourceAmass       = sources.Amass
+	sourceWayback     = sources.Wayback
+	sourceGAU         = sources.GAU
+	sourceCRTSh       = sources.CRTSH
+	sourceCensys      = sources.Censys
+	sourceHTTPX       = sources.HTTPX
+)
+
 func Run(cfg *config.Config) error {
 	// preparar sink (writers)
-	sink, err := pipeline.NewSink(cfg.OutDir)
+	sink, err := sinkFactory(cfg.OutDir)
 	if err != nil {
 		return err
 	}
@@ -42,37 +63,37 @@ func Run(cfg *config.Config) error {
 		switch strings.ToLower(toolName) {
 		case "subfinder":
 			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
-				return sources.Subfinder(c, cfg.Target, sink.In())
+				return sourceSubfinder(c, cfg.Target, sink.In())
 			})))
 		case "assetfinder":
 			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
-				return sources.Assetfinder(c, cfg.Target, sink.In())
+				return sourceAssetfinder(c, cfg.Target, sink.In())
 			})))
 		case "amass":
 			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
-				return sources.Amass(c, cfg.Target, sink.In())
+				return sourceAmass(c, cfg.Target, sink.In())
 			})))
 		case "waybackurls":
 			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
-				return sources.Wayback(c, cfg.Target, sink.In())
+				return sourceWayback(c, cfg.Target, sink.In())
 			})))
 		case "gau":
 			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
-				return sources.GAU(c, cfg.Target, sink.In())
+				return sourceGAU(c, cfg.Target, sink.In())
 			})))
 		case "crtsh":
 			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
-				return sources.CRTSH(c, cfg.Target, sink.In())
+				return sourceCRTSh(c, cfg.Target, sink.In())
 			})))
 		case "censys":
 			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
-				return sources.Censys(c, cfg.Target, cfg.CensysAPIID, cfg.CensysAPISecret, sink.In())
+				return sourceCensys(c, cfg.Target, cfg.CensysAPIID, cfg.CensysAPISecret, sink.In())
 			})))
 		case "httpx":
 			if cfg.Active {
 				deferreds = append(deferreds, bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
 					// leer de domains/routes.passive generado
-					return sources.HTTPX(c, []string{"domains.passive", "routes.passive"}, cfg.OutDir, sink.In())
+					return sourceHTTPX(c, []string{"domains.passive", "routes.passive"}, cfg.OutDir, sink.In())
 				})))
 			} else {
 				sink.In() <- "meta: httpx skipped (requires --active)"
@@ -94,6 +115,7 @@ func Run(cfg *config.Config) error {
 			logx.Warnf("source error: %v", err)
 		}
 	}
+	sink.Flush()
 	if cfg.Report {
 		sinkFiles := report.DefaultSinkFiles(cfg.OutDir)
 		if err := report.Generate(ctx, cfg, sinkFiles); err != nil {
