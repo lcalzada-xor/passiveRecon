@@ -59,7 +59,7 @@ func Censys(ctx context.Context, domain, apiID, apiSecret string, out chan<- str
 			return
 		}
 		seen[key] = struct{}{}
-		out <- key
+		out <- "cert: " + key
 	}
 
 	baseURL, err := url.Parse(censysBaseURL)

@@ -45,7 +45,7 @@ func CRTSH(ctx context.Context, domain string, out chan<- string) error {
 			for _, p := range strings.Split(v, "\n") {
 				p = strings.TrimSpace(p)
 				if p != "" {
-					out <- p
+					out <- "cert: " + p
 				}
 			}
 		}
