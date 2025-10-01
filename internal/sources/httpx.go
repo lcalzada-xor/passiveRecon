@@ -18,6 +18,7 @@ import (
 var (
 	httpxBinFinder = runner.HTTPXBin
 	httpxRunCmd    = runner.RunCommand
+	httpxBatchSize = 5000
 )
 
 func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- string) error {
@@ -71,31 +72,6 @@ func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- st
 		return nil
 	}
 
-	tmpFile, err := os.CreateTemp("", "passive-rec-httpx-*.txt")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmpFile.Name()
-
-	writer := bufio.NewWriter(tmpFile)
-	for _, line := range combined {
-		if _, err := writer.WriteString(line + "\n"); err != nil {
-			tmpFile.Close()
-			os.Remove(tmpPath)
-			return err
-		}
-	}
-	if err := writer.Flush(); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpPath)
-		return err
-	}
-	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	defer os.Remove(tmpPath)
-
 	intermediate := make(chan string)
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -108,16 +84,72 @@ func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- st
 		}
 	}()
 
-	err = httpxRunCmd(ctx, bin, []string{
-		"-sc",
-		"-title",
-		"-silent",
-		"-l",
-		tmpPath,
-	}, intermediate)
-	close(intermediate)
-	wg.Wait()
-	return err
+	defer func() {
+		close(intermediate)
+		wg.Wait()
+	}()
+
+	batchSize := httpxBatchSize
+	if batchSize <= 0 || batchSize > len(combined) {
+		batchSize = len(combined)
+	}
+
+	for start := 0; start < len(combined); start += batchSize {
+		end := start + batchSize
+		if end > len(combined) {
+			end = len(combined)
+		}
+
+		tmpPath, cleanup, err := writeHTTPXInput(combined[start:end])
+		if err != nil {
+			return err
+		}
+
+		err = httpxRunCmd(ctx, bin, []string{
+			"-sc",
+			"-title",
+			"-silent",
+			"-l",
+			tmpPath,
+		}, intermediate)
+		cleanup()
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func writeHTTPXInput(lines []string) (string, func(), error) {
+	tmpFile, err := os.CreateTemp("", "passive-rec-httpx-*.txt")
+	if err != nil {
+		return "", nil, err
+	}
+
+	cleanup := func() {
+		os.Remove(tmpFile.Name())
+	}
+
+	writer := bufio.NewWriter(tmpFile)
+	for _, line := range lines {
+		if _, err := writer.WriteString(line + "\n"); err != nil {
+			tmpFile.Close()
+			cleanup()
+			return "", nil, err
+		}
+	}
+	if err := writer.Flush(); err != nil {
+		tmpFile.Close()
+		cleanup()
+		return "", nil, err
+	}
+	if err := tmpFile.Close(); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+
+	return tmpFile.Name(), cleanup, nil
 }
 
 func normalizeHTTPXLine(line string) []string {

@@ -2,6 +2,7 @@ package sources
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -200,5 +201,68 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 	meta := readLines(filepath.Join(outputDir, "meta.passive"))
 	if diff := cmp.Diff([]string{"[200]", "[Title]"}, meta); diff != "" {
 		t.Fatalf("unexpected meta.passive contents (-want +got):\n%s", diff)
+	}
+}
+
+func TestHTTPXBatchesLargeInputs(t *testing.T) {
+	inputDir := t.TempDir()
+	var builder strings.Builder
+	for i := 0; i < 5; i++ {
+		builder.WriteString(fmt.Sprintf("https://example.com/path-%d\n", i))
+	}
+	if err := os.WriteFile(filepath.Join(inputDir, "routes.passive"), []byte(builder.String()), 0644); err != nil {
+		t.Fatalf("write routes list: %v", err)
+	}
+
+	originalBinFinder := httpxBinFinder
+	originalRunCmd := httpxRunCmd
+	originalBatchSize := httpxBatchSize
+	t.Cleanup(func() {
+		httpxBinFinder = originalBinFinder
+		httpxRunCmd = originalRunCmd
+		httpxBatchSize = originalBatchSize
+	})
+
+	httpxBinFinder = func() (string, error) { return "httpx", nil }
+	httpxBatchSize = 2
+
+	var mu sync.Mutex
+	var captured [][]string
+	httpxRunCmd = func(ctx context.Context, name string, args []string, out chan<- string) error {
+		data, err := os.ReadFile(args[4])
+		if err != nil {
+			t.Fatalf("read httpx input: %v", err)
+		}
+		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+		mu.Lock()
+		captured = append(captured, lines)
+		mu.Unlock()
+		return nil
+	}
+
+	if err := HTTPX(context.Background(), []string{"routes.passive"}, inputDir, make(chan string, 10)); err != nil {
+		t.Fatalf("HTTPX returned error: %v", err)
+	}
+
+	if len(captured) != 3 {
+		t.Fatalf("expected 3 batches, got %d", len(captured))
+	}
+
+	var all []string
+	for _, batch := range captured {
+		all = append(all, batch...)
+	}
+	sort.Strings(all)
+
+	want := []string{
+		"https://example.com/path-0",
+		"https://example.com/path-1",
+		"https://example.com/path-2",
+		"https://example.com/path-3",
+		"https://example.com/path-4",
+	}
+
+	if diff := cmp.Diff(want, all); diff != "" {
+		t.Fatalf("unexpected combined batch contents (-want +got):\n%s", diff)
 	}
 }
