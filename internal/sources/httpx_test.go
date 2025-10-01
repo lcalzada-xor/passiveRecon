@@ -204,6 +204,43 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 	}
 }
 
+func TestHTTPXSkipsUnresponsiveResults(t *testing.T) {
+	inputDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(inputDir, "routes.passive"), []byte("https://app.example.com\n"), 0644); err != nil {
+		t.Fatalf("write routes list: %v", err)
+	}
+
+	originalBinFinder := httpxBinFinder
+	originalRunCmd := httpxRunCmd
+	t.Cleanup(func() {
+		httpxBinFinder = originalBinFinder
+		httpxRunCmd = originalRunCmd
+	})
+
+	httpxBinFinder = func() (string, error) { return "httpx", nil }
+
+	httpxRunCmd = func(ctx context.Context, name string, args []string, out chan<- string) error {
+		out <- "https://down.example.com [0] [connection refused]"
+		out <- "https://up.example.com [200] [OK]"
+		return nil
+	}
+
+	outCh := make(chan string, 10)
+	if err := HTTPX(context.Background(), []string{"routes.passive"}, inputDir, outCh); err != nil {
+		t.Fatalf("HTTPX returned error: %v", err)
+	}
+
+	var forwarded []string
+	for len(outCh) > 0 {
+		forwarded = append(forwarded, <-outCh)
+	}
+
+	want := []string{"https://up.example.com [200] [OK]", "meta: [200]", "meta: [OK]"}
+	if diff := cmp.Diff(want, forwarded); diff != "" {
+		t.Fatalf("unexpected forwarded lines (-want +got):\n%s", diff)
+	}
+}
+
 func TestHTTPXBatchesLargeInputs(t *testing.T) {
 	inputDir := t.TempDir()
 	var builder strings.Builder

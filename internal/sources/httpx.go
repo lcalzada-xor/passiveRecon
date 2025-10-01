@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode"
@@ -168,6 +169,11 @@ func normalizeHTTPXLine(line string) []string {
 		metaPart = strings.TrimSpace(line[i+1:])
 	}
 
+	metas := splitHTTPXMeta(metaPart)
+	if shouldDiscardHTTPXLine(metas) {
+		return nil
+	}
+
 	var out []string
 	if urlPart != "" {
 		combined := urlPart
@@ -177,11 +183,7 @@ func normalizeHTTPXLine(line string) []string {
 		out = append(out, combined)
 	}
 
-	if metaPart == "" {
-		return out
-	}
-
-	for _, meta := range splitHTTPXMeta(metaPart) {
+	for _, meta := range metas {
 		meta = strings.TrimSpace(meta)
 		if meta == "" {
 			continue
@@ -190,6 +192,42 @@ func normalizeHTTPXLine(line string) []string {
 	}
 
 	return out
+}
+
+func shouldDiscardHTTPXLine(metas []string) bool {
+	if len(metas) == 0 {
+		return false
+	}
+
+	status := strings.TrimSpace(metas[0])
+	if len(status) < 2 || status[0] != '[' || status[len(status)-1] != ']' {
+		return false
+	}
+
+	inside := strings.TrimSpace(status[1 : len(status)-1])
+	if inside == "" {
+		return false
+	}
+
+	// Some httpx status fields may include additional information (e.g. "301,301").
+	// Consider the leading numeric portion when deciding whether the target responded.
+	for i, r := range inside {
+		if !unicode.IsDigit(r) {
+			inside = inside[:i]
+			break
+		}
+	}
+
+	if inside == "" {
+		return false
+	}
+
+	code, err := strconv.Atoi(inside)
+	if err != nil {
+		return false
+	}
+
+	return code == 0
 }
 
 func splitHTTPXMeta(meta string) []string {
