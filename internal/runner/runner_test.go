@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -53,6 +54,57 @@ func TestWithTimeout(t *testing.T) {
 	explicitRemaining := time.Until(explicitDeadline)
 	if diff := time.Duration(absDuration(explicitRemaining - 5*time.Second)); diff > tolerance {
 		t.Fatalf("expected explicit timeout near 5s, got %v (diff %v)", explicitRemaining, diff)
+	}
+}
+
+func TestRunCommandCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "block.sh")
+	script := "#!/bin/sh\n\necho $$\nwhile true; do sleep 1; done\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to create script: %v", err)
+	}
+
+	out := make(chan string, 1)
+	done := make(chan error, 1)
+
+	go func() {
+		done <- RunCommand(ctx, scriptPath, nil, out)
+	}()
+
+	var pidLine string
+	select {
+	case pidLine = <-out:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for process pid")
+	}
+	if pidLine == "" {
+		t.Fatal("empty pid line from process")
+	}
+
+	cancel()
+
+	err := <-done
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+
+	procPath := filepath.Join("/proc", pidLine)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(procPath); os.IsNotExist(err) {
+			break
+		} else if err != nil {
+			t.Fatalf("stat %s: %v", procPath, err)
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatalf("process %s still running after cancellation", pidLine)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

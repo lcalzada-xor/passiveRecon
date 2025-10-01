@@ -123,23 +123,41 @@ func RunCommand(ctx context.Context, name string, args []string, out chan<- stri
 
 	s := bufio.NewScanner(stdout)
 	lines := 0
+	var ctxErr error
+loop:
 	for s.Scan() {
 		select {
 		case <-ctx.Done():
 			logx.Warnf("ctx cancel %s", name)
-			return ctx.Err()
+			ctxErr = ctx.Err()
+			break loop
 		default:
 			lines++
 			out <- s.Text()
 		}
 	}
-	if err := s.Err(); err != nil {
+	if ctxErr == nil {
+		select {
+		case <-ctx.Done():
+			logx.Warnf("ctx cancel %s", name)
+			ctxErr = ctx.Err()
+		default:
+		}
+	}
+	if err := s.Err(); err != nil && ctxErr == nil {
 		logx.Errorf("scan %s: %v", name, err)
 		return err
 	}
 	if err := cmd.Wait(); err != nil {
-		logx.Errorf("wait %s: %v", name, err)
-		return err
+		if ctxErr != nil {
+			logx.Debugf("wait after ctx cancel %s: %v", name, err)
+		} else {
+			logx.Errorf("wait %s: %v", name, err)
+			return err
+		}
+	}
+	if ctxErr != nil {
+		return ctxErr
 	}
 	duration := time.Since(start)
 	exitCode := 0
