@@ -1,0 +1,114 @@
+package sources
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"passive-rec/internal/logx"
+)
+
+var (
+	censysBaseURL    = "https://search.censys.io/api/v2/certificates/search"
+	censysHTTPClient = http.DefaultClient
+)
+
+type censysResponse struct {
+	Result struct {
+		Hits []struct {
+			Name   string `json:"name"`
+			Parsed struct {
+				Names   []string `json:"names"`
+				Subject struct {
+					CommonName string `json:"common_name"`
+				} `json:"subject"`
+			} `json:"parsed"`
+		} `json:"hits"`
+		Links struct {
+			Next string `json:"next"`
+		} `json:"links"`
+	} `json:"result"`
+}
+
+// Censys consulta la Search API de certificados y emite posibles subdominios.
+func Censys(ctx context.Context, domain, apiID, apiSecret string, out chan<- string) error {
+	if strings.TrimSpace(domain) == "" {
+		return errors.New("censys: empty domain")
+	}
+	if apiID == "" || apiSecret == "" {
+		return errors.New("censys: missing API credentials")
+	}
+
+	query := fmt.Sprintf("parsed.names: %s", domain)
+	values := url.Values{}
+	values.Set("per_page", "100")
+	values.Set("q", query)
+
+	seen := map[string]struct{}{}
+	send := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		out <- value
+	}
+
+	nextURL := fmt.Sprintf("%s?%s", censysBaseURL, values.Encode())
+	for nextURL != "" {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
+		if err != nil {
+			return err
+		}
+		req.SetBasicAuth(apiID, apiSecret)
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", "passive-rec/1.0 (+https://github.com/llvch/passiveRecon)")
+
+		resp, err := censysHTTPClient.Do(req)
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode != http.StatusOK {
+			if resp.Body != nil {
+				resp.Body.Close()
+			}
+			return fmt.Errorf("censys: unexpected status %d", resp.StatusCode)
+		}
+
+		var decoded censysResponse
+		if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+			resp.Body.Close()
+			return err
+		}
+		resp.Body.Close()
+
+		for _, hit := range decoded.Result.Hits {
+			if hit.Name != "" {
+				send(hit.Name)
+			}
+			if cn := hit.Parsed.Subject.CommonName; cn != "" {
+				send(cn)
+			}
+			for _, name := range hit.Parsed.Names {
+				send(name)
+			}
+		}
+
+		nextURL = strings.TrimSpace(decoded.Result.Links.Next)
+	}
+
+	logx.Debugf("censys query %s: %d resultados", domain, len(seen))
+	return nil
+}

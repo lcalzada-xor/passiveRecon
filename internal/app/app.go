@@ -63,6 +63,10 @@ func Run(cfg *config.Config) error {
 			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
 				return sources.CRTSH(c, cfg.Target, sink.In())
 			})))
+		case "censys":
+			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
+				return sources.Censys(c, cfg.Target, cfg.CensysAPIID, cfg.CensysAPISecret, sink.In())
+			})))
 		case "httpx":
 			if cfg.Active {
 				deferreds = append(deferreds, bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {

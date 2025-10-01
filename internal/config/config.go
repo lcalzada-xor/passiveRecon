@@ -2,17 +2,20 @@ package config
 
 import (
 	"flag"
+	"os"
 	"strings"
 )
 
 type Config struct {
-	Target    string
-	OutDir    string
-	Workers   int
-	Active    bool
-	Tools     []string
-	TimeoutS  int
-	Verbosity int
+	Target          string
+	OutDir          string
+	Workers         int
+	Active          bool
+	Tools           []string
+	TimeoutS        int
+	Verbosity       int
+	CensysAPIID     string
+	CensysAPISecret string
 }
 
 func ParseFlags() *Config {
@@ -23,6 +26,8 @@ func ParseFlags() *Config {
 	tools := flag.String("tools", "subfinder,assetfinder,amass,waybackurls,gau,crtsh,httpx", "Herramientas, CSV")
 	timeout := flag.Int("timeout", 120, "Timeout por herramienta (segundos)")
 	verbosity := flag.Int("v", 0, "Verbosity (0=silent,1=info,2=debug,3=trace)")
+	censysID := flag.String("censys-api-id", os.Getenv("CENSYS_API_ID"), "Censys API ID (o exporta CENSYS_API_ID)")
+	censysSecret := flag.String("censys-api-secret", os.Getenv("CENSYS_API_SECRET"), "Censys API secret (o exporta CENSYS_API_SECRET)")
 	flag.Parse()
 
 	list := []string{}
@@ -38,12 +43,14 @@ func ParseFlags() *Config {
 	}
 
 	return &Config{
-		Target:    *target,
-		OutDir:    *outdir,
-		Workers:   *workers,
-		Active:    *active,
-		Tools:     list,
-		TimeoutS:  *timeout,
-		Verbosity: *verbosity,
+		Target:          *target,
+		OutDir:          *outdir,
+		Workers:         *workers,
+		Active:          *active,
+		Tools:           list,
+		TimeoutS:        *timeout,
+		Verbosity:       *verbosity,
+		CensysAPIID:     strings.TrimSpace(*censysID),
+		CensysAPISecret: strings.TrimSpace(*censysSecret),
 	}
 }
