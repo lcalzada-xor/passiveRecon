@@ -14,8 +14,8 @@ func main() {
 	cfg := config.ParseFlags()
 
 	logx.SetVerbosity(cfg.Verbosity)
-	logx.Infof("Iniciando passive-rec target=%s outdir=%s tools=%v workers=%d active=%v",
-		cfg.Target, cfg.OutDir, cfg.Tools, cfg.Workers, cfg.Active)
+	logx.Infof("Iniciando passive-rec target=%s outdir=%s tools=%v workers=%d active=%v report=%v",
+		cfg.Target, cfg.OutDir, cfg.Tools, cfg.Workers, cfg.Active, cfg.Report)
 
 	if cfg.Target == "" {
 		fmt.Fprintln(os.Stderr, "uso: -target example.com")

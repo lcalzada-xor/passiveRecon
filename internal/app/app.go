@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"passive-rec/internal/config"
 	"passive-rec/internal/logx"
 	"passive-rec/internal/pipeline"
+	"passive-rec/internal/report"
 	"passive-rec/internal/runner"
 	"passive-rec/internal/sources"
 )
@@ -86,6 +88,14 @@ func Run(cfg *config.Config) error {
 				continue
 			}
 			logx.Warnf("source error: %v", err)
+		}
+	}
+	if cfg.Report {
+		sinkFiles := report.DefaultSinkFiles(cfg.OutDir)
+		if err := report.Generate(ctx, cfg, sinkFiles); err != nil {
+			logx.Warnf("no se pudo generar report.html: %v", err)
+		} else {
+			logx.Infof("Informe HTML generado en %s", filepath.Join(cfg.OutDir, "report.html"))
 		}
 	}
 	if missing := bar.MissingTools(); len(missing) > 0 {

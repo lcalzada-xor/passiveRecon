@@ -13,6 +13,7 @@ type Config struct {
 	Tools     []string
 	TimeoutS  int
 	Verbosity int
+	Report    bool
 }
 
 func ParseFlags() *Config {
@@ -23,6 +24,7 @@ func ParseFlags() *Config {
 	tools := flag.String("tools", "subfinder,assetfinder,amass,waybackurls,gau,crtsh,httpx", "Herramientas, CSV")
 	timeout := flag.Int("timeout", 120, "Timeout por herramienta (segundos)")
 	verbosity := flag.Int("v", 0, "Verbosity (0=silent,1=info,2=debug,3=trace)")
+	report := flag.Bool("report", false, "Generar un informe HTML al finalizar")
 	flag.Parse()
 
 	list := []string{}
@@ -45,5 +47,6 @@ func ParseFlags() *Config {
 		Tools:     list,
 		TimeoutS:  *timeout,
 		Verbosity: *verbosity,
+		Report:    *report,
 	}
 }
