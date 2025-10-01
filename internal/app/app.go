@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"passive-rec/internal/config"
 	"passive-rec/internal/logx"
@@ -119,7 +118,7 @@ func (w *runnerWaitGroup) Wait() {
 
 func runWithTimeout(parent context.Context, seconds int, fn func(context.Context) error) func() error {
 	return func() error {
-		ctx, cancel := context.WithTimeout(parent, time.Duration(seconds)*time.Second)
+		ctx, cancel := runner.WithTimeout(parent, seconds)
 		defer cancel()
 		return fn(ctx)
 	}
