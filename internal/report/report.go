@@ -247,10 +247,16 @@ func buildRouteStats(routes []string) routeStats {
 	uniqueHosts := make(map[string]struct{})
 	httpsCount := 0
 	for _, raw := range routes {
-		if raw == "" {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
 			continue
 		}
-		u, err := url.Parse(raw)
+		fields := strings.Fields(trimmed)
+		candidate := trimmed
+		if len(fields) > 0 {
+			candidate = fields[0]
+		}
+		u, err := url.Parse(candidate)
 		if err != nil {
 			continue
 		}

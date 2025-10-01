@@ -162,7 +162,7 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 		forwarded = append(forwarded, <-outCh)
 	}
 
-	wantForwarded := []string{"https://app.example.com", "meta: [200]", "meta: [Title]"}
+	wantForwarded := []string{"https://app.example.com [200] [Title]", "meta: [200]", "meta: [Title]"}
 	if diff := cmp.Diff(wantForwarded, forwarded); diff != "" {
 		t.Fatalf("unexpected forwarded lines (-want +got):\n%s", diff)
 	}
@@ -194,7 +194,7 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 	}
 
 	routes := readLines(filepath.Join(outputDir, "routes.passive"))
-	if diff := cmp.Diff([]string{"https://app.example.com"}, routes); diff != "" {
+	if diff := cmp.Diff([]string{"https://app.example.com [200] [Title]"}, routes); diff != "" {
 		t.Fatalf("unexpected routes.passive contents (-want +got):\n%s", diff)
 	}
 
