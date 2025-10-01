@@ -51,6 +51,7 @@ func (p *progressBar) Wrap(tool string, fn func() error) func() error {
 		return fn
 	}
 	return func() error {
+		p.StepRunning(tool)
 		err := fn()
 		status := "ok"
 		if err != nil {
@@ -66,6 +67,20 @@ func (p *progressBar) Wrap(tool string, fn func() error) func() error {
 		p.StepDone(tool, status)
 		return err
 	}
+}
+
+func (p *progressBar) StepRunning(tool string) {
+	if p == nil || p.total <= 0 {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.done {
+		return
+	}
+
+	p.renderLocked(tool, "ejecutando")
 }
 
 func (p *progressBar) StepDone(tool, status string) {
