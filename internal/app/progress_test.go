@@ -50,3 +50,14 @@ func TestProgressBarWrapAndMissingTools(t *testing.T) {
 		t.Fatalf("expected buffer to end with newline after completing steps, got: %q", buf.String())
 	}
 }
+
+func TestProgressBarStepRunning(t *testing.T) {
+	var buf bytes.Buffer
+	pb := newProgressBar(2, &buf)
+
+	pb.StepRunning("ToolRun")
+
+	if !strings.Contains(buf.String(), "ToolRun (ejecutando)") {
+		t.Fatalf("expected running status in buffer, got: %q", buf.String())
+	}
+}
