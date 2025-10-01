@@ -42,18 +42,20 @@ func TestGenerateCreatesHTMLReport(t *testing.T) {
 
 	contents := readFile(t, filepath.Join(dir, "report.html"))
 	checks := []string{
-		"Total: 4",
+		"Total de artefactos procesados",
+		"Dominios únicos:</strong> 4 (registrables: 2)",
+		"Niveles promedio por dominio:</strong> 3.50",
 		"Top dominios registrables",
 		"example.com</td><td>3",
 		"test.com</td><td>1",
-		"Top hosts",
-		"app.example.com</td><td>2",
-		"Profundidad promedio de ruta: 1.67",
-		"Esquemas",
+		"Hosts únicos observados:</strong> 2",
+		"Profundidad promedio de ruta:</strong> 1.67",
+		"Uso de HTTPS:</strong> 66.7% de las rutas.",
+		"Esquemas por volumen",
 		"http</td><td>1",
 		"https</td><td>2",
-		"Certificados",
-		"example.com</td><td>2",
+		"Certificados únicos:</strong> 3",
+		"Dominios registrables únicos:</strong> 2",
 		"Meta",
 		"subfinder: ok",
 	}

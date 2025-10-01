@@ -59,13 +59,24 @@ func Generate(ctx context.Context, cfg *config.Config, files SinkFiles) error {
 		return fmt.Errorf("report: meta: %w", err)
 	}
 
+	domainStats := buildDomainStats(domains)
+	routeStats := buildRouteStats(routes)
+	certStats := buildCertStats(certs)
+
 	data := reportData{
-		Target:       cfg.Target,
-		OutDir:       cfg.OutDir,
-		GeneratedAt:  time.Now().Format(time.RFC3339),
-		Domains:      buildDomainStats(domains),
-		Routes:       buildRouteStats(routes),
-		Certificates: buildCertStats(certs),
+		Target:      cfg.Target,
+		OutDir:      cfg.OutDir,
+		GeneratedAt: time.Now().Format(time.RFC3339),
+		Overview: overviewStats{
+			TotalArtifacts:      domainStats.Total + routeStats.Total + certStats.Total,
+			UniqueDomains:       domainStats.Unique,
+			UniqueHosts:         routeStats.UniqueHosts,
+			UniqueCertificates:  certStats.Unique,
+			SecureRoutesPercent: routeStats.SecurePercentage,
+		},
+		Domains:      domainStats,
+		Routes:       routeStats,
+		Certificates: certStats,
 		Meta:         meta,
 	}
 
@@ -92,13 +103,19 @@ type countItem struct {
 }
 
 type domainStats struct {
-	Total          int
-	TopRegistrable []countItem
-	LabelHistogram []countItem
+	Total             int
+	Unique            int
+	UniqueRegistrable int
+	AverageLabels     float64
+	TopRegistrable    []countItem
+	LabelHistogram    []countItem
 }
 
 type routeStats struct {
 	Total            int
+	UniqueHosts      int
+	UniqueSchemes    int
+	SecurePercentage float64
 	TopHosts         []countItem
 	SchemeHistogram  []countItem
 	DepthHistogram   []countItem
@@ -106,14 +123,25 @@ type routeStats struct {
 }
 
 type certStats struct {
-	Total          int
-	TopRegistrable []countItem
+	Total             int
+	Unique            int
+	UniqueRegistrable int
+	TopRegistrable    []countItem
+}
+
+type overviewStats struct {
+	TotalArtifacts      int
+	UniqueDomains       int
+	UniqueHosts         int
+	UniqueCertificates  int
+	SecureRoutesPercent float64
 }
 
 type reportData struct {
 	Target       string
 	OutDir       string
 	GeneratedAt  string
+	Overview     overviewStats
 	Domains      domainStats
 	Routes       routeStats
 	Certificates certStats
@@ -158,16 +186,29 @@ func buildDomainStats(domains []string) domainStats {
 	}
 	registrableCounts := make(map[string]int)
 	labelHistogram := make(map[string]int)
+	uniqueDomains := make(map[string]struct{})
+	uniqueRegistrable := make(map[string]struct{})
+	var totalLabels int
 	for _, d := range domains {
 		if d == "" {
 			continue
 		}
-		registrableCounts[registrableDomain(d)]++
-		labelKey := fmt.Sprintf("%d niveles", strings.Count(d, ".")+1)
+		uniqueDomains[strings.ToLower(d)] = struct{}{}
+		registrable := registrableDomain(d)
+		uniqueRegistrable[registrable] = struct{}{}
+		registrableCounts[registrable]++
+		levels := strings.Count(d, ".") + 1
+		labelKey := fmt.Sprintf("%d niveles", levels)
 		labelHistogram[labelKey]++
+		totalLabels += levels
 	}
 	stats.TopRegistrable = topItems(registrableCounts, topN)
 	stats.LabelHistogram = topItems(labelHistogram, len(labelHistogram))
+	stats.Unique = len(uniqueDomains)
+	stats.UniqueRegistrable = len(uniqueRegistrable)
+	if stats.Total > 0 {
+		stats.AverageLabels = float64(totalLabels) / float64(stats.Total)
+	}
 	return stats
 }
 
@@ -177,13 +218,20 @@ func buildCertStats(certs []string) certStats {
 		return stats
 	}
 	registrableCounts := make(map[string]int)
+	uniqueCerts := make(map[string]struct{})
+	uniqueRegistrable := make(map[string]struct{})
 	for _, c := range certs {
 		if c == "" {
 			continue
 		}
-		registrableCounts[registrableDomain(c)]++
+		uniqueCerts[strings.ToLower(c)] = struct{}{}
+		registrable := registrableDomain(c)
+		uniqueRegistrable[registrable] = struct{}{}
+		registrableCounts[registrable]++
 	}
 	stats.TopRegistrable = topItems(registrableCounts, topN)
+	stats.Unique = len(uniqueCerts)
+	stats.UniqueRegistrable = len(uniqueRegistrable)
 	return stats
 }
 
@@ -196,6 +244,8 @@ func buildRouteStats(routes []string) routeStats {
 	schemeHistogram := make(map[string]int)
 	depthHistogram := make(map[string]int)
 	var totalDepth int
+	uniqueHosts := make(map[string]struct{})
+	httpsCount := 0
 	for _, raw := range routes {
 		if raw == "" {
 			continue
@@ -208,12 +258,17 @@ func buildRouteStats(routes []string) routeStats {
 		if host == "" {
 			host = "(sin host)"
 		}
-		hostCounts[strings.ToLower(host)]++
+		loweredHost := strings.ToLower(host)
+		hostCounts[loweredHost]++
+		uniqueHosts[loweredHost] = struct{}{}
 		scheme := strings.ToLower(u.Scheme)
 		if scheme == "" {
 			scheme = "(vacío)"
 		}
 		schemeHistogram[scheme]++
+		if scheme == "https" {
+			httpsCount++
+		}
 		path := strings.Trim(u.Path, "/")
 		depth := 0
 		if path != "" {
@@ -227,8 +282,11 @@ func buildRouteStats(routes []string) routeStats {
 	stats.SchemeHistogram = topItems(schemeHistogram, len(schemeHistogram))
 	stats.DepthHistogram = topItems(depthHistogram, len(depthHistogram))
 	stats.AveragePathDepth = float64(totalDepth)
+	stats.UniqueHosts = len(uniqueHosts)
+	stats.UniqueSchemes = len(schemeHistogram)
 	if stats.Total > 0 {
 		stats.AveragePathDepth = stats.AveragePathDepth / float64(stats.Total)
+		stats.SecurePercentage = (float64(httpsCount) / float64(stats.Total)) * 100
 	}
 	return stats
 }
@@ -272,25 +330,72 @@ const reportTemplate = `<!DOCTYPE html>
         <meta charset="utf-8">
         <title>Informe passive-rec</title>
         <style>
-                body { font-family: Arial, sans-serif; margin: 2rem; background: #f7f7f7; color: #222; }
-                h1, h2, h3 { color: #1f2937; }
-                table { border-collapse: collapse; margin-bottom: 1.5rem; width: 100%; max-width: 800px; background: white; }
-                th, td { border: 1px solid #ddd; padding: 0.5rem 0.75rem; text-align: left; }
-                th { background: #0f172a; color: white; }
-                section { margin-bottom: 2rem; padding: 1rem; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+                :root {
+                        color-scheme: light;
+                }
+                body { font-family: "Inter", "Segoe UI", Arial, sans-serif; margin: 2.5rem; background: #f1f5f9; color: #1f2937; }
+                h1, h2, h3 { color: #111827; margin-top: 0; }
+                header { margin-bottom: 2rem; }
+                section { margin-bottom: 2rem; padding: 1.5rem; background: #ffffff; border-radius: 12px; box-shadow: 0 15px 35px rgba(15, 23, 42, 0.08); }
+                table { border-collapse: collapse; margin-bottom: 1.5rem; width: 100%; background: white; border-radius: 8px; overflow: hidden; }
+                th, td { border: 1px solid #e2e8f0; padding: 0.65rem 0.9rem; text-align: left; }
+                th { background: #0f172a; color: #f8fafc; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.82rem; }
                 ul { padding-left: 1.5rem; }
-                .muted { color: #6b7280; }
+                .muted { color: #64748b; }
+                .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-top: 1rem; }
+                .card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 1rem; background: linear-gradient(135deg, rgba(148, 163, 184, 0.12), rgba(148, 163, 184, 0)); }
+                .metric { font-size: 2rem; font-weight: 600; color: #0f172a; margin: 0.25rem 0; }
+                .subtext { font-size: 0.9rem; color: #475569; margin: 0; }
+                .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; }
         </style>
 </head>
 <body>
-        <h1>Informe de passive-rec</h1>
-        <p><strong>Objetivo:</strong> {{.Target}}</p>
-        <p><strong>Directorio de salida:</strong> {{.OutDir}}</p>
-        <p class="muted">Generado: {{.GeneratedAt}}</p>
+        <header>
+                <h1>Informe de passive-rec</h1>
+                <p><strong>Objetivo:</strong> {{.Target}}</p>
+                <p><strong>Directorio de salida:</strong> {{.OutDir}}</p>
+                <p class="muted">Generado: {{.GeneratedAt}}</p>
+        </header>
+
+        <section>
+                <h2>Resumen ejecutivo</h2>
+                <p class="subtext">Vista rápida de los hallazgos más relevantes para priorizar acciones.</p>
+                <div class="cards">
+                        <div class="card">
+                                <h3>Total de artefactos procesados</h3>
+                                <p class="metric">{{.Overview.TotalArtifacts}}</p>
+                                <p class="subtext">Entradas combinadas de dominios, rutas y certificados.</p>
+                        </div>
+                        <div class="card">
+                                <h3>Dominios únicos</h3>
+                                <p class="metric">{{.Overview.UniqueDomains}}</p>
+                                <p class="subtext">Incluye {{.Domains.UniqueRegistrable}} dominios registrables distintos.</p>
+                        </div>
+                        <div class="card">
+                                <h3>Hosts únicos en rutas</h3>
+                                <p class="metric">{{.Overview.UniqueHosts}}</p>
+                                <p class="subtext">Cobertura sobre {{.Routes.UniqueSchemes}} esquemas de servicio.</p>
+                        </div>
+                        <div class="card">
+                                <h3>Certificados únicos</h3>
+                                <p class="metric">{{.Overview.UniqueCertificates}}</p>
+                                <p class="subtext">{{printf "%.1f" .Overview.SecureRoutesPercent}}% de las rutas usan HTTPS.</p>
+                        </div>
+                </div>
+        </section>
 
         <section>
                 <h2>Dominios</h2>
-                <p>Total: {{.Domains.Total}}</p>
+                <div class="grid">
+                        <div>
+                                <p><strong>Total de dominios recolectados:</strong> {{.Domains.Total}}</p>
+                                <p><strong>Dominios únicos:</strong> {{.Domains.Unique}} (registrables: {{.Domains.UniqueRegistrable}})</p>
+                                <p><strong>Niveles promedio por dominio:</strong> {{printf "%.2f" .Domains.AverageLabels}}</p>
+                        </div>
+                        <div>
+                                <p class="subtext">Los dominios con mayor frecuencia ayudan a identificar activos críticos y oportunidades para consolidar cobertura.</p>
+                        </div>
+                </div>
                 {{if hasData .Domains.TopRegistrable}}
                 <h3>Top dominios registrables</h3>
                 <table>
@@ -301,7 +406,7 @@ const reportTemplate = `<!DOCTYPE html>
                 </table>
                 {{end}}
                 {{if hasData .Domains.LabelHistogram}}
-                <h3>Histograma por niveles</h3>
+                <h3>Distribución por niveles</h3>
                 <table>
                         <tr><th>Niveles</th><th>Conteo</th></tr>
                         {{range .Domains.LabelHistogram}}
@@ -313,8 +418,17 @@ const reportTemplate = `<!DOCTYPE html>
 
         <section>
                 <h2>Rutas</h2>
-                <p>Total: {{.Routes.Total}}</p>
-                <p>Profundidad promedio de ruta: {{printf "%.2f" .Routes.AveragePathDepth}}</p>
+                <div class="grid">
+                        <div>
+                                <p><strong>Total de rutas:</strong> {{.Routes.Total}}</p>
+                                <p><strong>Hosts únicos observados:</strong> {{.Routes.UniqueHosts}}</p>
+                                <p><strong>Profundidad promedio de ruta:</strong> {{printf "%.2f" .Routes.AveragePathDepth}}</p>
+                        </div>
+                        <div>
+                                <p><strong>Uso de HTTPS:</strong> {{printf "%.1f" .Routes.SecurePercentage}}% de las rutas.</p>
+                                <p><strong>Esquemas únicos:</strong> {{.Routes.UniqueSchemes}}</p>
+                        </div>
+                </div>
                 {{if hasData .Routes.TopHosts}}
                 <h3>Top hosts</h3>
                 <table>
@@ -325,7 +439,7 @@ const reportTemplate = `<!DOCTYPE html>
                 </table>
                 {{end}}
                 {{if hasData .Routes.SchemeHistogram}}
-                <h3>Esquemas</h3>
+                <h3>Esquemas por volumen</h3>
                 <table>
                         <tr><th>Esquema</th><th>Conteo</th></tr>
                         {{range .Routes.SchemeHistogram}}
@@ -334,7 +448,7 @@ const reportTemplate = `<!DOCTYPE html>
                 </table>
                 {{end}}
                 {{if hasData .Routes.DepthHistogram}}
-                <h3>Profundidad de ruta</h3>
+                <h3>Profundidad de rutas</h3>
                 <table>
                         <tr><th>Segmentos</th><th>Conteo</th></tr>
                         {{range .Routes.DepthHistogram}}
@@ -346,7 +460,16 @@ const reportTemplate = `<!DOCTYPE html>
 
         <section>
                 <h2>Certificados</h2>
-                <p>Total: {{.Certificates.Total}}</p>
+                <div class="grid">
+                        <div>
+                                <p><strong>Total de certificados recolectados:</strong> {{.Certificates.Total}}</p>
+                                <p><strong>Certificados únicos:</strong> {{.Certificates.Unique}}</p>
+                        </div>
+                        <div>
+                                <p><strong>Dominios registrables únicos:</strong> {{.Certificates.UniqueRegistrable}}</p>
+                                <p class="subtext">Útiles para validar el alcance de la emisión y reutilización de certificados.</p>
+                        </div>
+                </div>
                 {{if hasData .Certificates.TopRegistrable}}
                 <h3>Top dominios registrables</h3>
                 <table>
