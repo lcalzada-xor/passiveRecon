@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"unicode"
 
 	"passive-rec/internal/runner"
 )
@@ -94,11 +96,110 @@ func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- st
 	}
 	defer os.Remove(tmpPath)
 
-	return httpxRunCmd(ctx, bin, []string{
+	intermediate := make(chan string)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for line := range intermediate {
+			for _, normalized := range normalizeHTTPXLine(line) {
+				out <- normalized
+			}
+		}
+	}()
+
+	err = httpxRunCmd(ctx, bin, []string{
 		"-sc",
 		"-title",
 		"-silent",
 		"-l",
 		tmpPath,
-	}, out)
+	}, intermediate)
+	close(intermediate)
+	wg.Wait()
+	return err
+}
+
+func normalizeHTTPXLine(line string) []string {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return nil
+	}
+
+	var (
+		urlPart  = line
+		metaPart string
+	)
+
+	if i := strings.IndexAny(line, " \t"); i != -1 {
+		urlPart = strings.TrimSpace(line[:i])
+		metaPart = strings.TrimSpace(line[i+1:])
+	}
+
+	var out []string
+	if urlPart != "" {
+		out = append(out, urlPart)
+	}
+
+	if metaPart == "" {
+		return out
+	}
+
+	for _, meta := range splitHTTPXMeta(metaPart) {
+		meta = strings.TrimSpace(meta)
+		if meta == "" {
+			continue
+		}
+		out = append(out, "meta: "+meta)
+	}
+
+	return out
+}
+
+func splitHTTPXMeta(meta string) []string {
+	meta = strings.TrimSpace(meta)
+	if meta == "" {
+		return nil
+	}
+
+	var (
+		parts      []string
+		current    strings.Builder
+		inBrackets bool
+	)
+
+	flush := func() {
+		if current.Len() == 0 {
+			return
+		}
+		parts = append(parts, current.String())
+		current.Reset()
+	}
+
+	for _, r := range meta {
+		switch {
+		case r == '[':
+			if current.Len() > 0 {
+				flush()
+			}
+			inBrackets = true
+			current.WriteRune(r)
+		case r == ']':
+			current.WriteRune(r)
+			flush()
+			inBrackets = false
+		case unicode.IsSpace(r) && !inBrackets:
+			flush()
+		default:
+			current.WriteRune(r)
+		}
+	}
+
+	flush()
+
+	for i, p := range parts {
+		parts[i] = strings.TrimSpace(p)
+	}
+
+	return parts
 }

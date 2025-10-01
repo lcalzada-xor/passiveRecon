@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+
+	"passive-rec/internal/pipeline"
 )
 
 func TestHTTPXCombinesAllLists(t *testing.T) {
@@ -126,5 +128,77 @@ func TestHTTPXSkipsMissingLists(t *testing.T) {
 	wantMeta := []string{"meta: httpx skipped missing input domains.passive"}
 	if diff := cmp.Diff(wantMeta, meta); diff != "" {
 		t.Fatalf("unexpected meta lines (-want +got):\n%s", diff)
+	}
+}
+
+func TestHTTPXNormalizesOutput(t *testing.T) {
+	inputDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(inputDir, "routes.passive"), []byte("https://app.example.com\n"), 0644); err != nil {
+		t.Fatalf("write routes list: %v", err)
+	}
+
+	originalBinFinder := httpxBinFinder
+	originalRunCmd := httpxRunCmd
+	t.Cleanup(func() {
+		httpxBinFinder = originalBinFinder
+		httpxRunCmd = originalRunCmd
+	})
+
+	httpxBinFinder = func() (string, error) { return "httpx", nil }
+
+	httpxRunCmd = func(ctx context.Context, name string, args []string, out chan<- string) error {
+		out <- "https://app.example.com [200] [Title]"
+		return nil
+	}
+
+	outCh := make(chan string, 10)
+	if err := HTTPX(context.Background(), []string{"routes.passive"}, inputDir, outCh); err != nil {
+		t.Fatalf("HTTPX returned error: %v", err)
+	}
+
+	var forwarded []string
+	for len(outCh) > 0 {
+		forwarded = append(forwarded, <-outCh)
+	}
+
+	wantForwarded := []string{"https://app.example.com", "meta: [200]", "meta: [Title]"}
+	if diff := cmp.Diff(wantForwarded, forwarded); diff != "" {
+		t.Fatalf("unexpected forwarded lines (-want +got):\n%s", diff)
+	}
+
+	outputDir := t.TempDir()
+	sink, err := pipeline.NewSink(outputDir)
+	if err != nil {
+		t.Fatalf("new sink: %v", err)
+	}
+	sink.Start(1)
+	in := sink.In()
+	for _, line := range forwarded {
+		in <- line
+	}
+	if err := sink.Close(); err != nil {
+		t.Fatalf("close sink: %v", err)
+	}
+
+	readLines := func(path string) []string {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		trimmed := strings.TrimSpace(string(data))
+		if trimmed == "" {
+			return nil
+		}
+		return strings.Split(trimmed, "\n")
+	}
+
+	routes := readLines(filepath.Join(outputDir, "routes.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com"}, routes); diff != "" {
+		t.Fatalf("unexpected routes.passive contents (-want +got):\n%s", diff)
+	}
+
+	meta := readLines(filepath.Join(outputDir, "meta.passive"))
+	if diff := cmp.Diff([]string{"[200]", "[Title]"}, meta); diff != "" {
+		t.Fatalf("unexpected meta.passive contents (-want +got):\n%s", diff)
 	}
 }
