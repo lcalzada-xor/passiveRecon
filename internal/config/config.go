@@ -2,10 +2,12 @@ package config
 
 import (
 	"flag"
+	"os"
 	"strings"
 )
 
 type Config struct {
+
 	Target    string
 	OutDir    string
 	Workers   int
@@ -14,6 +16,9 @@ type Config struct {
 	TimeoutS  int
 	Verbosity int
 	Report    bool
+	CensysAPIID     string
+	CensysAPISecret string
+
 }
 
 func ParseFlags() *Config {
@@ -25,6 +30,9 @@ func ParseFlags() *Config {
 	timeout := flag.Int("timeout", 120, "Timeout por herramienta (segundos)")
 	verbosity := flag.Int("v", 0, "Verbosity (0=silent,1=info,2=debug,3=trace)")
 	report := flag.Bool("report", false, "Generar un informe HTML al finalizar")
+	censysID := flag.String("censys-api-id", os.Getenv("CENSYS_API_ID"), "Censys API ID (o exporta CENSYS_API_ID)")
+	censysSecret := flag.String("censys-api-secret", os.Getenv("CENSYS_API_SECRET"), "Censys API secret (o exporta CENSYS_API_SECRET)")
+
 	flag.Parse()
 
 	list := []string{}
@@ -40,6 +48,7 @@ func ParseFlags() *Config {
 	}
 
 	return &Config{
+
 		Target:    *target,
 		OutDir:    *outdir,
 		Workers:   *workers,
@@ -48,5 +57,8 @@ func ParseFlags() *Config {
 		TimeoutS:  *timeout,
 		Verbosity: *verbosity,
 		Report:    *report,
+		CensysAPIID:     strings.TrimSpace(*censysID),
+		CensysAPISecret: strings.TrimSpace(*censysSecret),
+
 	}
 }
