@@ -1,6 +1,7 @@
 package out
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,10 +55,28 @@ func normalizeURL(u string) string {
 	if u == "" {
 		return ""
 	}
-	if !(strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://")) {
+
+	if !strings.Contains(u, "://") {
 		u = "http://" + u
 	}
-	return u
+
+	parsed, err := url.Parse(u)
+	if err != nil {
+		// Si la URL es inválida devolvemos la versión con esquema para evitar perder datos.
+		return u
+	}
+
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	host := parsed.Hostname()
+	port := parsed.Port()
+	if host != "" {
+		parsed.Host = strings.ToLower(host)
+		if port != "" {
+			parsed.Host += ":" + port
+		}
+	}
+
+	return parsed.String()
 }
 
 func (w *Writer) WriteDomain(d string) error {

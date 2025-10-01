@@ -36,11 +36,13 @@ func TestNormalizeURL(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]string{
-		"example.com":            "http://example.com",
-		"https://secure.example": "https://secure.example",
-		" http://foo.bar/baz ":   "http://foo.bar/baz",
-		"":                       "",
-		"//relative/path":        "http:////relative/path",
+		"example.com":             "http://example.com",
+		"https://secure.example":  "https://secure.example",
+		" http://foo.bar/baz ":    "http://foo.bar/baz",
+		"":                        "",
+		"//relative/path":         "http:////relative/path",
+		"HTTPS://Example.com":     "https://example.com",
+		"http://Example.com:8080": "http://example.com:8080",
 	}
 	for input, expected := range cases {
 		input, expected := input, expected
