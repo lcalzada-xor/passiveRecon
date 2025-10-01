@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -75,7 +76,9 @@ func TestCensysPagination(t *testing.T) {
 
 	results := make(map[string]bool)
 	for len(out) > 0 {
-		results[<-out] = true
+		raw := <-out
+		value := strings.TrimSpace(strings.TrimPrefix(raw, "cert:"))
+		results[value] = true
 	}
 
 	expected := []string{"example.com", "www.example.com", "alt.example.com", "legacy.example.com"}
@@ -135,7 +138,8 @@ func TestCensysDeduplicatesCaseInsensitive(t *testing.T) {
 
 	var results []string
 	for len(out) > 0 {
-		results = append(results, <-out)
+		raw := <-out
+		results = append(results, strings.TrimSpace(strings.TrimPrefix(raw, "cert:")))
 	}
 
 	if len(results) != 2 {
@@ -196,7 +200,8 @@ func TestCensysRelativeNextLink(t *testing.T) {
 
 	var results []string
 	for len(out) > 0 {
-		results = append(results, <-out)
+		raw := <-out
+		results = append(results, strings.TrimSpace(strings.TrimPrefix(raw, "cert:")))
 	}
 
 	sort.Strings(results)

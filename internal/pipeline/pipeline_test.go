@@ -31,6 +31,7 @@ func TestSinkClassification(t *testing.T) {
 		"meta: run started",
 		"alt1.example.com,alt2.example.com",
 		"alt2.example.com\nalt3.example.com",
+		"cert: direct-cert.example.com",
 		"   ",
 	}
 
@@ -59,7 +60,7 @@ func TestSinkClassification(t *testing.T) {
 	}
 
 	certs := readLines(t, filepath.Join(dir, "certs.passive"))
-	wantCerts := []string{"alt1.example.com", "alt2.example.com", "alt3.example.com"}
+	wantCerts := []string{"alt1.example.com", "alt2.example.com", "alt3.example.com", "direct-cert.example.com"}
 	if diff := cmp.Diff(wantCerts, certs); diff != "" {
 		t.Fatalf("unexpected certs (-want +got):\n%s", diff)
 	}

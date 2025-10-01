@@ -117,6 +117,11 @@ func (s *Sink) processLine(ln string) {
 		return
 	}
 
+	if strings.HasPrefix(l, "cert:") {
+		s.writeCertLine(strings.TrimSpace(l[len("cert:"):]))
+		return
+	}
+
 	// Clasificación simple: URLs/rutas si contiene esquema o '/'
 	if strings.Contains(l, "http://") || strings.Contains(l, "https://") || strings.Contains(l, "/") {
 		if s.markSeen(s.seenRoutes, l) {
@@ -128,18 +133,7 @@ func (s *Sink) processLine(ln string) {
 
 	// crt.sh name_value puede venir con commas/nuevas líneas ya partidos aguas arriba.
 	if strings.Contains(l, ",") || strings.Contains(l, "\n") {
-		parts := strings.FieldsFunc(l, func(r rune) bool { return r == ',' || r == '\n' })
-		for _, p := range parts {
-			p = strings.TrimSpace(p)
-			if p == "" {
-				continue
-			}
-			key := strings.ToLower(p)
-			if s.markSeen(s.seenCerts, key) {
-				continue
-			}
-			_ = s.Certs.WriteRaw(p)
-		}
+		s.writeCertLine(l)
 		return
 	}
 
@@ -180,4 +174,28 @@ func (s *Sink) markSeen(seen map[string]struct{}, key string) bool {
 	}
 	seen[key] = struct{}{}
 	return false
+}
+
+func (s *Sink) writeCertLine(line string) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return
+	}
+
+	parts := []string{line}
+	if strings.ContainsAny(line, ",\n") {
+		parts = strings.FieldsFunc(line, func(r rune) bool { return r == ',' || r == '\n' })
+	}
+
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		key := strings.ToLower(p)
+		if s.markSeen(s.seenCerts, key) {
+			continue
+		}
+		_ = s.Certs.WriteRaw(p)
+	}
 }
