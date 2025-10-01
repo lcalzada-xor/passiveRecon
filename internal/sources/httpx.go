@@ -170,7 +170,11 @@ func normalizeHTTPXLine(line string) []string {
 
 	var out []string
 	if urlPart != "" {
-		out = append(out, urlPart)
+		combined := urlPart
+		if metaPart != "" {
+			combined = strings.TrimSpace(urlPart + " " + metaPart)
+		}
+		out = append(out, combined)
 	}
 
 	if metaPart == "" {

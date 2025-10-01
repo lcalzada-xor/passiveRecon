@@ -197,10 +197,16 @@ func buildRouteStats(routes []string) routeStats {
 	depthHistogram := make(map[string]int)
 	var totalDepth int
 	for _, raw := range routes {
-		if raw == "" {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
 			continue
 		}
-		u, err := url.Parse(raw)
+		fields := strings.Fields(trimmed)
+		candidate := trimmed
+		if len(fields) > 0 {
+			candidate = fields[0]
+		}
+		u, err := url.Parse(candidate)
 		if err != nil {
 			continue
 		}
