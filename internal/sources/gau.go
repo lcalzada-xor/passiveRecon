@@ -12,6 +12,6 @@ func GAU(ctx context.Context, target string, out chan<- string) error {
 		out <- "meta: gau/getallurls not found in PATH"
 		return runner.ErrMissingBinary
 	}
-    return runner.RunCommand(ctx, bin, []string{target}, out)
+	return runner.RunCommand(ctx, bin, []string{target}, out)
 
 }

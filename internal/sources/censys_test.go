@@ -97,3 +97,55 @@ func TestCensysMissingCredentials(t *testing.T) {
 		t.Fatalf("unexpected output when credentials missing: %d", len(out))
 	}
 }
+
+func TestCensysDeduplicatesCaseInsensitive(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+  "result": {
+    "hits": [
+      {
+        "name": "Example.com",
+        "parsed": {
+          "subject": {"common_name": "EXAMPLE.com"},
+          "names": ["example.com", "WWW.EXAMPLE.COM"]
+        }
+      }
+    ],
+    "links": {"next": ""}
+  }
+}`))
+	}))
+	defer srv.Close()
+
+	oldURL := censysBaseURL
+	oldClient := censysHTTPClient
+	censysBaseURL = srv.URL
+	censysHTTPClient = srv.Client()
+	defer func() {
+		censysBaseURL = oldURL
+		censysHTTPClient = oldClient
+	}()
+
+	out := make(chan string, 4)
+	if err := Censys(context.Background(), "example.com", "id", "secret", out); err != nil {
+		t.Fatalf("censys returned error: %v", err)
+	}
+
+	var results []string
+	for len(out) > 0 {
+		results = append(results, <-out)
+	}
+
+	if len(results) != 2 {
+		t.Fatalf("expected two unique results, got %d: %#v", len(results), results)
+	}
+
+	seen := map[string]bool{}
+	for _, r := range results {
+		seen[r] = true
+	}
+	if !seen["example.com"] || !seen["www.example.com"] {
+		t.Fatalf("expected example.com and www.example.com, got %#v", results)
+	}
+}

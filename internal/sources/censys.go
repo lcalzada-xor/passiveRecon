@@ -54,11 +54,12 @@ func Censys(ctx context.Context, domain, apiID, apiSecret string, out chan<- str
 		if value == "" {
 			return
 		}
-		if _, ok := seen[value]; ok {
+		key := strings.ToLower(value)
+		if _, ok := seen[key]; ok {
 			return
 		}
-		seen[value] = struct{}{}
-		out <- value
+		seen[key] = struct{}{}
+		out <- key
 	}
 
 	nextURL := fmt.Sprintf("%s?%s", censysBaseURL, values.Encode())
