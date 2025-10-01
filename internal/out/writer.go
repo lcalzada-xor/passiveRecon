@@ -43,7 +43,9 @@ func normalizeDomain(d string) string {
 	if i := strings.IndexAny(d, ":/"); i != -1 {
 		d = d[:i]
 	}
-	d = strings.TrimPrefix(d, "www.")
+	if strings.HasPrefix(strings.ToLower(d), "www.") {
+		d = d[4:]
+	}
 	return strings.ToLower(d)
 }
 
