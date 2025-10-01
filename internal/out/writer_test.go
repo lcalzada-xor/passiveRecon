@@ -15,6 +15,8 @@ func TestNormalizeDomain(t *testing.T) {
 	cases := map[string]string{
 		"example.com":                        "example.com",
 		" https://www.Example.com/path ":     "example.com",
+		"WWW.example.com":                    "example.com",
+		"WwW.foo.com":                        "foo.com",
 		"sub.example.com:8080/other":         "sub.example.com",
 		"http://www.example.com:443/foo/bar": "example.com",
 		"":                                   "",
