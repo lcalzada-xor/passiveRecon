@@ -62,6 +62,11 @@ func Censys(ctx context.Context, domain, apiID, apiSecret string, out chan<- str
 		out <- key
 	}
 
+	baseURL, err := url.Parse(censysBaseURL)
+	if err != nil {
+		return fmt.Errorf("censys: invalid base url: %w", err)
+	}
+
 	nextURL := fmt.Sprintf("%s?%s", censysBaseURL, values.Encode())
 	for nextURL != "" {
 		select {
@@ -107,7 +112,26 @@ func Censys(ctx context.Context, domain, apiID, apiSecret string, out chan<- str
 			}
 		}
 
-		nextURL = strings.TrimSpace(decoded.Result.Links.Next)
+		next := strings.TrimSpace(decoded.Result.Links.Next)
+		if next == "" {
+			nextURL = ""
+			continue
+		}
+
+		parsedNext, err := url.Parse(next)
+		if err != nil {
+			return fmt.Errorf("censys: parse next link: %w", err)
+		}
+		if !parsedNext.IsAbs() {
+			// Resolve relative links against either the last requested URL or the
+			// configured base URL when pagination uses relative references.
+			if req != nil && req.URL != nil {
+				parsedNext = req.URL.ResolveReference(parsedNext)
+			} else {
+				parsedNext = baseURL.ResolveReference(parsedNext)
+			}
+		}
+		nextURL = parsedNext.String()
 	}
 
 	logx.Debugf("censys query %s: %d resultados", domain, len(seen))
