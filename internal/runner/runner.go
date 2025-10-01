@@ -122,6 +122,11 @@ func RunCommand(ctx context.Context, name string, args []string, out chan<- stri
 	}()
 
 	s := bufio.NewScanner(stdout)
+	// Algunos programas como httpx o gau pueden emitir líneas largas (URLs con
+	// query strings extensos). El búfer por defecto de bufio.Scanner (64 KiB)
+	// provoca un error "token too long" y aborta el procesamiento del comando.
+	// Ampliamos el límite a 2 MiB para acomodar salidas más grandes sin fallar.
+	s.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
 	lines := 0
 	var ctxErr error
 loop:
