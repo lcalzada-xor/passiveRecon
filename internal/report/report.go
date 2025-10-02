@@ -71,16 +71,18 @@ func Generate(ctx context.Context, cfg *config.Config, files SinkFiles) error {
 		OutDir:      cfg.OutDir,
 		GeneratedAt: time.Now().Format(time.RFC3339),
 		Overview: overviewStats{
-			TotalArtifacts:      domainStats.Total + routeStats.Total + certStats.Total,
-			UniqueDomains:       domainStats.Unique,
-			UniqueHosts:         routeStats.UniqueHosts,
-			UniqueCertificates:  certStats.Unique,
-			SecureRoutesPercent: routeStats.SecurePercentage,
+			TotalArtifacts:        domainStats.Total + routeStats.Total + certStats.Total,
+			UniqueDomains:         domainStats.Unique,
+			UniqueHosts:           routeStats.UniqueHosts,
+			UniqueCertificates:    certStats.Unique,
+			SecureRoutesPercent:   routeStats.SecurePercentage,
+			InsecureRoutesPercent: 100 - routeStats.SecurePercentage,
 		},
 		Domains:      domainStats,
 		Routes:       routeStats,
 		Certificates: certStats,
 		Meta:         meta,
+		Highlights:   buildHighlights(domainStats, routeStats, certStats),
 	}
 
 	reportPath := filepath.Join(cfg.OutDir, "report.html")
@@ -112,17 +114,25 @@ type domainStats struct {
 	AverageLabels     float64
 	TopRegistrable    []countItem
 	LabelHistogram    []countItem
+	TopTLDs           []countItem
+	WildcardCount     int
+	Interesting       []string
 }
 
 type routeStats struct {
-	Total            int
-	UniqueHosts      int
-	UniqueSchemes    int
-	SecurePercentage float64
-	TopHosts         []countItem
-	SchemeHistogram  []countItem
-	DepthHistogram   []countItem
-	AveragePathDepth float64
+	Total             int
+	UniqueHosts       int
+	UniqueSchemes     int
+	SecurePercentage  float64
+	TopHosts          []countItem
+	SchemeHistogram   []countItem
+	DepthHistogram    []countItem
+	AveragePathDepth  float64
+	InsecureHosts     []countItem
+	InsecureHostTotal int
+	TopPorts          []countItem
+	InterestingPaths  []string
+	NonStandardPorts  []string
 }
 
 type certStats struct {
@@ -137,14 +147,17 @@ type certStats struct {
 	LatestExpiration  string
 	TopRegistrable    []countItem
 	TopIssuers        []countItem
+	ExpiringSoonList  []string
+	ExpiredList       []string
 }
 
 type overviewStats struct {
-	TotalArtifacts      int
-	UniqueDomains       int
-	UniqueHosts         int
-	UniqueCertificates  int
-	SecureRoutesPercent float64
+	TotalArtifacts        int
+	UniqueDomains         int
+	UniqueHosts           int
+	UniqueCertificates    int
+	SecureRoutesPercent   float64
+	InsecureRoutesPercent float64
 }
 
 type reportData struct {
@@ -156,11 +169,13 @@ type reportData struct {
 	Routes       routeStats
 	Certificates certStats
 	Meta         []string
+	Highlights   []string
 }
 
 const (
 	topN               = 10
 	certExpirySoonDays = 30
+	maxInterestingRows = 10
 )
 
 var certTimeLayouts = []string{
@@ -172,8 +187,18 @@ var certTimeLayouts = []string{
 }
 
 var reportTmpl = template.Must(template.New("report").Funcs(template.FuncMap{
-	"hasData": func(items []countItem) bool { return len(items) > 0 },
+	"hasData":    func(items []countItem) bool { return len(items) > 0 },
+	"hasStrings": func(items []string) bool { return len(items) > 0 },
 }).Parse(reportTemplate))
+
+var (
+	interestingDomainKeywords = []string{
+		"admin", "portal", "intranet", "vpn", "dev", "test", "stage", "staging", "qa", "beta", "login", "sso", "auth", "api", "secure", "internal", "manage", "ops", "billing", "payments",
+	}
+	interestingRouteKeywords = []string{
+		"admin", "login", "portal", "debug", "backup", "dev", "test", "stage", "config", "console", "manage", "git", "jenkins", "api", "token", "sso", "callback",
+	}
+)
 
 func readLines(ctx context.Context, path string) ([]string, error) {
 	if path == "" {
@@ -207,28 +232,54 @@ func buildDomainStats(domains []string) domainStats {
 	}
 	registrableCounts := make(map[string]int)
 	labelHistogram := make(map[string]int)
+	tldCounts := make(map[string]int)
 	uniqueDomains := make(map[string]struct{})
 	uniqueRegistrable := make(map[string]struct{})
+	interesting := make(map[string]struct{})
 	var totalLabels int
 	for _, raw := range domains {
 		d := strings.TrimSpace(raw)
 		if d == "" {
 			continue
 		}
+		lowered := strings.ToLower(d)
 		stats.Total++
-		uniqueDomains[strings.ToLower(d)] = struct{}{}
+		uniqueDomains[lowered] = struct{}{}
+		if strings.HasPrefix(strings.TrimSpace(raw), "*.") {
+			stats.WildcardCount++
+		}
 		registrable := registrableDomain(d)
-		uniqueRegistrable[registrable] = struct{}{}
-		registrableCounts[registrable]++
-		levels := strings.Count(d, ".") + 1
+		if registrable != "" {
+			uniqueRegistrable[registrable] = struct{}{}
+			registrableCounts[registrable]++
+		}
+		if suffix, _ := publicsuffix.PublicSuffix(lowered); suffix != "" {
+			tldCounts[suffix]++
+		} else {
+			parts := strings.Split(lowered, ".")
+			if len(parts) > 0 {
+				tldCounts[parts[len(parts)-1]]++
+			}
+		}
+		levels := strings.Count(lowered, ".") + 1
 		labelKey := fmt.Sprintf("%d niveles", levels)
 		labelHistogram[labelKey]++
 		totalLabels += levels
+		for _, keyword := range interestingDomainKeywords {
+			if strings.Contains(lowered, keyword) {
+				interesting[lowered] = struct{}{}
+				break
+			}
+		}
 	}
 	stats.TopRegistrable = topItems(registrableCounts, topN)
 	stats.LabelHistogram = topItems(labelHistogram, len(labelHistogram))
+	stats.TopTLDs = topItems(tldCounts, topN)
 	stats.Unique = len(uniqueDomains)
 	stats.UniqueRegistrable = len(uniqueRegistrable)
+	if len(interesting) > 0 {
+		stats.Interesting = sortedStringsWithLimit(interesting, maxInterestingRows)
+	}
 	if stats.Total > 0 {
 		stats.AverageLabels = float64(totalLabels) / float64(stats.Total)
 	}
@@ -249,6 +300,8 @@ func buildCertStatsAt(certsLines []string, now time.Time) certStats {
 	uniqueCerts := make(map[string]struct{})
 	uniqueRegistrable := make(map[string]struct{})
 	uniqueIssuers := make(map[string]struct{})
+	expiringSoon := make(map[string]struct{})
+	expired := make(map[string]struct{})
 	var nextExpiration time.Time
 	var latestExpiration time.Time
 	for _, raw := range certsLines {
@@ -276,12 +329,19 @@ func buildCertStatsAt(certsLines []string, now time.Time) certStats {
 			registrableCounts[registrable]++
 		}
 		if expiry := parseCertTime(record.NotAfter); !expiry.IsZero() {
+			displayName := certDisplayName(record)
 			if expiry.Before(now) {
 				stats.Expired++
+				if displayName != "" {
+					expired[fmt.Sprintf("%s (venció %s)", displayName, expiry.Format("2006-01-02"))] = struct{}{}
+				}
 				continue
 			}
 			if expiry.Sub(now) <= certExpirySoonWindow() {
 				stats.ExpiringSoon++
+				if displayName != "" {
+					expiringSoon[fmt.Sprintf("%s (vence %s)", displayName, expiry.Format("2006-01-02"))] = struct{}{}
+				}
 			}
 			if nextExpiration.IsZero() || expiry.Before(nextExpiration) {
 				nextExpiration = expiry
@@ -296,6 +356,12 @@ func buildCertStatsAt(certsLines []string, now time.Time) certStats {
 	stats.Unique = len(uniqueCerts)
 	stats.UniqueRegistrable = len(uniqueRegistrable)
 	stats.UniqueIssuers = len(uniqueIssuers)
+	if len(expiringSoon) > 0 {
+		stats.ExpiringSoonList = sortedStringsWithLimit(expiringSoon, maxInterestingRows)
+	}
+	if len(expired) > 0 {
+		stats.ExpiredList = sortedStringsWithLimit(expired, maxInterestingRows)
+	}
 	if !nextExpiration.IsZero() {
 		stats.NextExpiration = nextExpiration.Format("2006-01-02")
 	}
@@ -313,6 +379,10 @@ func buildRouteStats(routes []string) routeStats {
 	hostCounts := make(map[string]int)
 	schemeHistogram := make(map[string]int)
 	depthHistogram := make(map[string]int)
+	insecureHostCounts := make(map[string]int)
+	portCounts := make(map[string]int)
+	interestingPaths := make(map[string]struct{})
+	nonStandard := make(map[string]struct{})
 	var totalDepth int
 	uniqueHosts := make(map[string]struct{})
 	httpsCount := 0
@@ -338,13 +408,19 @@ func buildRouteStats(routes []string) routeStats {
 		loweredHost := strings.ToLower(host)
 		hostCounts[loweredHost]++
 		uniqueHosts[loweredHost] = struct{}{}
-		scheme := strings.ToLower(u.Scheme)
+		rawScheme := strings.ToLower(u.Scheme)
+		scheme := rawScheme
 		if scheme == "" {
 			scheme = "(vacío)"
 		}
 		schemeHistogram[scheme]++
-		if scheme == "https" {
+		if rawScheme == "https" {
 			httpsCount++
+		} else if rawScheme != "" {
+			hostname := strings.ToLower(u.Hostname())
+			if hostname != "" {
+				insecureHostCounts[hostname]++
+			}
 		}
 		path := strings.Trim(u.Path, "/")
 		depth := 0
@@ -354,6 +430,41 @@ func buildRouteStats(routes []string) routeStats {
 		depthKey := fmt.Sprintf("%d segmentos", depth)
 		depthHistogram[depthKey]++
 		totalDepth += depth
+		port := u.Port()
+		if port == "" {
+			if def := defaultPortForScheme(rawScheme); def != "" {
+				port = def
+			}
+		}
+		displayPort := port
+		if displayPort == "" {
+			displayPort = "(sin puerto)"
+		}
+		portCounts[displayPort]++
+		if port != "" && isNonStandardPort(rawScheme, port) {
+			endpointScheme := rawScheme
+			if endpointScheme == "" {
+				endpointScheme = scheme
+			}
+			endpoint := fmt.Sprintf("%s://%s", endpointScheme, host)
+			nonStandard[strings.ToLower(endpoint)] = struct{}{}
+		}
+		loweredCandidate := strings.ToLower(candidate)
+		for _, keyword := range interestingRouteKeywords {
+			if strings.Contains(loweredCandidate, keyword) {
+				normalized := candidate
+				if u.Scheme != "" && u.Host != "" {
+					normalized = u.Scheme + "://" + u.Host + u.Path
+					if u.RawQuery != "" {
+						normalized += "?" + u.RawQuery
+					}
+				} else if normalized == "" {
+					normalized = fmt.Sprintf("%s://%s", rawScheme, host)
+				}
+				interestingPaths[normalized] = struct{}{}
+				break
+			}
+		}
 	}
 	stats.TopHosts = topItems(hostCounts, topN)
 	stats.SchemeHistogram = topItems(schemeHistogram, len(schemeHistogram))
@@ -361,6 +472,19 @@ func buildRouteStats(routes []string) routeStats {
 	stats.AveragePathDepth = float64(totalDepth)
 	stats.UniqueHosts = len(uniqueHosts)
 	stats.UniqueSchemes = len(schemeHistogram)
+	if len(insecureHostCounts) > 0 {
+		stats.InsecureHosts = topItems(insecureHostCounts, topN)
+		stats.InsecureHostTotal = len(insecureHostCounts)
+	}
+	if len(portCounts) > 0 {
+		stats.TopPorts = topItems(portCounts, len(portCounts))
+	}
+	if len(interestingPaths) > 0 {
+		stats.InterestingPaths = sortedStringsWithLimit(interestingPaths, maxInterestingRows)
+	}
+	if len(nonStandard) > 0 {
+		stats.NonStandardPorts = sortedStringsWithLimit(nonStandard, maxInterestingRows)
+	}
 	if stats.Total > 0 {
 		stats.AveragePathDepth = stats.AveragePathDepth / float64(stats.Total)
 		stats.SecurePercentage = (float64(httpsCount) / float64(stats.Total)) * 100
@@ -422,6 +546,107 @@ func certExpirySoonWindow() time.Duration {
 	return time.Duration(certExpirySoonDays) * 24 * time.Hour
 }
 
+func sortedStringsWithLimit(m map[string]struct{}, limit int) []string {
+	out := make([]string, 0, len(m))
+	for value := range m {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func defaultPortForScheme(scheme string) string {
+	switch scheme {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	case "ssh":
+		return "22"
+	case "ftp":
+		return "21"
+	case "rdp":
+		return "3389"
+	}
+	return ""
+}
+
+func isNonStandardPort(scheme, port string) bool {
+	if scheme == "" || port == "" {
+		return false
+	}
+	def := defaultPortForScheme(scheme)
+	if def == "" {
+		return false
+	}
+	return port != def
+}
+
+func certDisplayName(record certs.Record) string {
+	if record.CommonName != "" {
+		return record.CommonName
+	}
+	if len(record.DNSNames) > 0 {
+		return record.DNSNames[0]
+	}
+	if record.Subject != "" {
+		return record.Subject
+	}
+	return ""
+}
+
+func limitStrings(values []string, max int) []string {
+	if max <= 0 || len(values) <= max {
+		return values
+	}
+	return values[:max]
+}
+
+func buildHighlights(domains domainStats, routes routeStats, certs certStats) []string {
+	var highlights []string
+	if routes.SecurePercentage < 100 {
+		if len(routes.InsecureHosts) > 0 {
+			count := routes.InsecureHostTotal
+			verb := "exponen"
+			noun := "hosts"
+			if count == 1 {
+				verb = "expone"
+				noun = "host"
+			}
+			highlights = append(highlights, fmt.Sprintf("%d %s %s servicios sin HTTPS (por ejemplo %s)", count, noun, verb, routes.InsecureHosts[0].Name))
+		} else {
+			highlights = append(highlights, fmt.Sprintf("%.1f%% de las rutas carecen de HTTPS", 100-routes.SecurePercentage))
+		}
+	}
+	if len(routes.NonStandardPorts) > 0 {
+		highlights = append(highlights, fmt.Sprintf("Servicios en puertos no estándar detectados: %s", strings.Join(limitStrings(routes.NonStandardPorts, 3), ", ")))
+	}
+	if len(routes.InterestingPaths) > 0 {
+		highlights = append(highlights, fmt.Sprintf("Endpoints potencialmente sensibles encontrados (ej. %s)", routes.InterestingPaths[0]))
+	}
+	if len(domains.Interesting) > 0 {
+		highlights = append(highlights, fmt.Sprintf("Dominios que sugieren entornos sensibles: %s", strings.Join(limitStrings(domains.Interesting, 3), ", ")))
+	}
+	if certs.Expired > 0 {
+		if len(certs.ExpiredList) > 0 {
+			highlights = append(highlights, fmt.Sprintf("%d certificados vencidos, incluyendo %s", certs.Expired, certs.ExpiredList[0]))
+		} else {
+			highlights = append(highlights, fmt.Sprintf("%d certificados vencidos detectados", certs.Expired))
+		}
+	}
+	if certs.ExpiringSoon > 0 {
+		if len(certs.ExpiringSoonList) > 0 {
+			highlights = append(highlights, fmt.Sprintf("%d certificados por expirar pronto (ej. %s)", certs.ExpiringSoon, certs.ExpiringSoonList[0]))
+		} else {
+			highlights = append(highlights, fmt.Sprintf("%d certificados por expirar en %d días", certs.ExpiringSoon, certExpirySoonDays))
+		}
+	}
+	return highlights
+}
+
 const reportTemplate = `<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -472,14 +697,27 @@ const reportTemplate = `<!DOCTYPE html>
                         <div class="card">
                                 <h3>Hosts únicos en rutas</h3>
                                 <p class="metric">{{.Overview.UniqueHosts}}</p>
-                                <p class="subtext">Cobertura sobre {{.Routes.UniqueSchemes}} esquemas de servicio.</p>
+                                <p class="subtext">Cobertura sobre {{.Routes.UniqueSchemes}} esquemas de servicio; {{printf "%.1f" .Overview.InsecureRoutesPercent}}% sin HTTPS.</p>
                         </div>
                         <div class="card">
                                 <h3>Certificados únicos</h3>
                                 <p class="metric">{{.Overview.UniqueCertificates}}</p>
-                                <p class="subtext">{{printf "%.1f" .Overview.SecureRoutesPercent}}% de las rutas usan HTTPS.</p>
+                                <p class="subtext">{{.Certificates.ExpiringSoon}} por expirar en {{.Certificates.SoonThresholdDays}} días.</p>
                         </div>
                 </div>
+        </section>
+
+        <section>
+                <h2>Hallazgos clave</h2>
+                {{if hasStrings .Highlights}}
+                <ul>
+                        {{range .Highlights}}
+                        <li>{{.}}</li>
+                        {{end}}
+                </ul>
+                {{else}}
+                <p class="muted">Sin hallazgos destacados generados automáticamente.</p>
+                {{end}}
         </section>
 
         <section>
@@ -489,6 +727,7 @@ const reportTemplate = `<!DOCTYPE html>
                                 <p><strong>Total de dominios recolectados:</strong> {{.Domains.Total}}</p>
                                 <p><strong>Dominios únicos:</strong> {{.Domains.Unique}} (registrables: {{.Domains.UniqueRegistrable}})</p>
                                 <p><strong>Niveles promedio por dominio:</strong> {{printf "%.2f" .Domains.AverageLabels}}</p>
+                                <p><strong>Dominios comodín detectados:</strong> {{.Domains.WildcardCount}}</p>
                         </div>
                         <div>
                                 <p class="subtext">Los dominios con mayor frecuencia ayudan a identificar activos críticos y oportunidades para consolidar cobertura.</p>
@@ -512,6 +751,23 @@ const reportTemplate = `<!DOCTYPE html>
                         {{end}}
                 </table>
                 {{end}}
+                {{if hasData .Domains.TopTLDs}}
+                <h3>Top TLDs observados</h3>
+                <table>
+                        <tr><th>TLD</th><th>Conteo</th></tr>
+                        {{range .Domains.TopTLDs}}
+                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
+                        {{end}}
+                </table>
+                {{end}}
+                {{if hasStrings .Domains.Interesting}}
+                <h3>Dominios potencialmente sensibles</h3>
+                <ul>
+                        {{range .Domains.Interesting}}
+                        <li>{{.}}</li>
+                        {{end}}
+                </ul>
+                {{end}}
         </section>
 
         <section>
@@ -525,6 +781,7 @@ const reportTemplate = `<!DOCTYPE html>
                         <div>
                                 <p><strong>Uso de HTTPS:</strong> {{printf "%.1f" .Routes.SecurePercentage}}% de las rutas.</p>
                                 <p><strong>Esquemas únicos:</strong> {{.Routes.UniqueSchemes}}</p>
+                                <p><strong>Hosts con protocolos inseguros:</strong> {{.Routes.InsecureHostTotal}}</p>
                         </div>
                 </div>
                 {{if hasData .Routes.TopHosts}}
@@ -553,6 +810,40 @@ const reportTemplate = `<!DOCTYPE html>
                         <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
                         {{end}}
                 </table>
+                {{end}}
+                {{if hasData .Routes.InsecureHosts}}
+                <h3>Hosts con tráfico no cifrado</h3>
+                <table>
+                        <tr><th>Host</th><th>Observaciones</th></tr>
+                        {{range .Routes.InsecureHosts}}
+                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
+                        {{end}}
+                </table>
+                {{end}}
+                {{if hasData .Routes.TopPorts}}
+                <h3>Puertos observados</h3>
+                <table>
+                        <tr><th>Puerto</th><th>Conteo</th></tr>
+                        {{range .Routes.TopPorts}}
+                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
+                        {{end}}
+                </table>
+                {{end}}
+                {{if hasStrings .Routes.NonStandardPorts}}
+                <h3>Servicios en puertos no estándar</h3>
+                <ul>
+                        {{range .Routes.NonStandardPorts}}
+                        <li>{{.}}</li>
+                        {{end}}
+                </ul>
+                {{end}}
+                {{if hasStrings .Routes.InterestingPaths}}
+                <h3>Endpoints con palabras clave sensibles</h3>
+                <ul>
+                        {{range .Routes.InterestingPaths}}
+                        <li>{{.}}</li>
+                        {{end}}
+                </ul>
                 {{end}}
         </section>
 
@@ -594,6 +885,22 @@ const reportTemplate = `<!DOCTYPE html>
                         <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
                         {{end}}
                 </table>
+                {{end}}
+                {{if hasStrings .Certificates.ExpiredList}}
+                <h3>Certificados vencidos destacados</h3>
+                <ul>
+                        {{range .Certificates.ExpiredList}}
+                        <li>{{.}}</li>
+                        {{end}}
+                </ul>
+                {{end}}
+                {{if hasStrings .Certificates.ExpiringSoonList}}
+                <h3>Certificados próximos a expirar</h3>
+                <ul>
+                        {{range .Certificates.ExpiringSoonList}}
+                        <li>{{.}}</li>
+                        {{end}}
+                </ul>
                 {{end}}
         </section>
 
