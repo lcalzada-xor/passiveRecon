@@ -316,6 +316,51 @@ func TestHTTPXSkipsUnresponsiveResults(t *testing.T) {
 	}
 }
 
+func TestHTTPXSkipsHTMLForErrorResponses(t *testing.T) {
+	inputDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(inputDir, "routes"), 0o755); err != nil {
+		t.Fatalf("mkdir routes: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(inputDir, "routes", "routes.passive"), []byte("https://missing.example.com\n"), 0o644); err != nil {
+		t.Fatalf("write routes list: %v", err)
+	}
+
+	originalBinFinder := httpxBinFinder
+	originalRunCmd := httpxRunCmd
+	t.Cleanup(func() {
+		httpxBinFinder = originalBinFinder
+		httpxRunCmd = originalRunCmd
+	})
+
+	httpxBinFinder = func() (string, error) { return "httpx", nil }
+	httpxRunCmd = func(ctx context.Context, name string, args []string, out chan<- string) error {
+		out <- "https://missing.example.com [404] [Not Found] [text/html]"
+		return nil
+	}
+
+	outCh := make(chan string, 10)
+	if err := HTTPX(context.Background(), []string{"routes/routes.passive"}, inputDir, outCh); err != nil {
+		t.Fatalf("HTTPX returned error: %v", err)
+	}
+
+	var forwarded []string
+	for len(outCh) > 0 {
+		forwarded = append(forwarded, <-outCh)
+	}
+
+	want := []string{
+		"active: https://missing.example.com [404] [Not Found] [text/html]",
+		"active: missing.example.com [404] [Not Found] [text/html]",
+		"active: meta: [404]",
+		"active: meta: [Not Found]",
+		"active: meta: [text/html]",
+	}
+
+	if diff := cmp.Diff(want, forwarded); diff != "" {
+		t.Fatalf("unexpected forwarded lines (-want +got):\n%s", diff)
+	}
+}
+
 func TestHTTPXIncludesRedirectDomains(t *testing.T) {
 	inputDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(inputDir, "routes"), 0o755); err != nil {
