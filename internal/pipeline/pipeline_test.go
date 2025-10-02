@@ -56,6 +56,8 @@ func TestSinkClassification(t *testing.T) {
 		"meta: run started",
 		"sub.example.com/path",
 		"www.example.com",
+		"[2001:db8::1]:8443",
+		"2001:db8::1",
 		"meta: run started",
 		"cert: " + certOne,
 		"cert: " + certTwo,
@@ -71,7 +73,7 @@ func TestSinkClassification(t *testing.T) {
 	}
 
 	domains := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
-	wantDomains := []string{"example.com"}
+	wantDomains := []string{"example.com", "2001:db8::1"}
 	if diff := cmp.Diff(wantDomains, domains); diff != "" {
 		t.Fatalf("unexpected domains (-want +got):\n%s", diff)
 	}
@@ -173,6 +175,28 @@ func TestSinkFlush(t *testing.T) {
 
 	if err := sink.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestNormalizeDomainKeyIPv6(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"[2001:db8::1]:8443":                "2001:db8::1",
+		"2001:db8::1":                       "2001:db8::1",
+		"HTTPS://[2001:db8::1]:8443/path":   "2001:db8::1",
+		"http://[2001:db8::1]/":             "2001:db8::1",
+		"[2001:db8::1]:8443 extra metadata": "2001:db8::1",
+	}
+
+	for input, want := range cases {
+		input, want := input, want
+		t.Run(input, func(t *testing.T) {
+			t.Parallel()
+			if got := normalizeDomainKey(input); got != want {
+				t.Fatalf("normalizeDomainKey(%q) = %q, want %q", input, got, want)
+			}
+		})
 	}
 }
 

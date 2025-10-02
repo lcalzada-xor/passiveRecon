@@ -19,6 +19,9 @@ func TestNormalizeDomain(t *testing.T) {
 		"WwW.foo.com":                        "foo.com",
 		"sub.example.com:8080/other":         "sub.example.com",
 		"http://www.example.com:443/foo/bar": "example.com",
+		"[2001:db8::1]:8443":                 "2001:db8::1",
+		" 2001:db8::1 ":                      "2001:db8::1",
+		"[2001:db8::1]:8443 status: up":      "2001:db8::1 status: up",
 		"":                                   "",
 	}
 	for input, expected := range cases {
@@ -80,12 +83,16 @@ func TestWriteDomain(t *testing.T) {
 	defer w.Close()
 
 	inputs := []string{
-		"https://example.com", // base
-		"example.com",         // duplicate after normalization
-		"www.example.com",     // trimmed prefix
-		"sub.example.com",     // unique
-		"sub.example.com/",    // same as previous
-		"",                    // ignored
+		"https://example.com",           // base
+		"example.com",                   // duplicate after normalization
+		"www.example.com",               // trimmed prefix
+		"sub.example.com",               // unique
+		"sub.example.com/",              // same as previous
+		"[2001:db8::1]:8443",            // IPv6 with port and brackets
+		"2001:db8::1",                   // duplicate of previous
+		"[2001:db8::1]:8443 status: up", // IPv6 with metadata
+		"2001:db8::1 status: up",        // duplicate preserving metadata
+		"",                              // ignored
 	}
 	for _, in := range inputs {
 		if err := w.WriteDomain(in); err != nil {
@@ -94,7 +101,7 @@ func TestWriteDomain(t *testing.T) {
 	}
 
 	got := readLines(t, filepath.Join(dir, "domains.passive"))
-	want := []string{"example.com", "sub.example.com"}
+	want := []string{"example.com", "sub.example.com", "2001:db8::1", "2001:db8::1 status: up"}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Fatalf("unexpected domains (-want +got):\n%s", diff)
 	}

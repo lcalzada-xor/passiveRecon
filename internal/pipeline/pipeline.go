@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"context"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,18 +46,68 @@ func normalizeDomainKey(input string) string {
 		trimmed = trimmed[:idx]
 	}
 
-	if i := strings.Index(trimmed, "://"); i != -1 {
-		trimmed = trimmed[i+3:]
-	}
-	if i := strings.IndexAny(trimmed, ":/"); i != -1 {
-		trimmed = trimmed[:i]
+	host := extractHost(trimmed)
+	if host == "" {
+		return ""
 	}
 
-	lower := strings.ToLower(trimmed)
+	lower := strings.ToLower(host)
 	if strings.HasPrefix(lower, "www.") {
 		lower = lower[4:]
 	}
 	return lower
+}
+
+func extractHost(raw string) string {
+	if raw == "" {
+		return ""
+	}
+
+	candidate := raw
+	var parsed *url.URL
+	var err error
+
+	if strings.Contains(candidate, "://") {
+		parsed, err = url.Parse(candidate)
+	} else {
+		parsed, err = url.Parse("http://" + candidate)
+	}
+	if err == nil && parsed != nil {
+		hostPort := parsed.Host
+		hostname := parsed.Hostname()
+		if hostname != "" && !(strings.Count(hostPort, ":") > 1 && !strings.Contains(hostPort, "[")) {
+			return hostname
+		}
+		if hostPort != "" {
+			candidate = hostPort
+		}
+	}
+
+	if candidate == "" {
+		return ""
+	}
+
+	if at := strings.LastIndex(candidate, "@"); at != -1 {
+		candidate = candidate[at+1:]
+	}
+
+	if idx := strings.IndexAny(candidate, "/?#"); idx != -1 {
+		candidate = candidate[:idx]
+	}
+
+	if candidate == "" {
+		return ""
+	}
+
+	if host, _, err := net.SplitHostPort(candidate); err == nil {
+		return host
+	}
+
+	if strings.HasPrefix(candidate, "[") && strings.HasSuffix(candidate, "]") {
+		return strings.Trim(candidate, "[]")
+	}
+
+	return candidate
 }
 
 func NewSink(outdir string) (*Sink, error) {
