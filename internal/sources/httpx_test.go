@@ -134,7 +134,7 @@ func TestHTTPXSkipsMissingLists(t *testing.T) {
 	}
 	sort.Strings(meta)
 
-	wantMeta := []string{"meta: httpx skipped missing input domains/domains.passive"}
+	wantMeta := []string{"active: meta: httpx skipped missing input domains/domains.passive"}
 	if diff := cmp.Diff(wantMeta, meta); diff != "" {
 		t.Fatalf("unexpected meta lines (-want +got):\n%s", diff)
 	}
@@ -173,7 +173,7 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 		forwarded = append(forwarded, <-outCh)
 	}
 
-	wantForwarded := []string{"https://app.example.com [200] [Title]", "app.example.com", "meta: [200]", "meta: [Title]"}
+	wantForwarded := []string{"active: https://app.example.com [200] [Title]", "active: app.example.com", "active: meta: [200]", "active: meta: [Title]"}
 	if diff := cmp.Diff(wantForwarded, forwarded); diff != "" {
 		t.Fatalf("unexpected forwarded lines (-want +got):\n%s", diff)
 	}
@@ -204,19 +204,19 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 		return strings.Split(trimmed, "\n")
 	}
 
-	routes := readLines(filepath.Join(outputDir, "routes", "routes.passive"))
+	routes := readLines(filepath.Join(outputDir, "routes", "routes.active"))
 	if diff := cmp.Diff([]string{"https://app.example.com [200] [Title]"}, routes); diff != "" {
-		t.Fatalf("unexpected routes.passive contents (-want +got):\n%s", diff)
+		t.Fatalf("unexpected routes.active contents (-want +got):\n%s", diff)
 	}
 
-	domains := readLines(filepath.Join(outputDir, "domains", "domains.passive"))
+	domains := readLines(filepath.Join(outputDir, "domains", "domains.active"))
 	if diff := cmp.Diff([]string{"app.example.com"}, domains); diff != "" {
-		t.Fatalf("unexpected domains.passive contents (-want +got):\n%s", diff)
+		t.Fatalf("unexpected domains.active contents (-want +got):\n%s", diff)
 	}
 
-	meta := readLines(filepath.Join(outputDir, "meta.passive"))
+	meta := readLines(filepath.Join(outputDir, "meta.active"))
 	if diff := cmp.Diff([]string{"[200]", "[Title]"}, meta); diff != "" {
-		t.Fatalf("unexpected meta.passive contents (-want +got):\n%s", diff)
+		t.Fatalf("unexpected meta.active contents (-want +got):\n%s", diff)
 	}
 }
 
@@ -255,13 +255,13 @@ func TestHTTPXSkipsUnresponsiveResults(t *testing.T) {
 	}
 
 	want := []string{
-		"down.example.com",
-		"meta: [0]",
-		"meta: [connection refused]",
-		"https://up.example.com [200] [OK]",
-		"up.example.com",
-		"meta: [200]",
-		"meta: [OK]",
+		"active: down.example.com",
+		"active: meta: [0]",
+		"active: meta: [connection refused]",
+		"active: https://up.example.com [200] [OK]",
+		"active: up.example.com",
+		"active: meta: [200]",
+		"active: meta: [OK]",
 	}
 	if diff := cmp.Diff(want, forwarded); diff != "" {
 		t.Fatalf("unexpected forwarded lines (-want +got):\n%s", diff)

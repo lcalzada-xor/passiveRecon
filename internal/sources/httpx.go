@@ -36,7 +36,7 @@ var (
 func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- string) error {
 	bin, err := httpxBinFinder()
 	if err != nil {
-		out <- "meta: httpx not found in PATH"
+		out <- "active: meta: httpx not found in PATH"
 		return err
 	}
 
@@ -53,7 +53,7 @@ func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- st
 		data, err := os.ReadFile(inputPath)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				out <- "meta: httpx skipped missing input " + list
+				out <- "active: meta: httpx skipped missing input " + list
 				continue
 			}
 			return err
@@ -208,6 +208,14 @@ func normalizeHTTPXLine(line string) []string {
 			continue
 		}
 		out = append(out, "meta: "+meta)
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+
+	for i := range out {
+		out[i] = "active: " + out[i]
 	}
 
 	return out
