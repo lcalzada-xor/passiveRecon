@@ -9,18 +9,22 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"unicode"
 
+	"golang.org/x/sync/errgroup"
+
 	"passive-rec/internal/runner"
 )
 
 var (
-	httpxBinFinder = runner.HTTPXBin
-	httpxRunCmd    = runner.RunCommand
-	httpxBatchSize = 5000
+	httpxBinFinder   = runner.HTTPXBin
+	httpxRunCmd      = runner.RunCommand
+	httpxBatchSize   = 5000
+	httpxWorkerCount = runtime.NumCPU()
 
 	lowPriorityHTTPXExtensions = map[string]struct{}{
 		".ico": {},
@@ -109,28 +113,68 @@ func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- st
 		batchSize = len(combined)
 	}
 
-	for start := 0; start < len(combined); start += batchSize {
-		end := start + batchSize
-		if end > len(combined) {
-			end = len(combined)
-		}
+	workerCount := httpxWorkerCount
+	if workerCount <= 0 {
+		workerCount = 1
+	}
 
-		tmpPath, cleanup, err := writeHTTPXInput(combined[start:end])
-		if err != nil {
-			return err
-		}
+	type batchRange struct {
+		start int
+		end   int
+	}
 
-		err = httpxRunCmd(ctx, bin, []string{
-			"-sc",
-			"-title",
-			"-silent",
-			"-l",
-			tmpPath,
-		}, intermediate)
-		cleanup()
-		if err != nil {
-			return err
+	jobs := make(chan batchRange)
+	group, groupCtx := errgroup.WithContext(ctx)
+
+	for i := 0; i < workerCount; i++ {
+		group.Go(func() error {
+			for br := range jobs {
+				select {
+				case <-groupCtx.Done():
+					return groupCtx.Err()
+				default:
+				}
+
+				tmpPath, cleanup, err := writeHTTPXInput(combined[br.start:br.end])
+				if err != nil {
+					return err
+				}
+
+				err = httpxRunCmd(groupCtx, bin, []string{
+					"-sc",
+					"-title",
+					"-silent",
+					"-l",
+					tmpPath,
+				}, intermediate)
+				cleanup()
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+
+	go func() {
+		defer close(jobs)
+		for start := 0; start < len(combined); start += batchSize {
+			end := start + batchSize
+			if end > len(combined) {
+				end = len(combined)
+			}
+
+			br := batchRange{start: start, end: end}
+			select {
+			case <-groupCtx.Done():
+				return
+			case jobs <- br:
+			}
 		}
+	}()
+
+	if err := group.Wait(); err != nil {
+		return err
 	}
 
 	return nil
