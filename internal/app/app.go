@@ -36,6 +36,7 @@ var (
 	sourceCRTSh       = sources.CRTSH
 	sourceCensys      = sources.Censys
 	sourceHTTPX       = sources.HTTPX
+	sourceSubJS       = sources.SubJS
 )
 
 func Run(cfg *config.Config) error {
@@ -105,6 +106,15 @@ func Run(cfg *config.Config) error {
 				})))
 			} else {
 				sink.In() <- "meta: httpx skipped (requires --active)"
+				bar.StepDone(toolName, "omitido")
+			}
+		case "subjs":
+			if cfg.Active {
+				deferreds = append(deferreds, bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
+					return sourceSubJS(c, filepath.Join("routes", "routes.active"), cfg.OutDir, sink.In())
+				})))
+			} else {
+				sink.In() <- "meta: subjs skipped (requires --active)"
 				bar.StepDone(toolName, "omitido")
 			}
 		default:

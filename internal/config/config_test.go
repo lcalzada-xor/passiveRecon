@@ -34,9 +34,9 @@ func TestParseFlagsDefaults(t *testing.T) {
 		t.Fatalf("expected default outdir '.', got %q", cfg.OutDir)
 	}
 
-	if len(cfg.Tools) != 7 {
-		t.Fatalf("expected 7 default tools, got %d", len(cfg.Tools))
-	}
+        if len(cfg.Tools) != 8 {
+                t.Fatalf("expected 8 default tools, got %d", len(cfg.Tools))
+        }
 
 	if cfg.TimeoutS != 120 {
 		t.Fatalf("expected default timeout 120, got %d", cfg.TimeoutS)

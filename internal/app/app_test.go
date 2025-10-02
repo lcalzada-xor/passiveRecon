@@ -182,6 +182,9 @@ drained:
 			} else {
 				targetFile = "meta.passive"
 			}
+		} else if strings.HasPrefix(trimmed, "js: ") {
+			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "js: "))
+			targetFile = filepath.Join("routes", "js", "js.passive")
 		} else if strings.Contains(trimmed, "://") || strings.Contains(trimmed, "/") {
 			if isActive {
 				targetFile = filepath.Join("routes", "routes.active")

@@ -21,6 +21,7 @@ type writerPair struct {
 type Sink struct {
 	Domains            writerPair
 	Routes             writerPair
+	RoutesJS           writerPair
 	Certs              writerPair
 	Meta               writerPair
 	wg                 sync.WaitGroup
@@ -148,6 +149,10 @@ func NewSink(outdir string) (*Sink, error) {
 	if err != nil {
 		return nil, err
 	}
+	jsPassive, err := newWriter(filepath.Join("routes", "js"), "js.passive")
+	if err != nil {
+		return nil, err
+	}
 	cPassive, err := newWriter("certs", "certs.passive")
 	if err != nil {
 		return nil, err
@@ -164,6 +169,7 @@ func NewSink(outdir string) (*Sink, error) {
 	s := &Sink{
 		Domains:            writerPair{passive: dPassive, active: dActive},
 		Routes:             writerPair{passive: rPassive, active: rActive},
+		RoutesJS:           writerPair{passive: jsPassive},
 		Certs:              writerPair{passive: cPassive},
 		Meta:               writerPair{passive: mPassive, active: mActive},
 		lines:              make(chan string, 1024),
@@ -233,6 +239,20 @@ func (s *Sink) processLine(ln string) {
 			target = s.Meta.active
 		}
 		_ = target.WriteRaw(strings.TrimPrefix(l, "meta: "))
+		return
+	}
+
+	if strings.HasPrefix(l, "js:") {
+		js := strings.TrimSpace(strings.TrimPrefix(l, "js:"))
+		if js == "" {
+			return
+		}
+		if s.RoutesJS.passive != nil {
+			_ = s.RoutesJS.passive.WriteURL(js)
+		}
+		if isActive && s.RoutesJS.active != nil {
+			_ = s.RoutesJS.active.WriteURL(js)
+		}
 		return
 	}
 
@@ -322,6 +342,12 @@ func (s *Sink) Close() error {
 	}
 	if s.Routes.active != nil {
 		_ = s.Routes.active.Close()
+	}
+	if s.RoutesJS.passive != nil {
+		_ = s.RoutesJS.passive.Close()
+	}
+	if s.RoutesJS.active != nil {
+		_ = s.RoutesJS.active.Close()
 	}
 	if s.Certs.passive != nil {
 		_ = s.Certs.passive.Close()

@@ -263,6 +263,30 @@ func TestActiveRoutesPopulatePassive(t *testing.T) {
 	}
 }
 
+func TestJSLinesAreWrittenToFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir)
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "js: https://static.example.com/app.js"
+	sink.In() <- "active: js: https://static.example.com/app.js"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	jsPath := filepath.Join(dir, "routes", "js", "js.passive")
+	jsLines := readLines(t, jsPath)
+	if diff := cmp.Diff([]string{"https://static.example.com/app.js"}, jsLines); diff != "" {
+		t.Fatalf("unexpected js.passive contents (-want +got):\n%s", diff)
+	}
+}
+
 func readLines(t *testing.T, path string) []string {
 	t.Helper()
 
