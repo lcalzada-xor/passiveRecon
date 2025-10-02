@@ -208,6 +208,69 @@ func TestBuildRouteStatsIgnoresInvalidLines(t *testing.T) {
 	}
 }
 
+func TestBuildDomainStatsGroupsMultiLevelTLDs(t *testing.T) {
+	t.Parallel()
+
+	stats := buildDomainStats([]string{
+		"api.example.co.uk",
+		"portal.example.co.uk",
+		"example.co.uk",
+		"app.example.com",
+	})
+
+	if stats.UniqueRegistrable != 2 {
+		t.Fatalf("UniqueRegistrable = %d, want 2", stats.UniqueRegistrable)
+	}
+
+	counts := make(map[string]int)
+	for _, item := range stats.TopRegistrable {
+		counts[item.Name] = item.Count
+	}
+
+	if counts["example.co.uk"] != 3 {
+		t.Fatalf("example.co.uk count = %d, want 3", counts["example.co.uk"])
+	}
+	if counts["example.com"] != 1 {
+		t.Fatalf("example.com count = %d, want 1", counts["example.com"])
+	}
+}
+
+func TestBuildCertStatsGroupsMultiLevelTLDs(t *testing.T) {
+	t.Parallel()
+
+	record, err := (certs.Record{
+		CommonName: "*.portal.example.co.uk",
+		DNSNames: []string{
+			"portal.example.co.uk",
+			"login.example.co.uk",
+			"example.com",
+		},
+		Issuer:   "Example CA",
+		NotAfter: "2030-01-01T00:00:00Z",
+	}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal record: %v", err)
+	}
+
+	stats := buildCertStats([]string{record})
+
+	if stats.UniqueRegistrable != 2 {
+		t.Fatalf("UniqueRegistrable = %d, want 2", stats.UniqueRegistrable)
+	}
+
+	counts := make(map[string]int)
+	for _, item := range stats.TopRegistrable {
+		counts[item.Name] = item.Count
+	}
+
+	if counts["example.co.uk"] != 3 {
+		t.Fatalf("example.co.uk count = %d, want 3", counts["example.co.uk"])
+	}
+	if counts["example.com"] != 1 {
+		t.Fatalf("example.com count = %d, want 1", counts["example.com"])
+	}
+}
+
 func writeFixture(t *testing.T, path, contents string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

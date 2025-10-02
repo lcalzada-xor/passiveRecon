@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/net/publicsuffix"
+
 	"passive-rec/internal/certs"
 	"passive-rec/internal/config"
 )
@@ -367,16 +369,20 @@ func buildRouteStats(routes []string) routeStats {
 }
 
 func registrableDomain(domain string) string {
-	parts := strings.FieldsFunc(domain, func(r rune) bool { return r == '.' })
-	if len(parts) <= 1 {
-		return strings.ToLower(strings.TrimSpace(domain))
+	trimmed := strings.TrimSpace(domain)
+	if trimmed == "" {
+		return ""
 	}
-	last := parts[len(parts)-1]
-	secondLast := parts[len(parts)-2]
-	if secondLast == "" {
-		return strings.ToLower(last)
+	cleaned := strings.ToLower(strings.TrimSuffix(trimmed, "."))
+	cleaned = strings.TrimPrefix(cleaned, "*.")
+	if cleaned == "" {
+		return ""
 	}
-	return strings.ToLower(secondLast + "." + last)
+	registrable, err := publicsuffix.EffectiveTLDPlusOne(cleaned)
+	if err != nil {
+		return cleaned
+	}
+	return strings.ToLower(registrable)
 }
 
 func topItems(counts map[string]int, n int) []countItem {
