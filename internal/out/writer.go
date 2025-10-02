@@ -60,6 +60,13 @@ func normalizeURL(u string) string {
 		u = "http://" + u
 	}
 
+	// If the string already contains whitespace, assume it carries metadata
+	// (e.g. httpx status/title) and keep the original representation so the
+	// additional information remains human-readable.
+	if strings.ContainsAny(u, " \t") {
+		return u
+	}
+
 	parsed, err := url.Parse(u)
 	if err != nil {
 		// Si la URL es inválida devolvemos la versión con esquema para evitar perder datos.
