@@ -7,18 +7,16 @@ import (
 )
 
 type Config struct {
-
-	Target    string
-	OutDir    string
-	Workers   int
-	Active    bool
-	Tools     []string
-	TimeoutS  int
-	Verbosity int
-	Report    bool
+	Target          string
+	OutDir          string
+	Workers         int
+	Active          bool
+	Tools           []string
+	TimeoutS        int
+	Verbosity       int
+	Report          bool
 	CensysAPIID     string
 	CensysAPISecret string
-
 }
 
 func ParseFlags() *Config {
@@ -26,7 +24,7 @@ func ParseFlags() *Config {
 	outdir := flag.String("outdir", ".", "Directorio de salida (default: .)")
 	workers := flag.Int("workers", 6, "Número de workers")
 	active := flag.Bool("active", false, "Comprobaciones superficiales activas (httpx)")
-	tools := flag.String("tools", "subfinder,assetfinder,amass,waybackurls,gau,crtsh,httpx", "Herramientas, CSV")
+	tools := flag.String("tools", "subfinder,assetfinder,amass,waybackurls,gau,crtsh,httpx,subjs", "Herramientas, CSV")
 	timeout := flag.Int("timeout", 120, "Timeout por herramienta (segundos)")
 	verbosity := flag.Int("v", 0, "Verbosity (0=silent,1=info,2=debug,3=trace)")
 	report := flag.Bool("report", false, "Generar un informe HTML al finalizar")
@@ -49,16 +47,15 @@ func ParseFlags() *Config {
 
 	return &Config{
 
-		Target:    *target,
-		OutDir:    *outdir,
-		Workers:   *workers,
-		Active:    *active,
-		Tools:     list,
-		TimeoutS:  *timeout,
-		Verbosity: *verbosity,
-		Report:    *report,
+		Target:          *target,
+		OutDir:          *outdir,
+		Workers:         *workers,
+		Active:          *active,
+		Tools:           list,
+		TimeoutS:        *timeout,
+		Verbosity:       *verbosity,
+		Report:          *report,
 		CensysAPIID:     strings.TrimSpace(*censysID),
 		CensysAPISecret: strings.TrimSpace(*censysSecret),
-
 	}
 }
