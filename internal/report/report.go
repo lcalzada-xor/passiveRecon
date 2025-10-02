@@ -127,7 +127,14 @@ type certStats struct {
 	Total             int
 	Unique            int
 	UniqueRegistrable int
+	UniqueIssuers     int
+	Expired           int
+	ExpiringSoon      int
+	SoonThresholdDays int
+	NextExpiration    string
+	LatestExpiration  string
 	TopRegistrable    []countItem
+	TopIssuers        []countItem
 }
 
 type overviewStats struct {
@@ -149,7 +156,18 @@ type reportData struct {
 	Meta         []string
 }
 
-const topN = 10
+const (
+	topN               = 10
+	certExpirySoonDays = 30
+)
+
+var certTimeLayouts = []string{
+	time.RFC3339Nano,
+	time.RFC3339,
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04:05",
+	"2006-01-02",
+}
 
 var reportTmpl = template.Must(template.New("report").Funcs(template.FuncMap{
 	"hasData": func(items []countItem) bool { return len(items) > 0 },
@@ -216,13 +234,21 @@ func buildDomainStats(domains []string) domainStats {
 }
 
 func buildCertStats(certsLines []string) certStats {
-	stats := certStats{}
+	return buildCertStatsAt(certsLines, time.Now())
+}
+
+func buildCertStatsAt(certsLines []string, now time.Time) certStats {
+	stats := certStats{SoonThresholdDays: certExpirySoonDays}
 	if len(certsLines) == 0 {
 		return stats
 	}
 	registrableCounts := make(map[string]int)
+	issuerCounts := make(map[string]int)
 	uniqueCerts := make(map[string]struct{})
 	uniqueRegistrable := make(map[string]struct{})
+	uniqueIssuers := make(map[string]struct{})
+	var nextExpiration time.Time
+	var latestExpiration time.Time
 	for _, raw := range certsLines {
 		record, err := certs.Parse(raw)
 		if err != nil {
@@ -234,6 +260,11 @@ func buildCertStats(certsLines []string) certStats {
 			key = strings.TrimSpace(strings.ToLower(raw))
 		}
 		uniqueCerts[key] = struct{}{}
+		issuer := strings.TrimSpace(record.Issuer)
+		if issuer != "" {
+			issuerCounts[issuer]++
+			uniqueIssuers[strings.ToLower(issuer)] = struct{}{}
+		}
 		for _, name := range record.AllNames() {
 			registrable := registrableDomain(name)
 			if registrable == "" {
@@ -242,10 +273,33 @@ func buildCertStats(certsLines []string) certStats {
 			uniqueRegistrable[registrable] = struct{}{}
 			registrableCounts[registrable]++
 		}
+		if expiry := parseCertTime(record.NotAfter); !expiry.IsZero() {
+			if expiry.Before(now) {
+				stats.Expired++
+				continue
+			}
+			if expiry.Sub(now) <= certExpirySoonWindow() {
+				stats.ExpiringSoon++
+			}
+			if nextExpiration.IsZero() || expiry.Before(nextExpiration) {
+				nextExpiration = expiry
+			}
+			if latestExpiration.IsZero() || expiry.After(latestExpiration) {
+				latestExpiration = expiry
+			}
+		}
 	}
 	stats.TopRegistrable = topItems(registrableCounts, topN)
+	stats.TopIssuers = topItems(issuerCounts, topN)
 	stats.Unique = len(uniqueCerts)
 	stats.UniqueRegistrable = len(uniqueRegistrable)
+	stats.UniqueIssuers = len(uniqueIssuers)
+	if !nextExpiration.IsZero() {
+		stats.NextExpiration = nextExpiration.Format("2006-01-02")
+	}
+	if !latestExpiration.IsZero() {
+		stats.LatestExpiration = latestExpiration.Format("2006-01-02")
+	}
 	return stats
 }
 
@@ -343,6 +397,23 @@ func topItems(counts map[string]int, n int) []countItem {
 		n = len(items)
 	}
 	return items[:n]
+}
+
+func parseCertTime(value string) time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}
+	}
+	for _, layout := range certTimeLayouts {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t.UTC()
+		}
+	}
+	return time.Time{}
+}
+
+func certExpirySoonWindow() time.Duration {
+	return time.Duration(certExpirySoonDays) * 24 * time.Hour
 }
 
 const reportTemplate = `<!DOCTYPE html>
@@ -485,9 +556,18 @@ const reportTemplate = `<!DOCTYPE html>
                         <div>
                                 <p><strong>Total de certificados recolectados:</strong> {{.Certificates.Total}}</p>
                                 <p><strong>Certificados únicos:</strong> {{.Certificates.Unique}}</p>
+                                <p><strong>Emisores únicos:</strong> {{.Certificates.UniqueIssuers}}</p>
+                                <p><strong>Certificados vencidos:</strong> {{.Certificates.Expired}}</p>
                         </div>
                         <div>
                                 <p><strong>Dominios registrables únicos:</strong> {{.Certificates.UniqueRegistrable}}</p>
+                                <p><strong>Certificados por expirar ({{.Certificates.SoonThresholdDays}} días):</strong> {{.Certificates.ExpiringSoon}}</p>
+                                {{if .Certificates.NextExpiration}}
+                                <p><strong>Próximo vencimiento:</strong> {{.Certificates.NextExpiration}}</p>
+                                {{end}}
+                                {{if .Certificates.LatestExpiration}}
+                                <p><strong>Último vencimiento observado:</strong> {{.Certificates.LatestExpiration}}</p>
+                                {{end}}
                                 <p class="subtext">Útiles para validar el alcance de la emisión y reutilización de certificados.</p>
                         </div>
                 </div>
@@ -496,6 +576,15 @@ const reportTemplate = `<!DOCTYPE html>
                 <table>
                         <tr><th>Dominio</th><th>Conteo</th></tr>
                         {{range .Certificates.TopRegistrable}}
+                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
+                        {{end}}
+                </table>
+                {{end}}
+                {{if hasData .Certificates.TopIssuers}}
+                <h3>Top emisores</h3>
+                <table>
+                        <tr><th>Emisor</th><th>Conteo</th></tr>
+                        {{range .Certificates.TopIssuers}}
                         <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
                         {{end}}
                 </table>

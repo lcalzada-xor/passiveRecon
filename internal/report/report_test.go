@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"passive-rec/internal/certs"
 	"passive-rec/internal/config"
@@ -31,6 +32,7 @@ func TestGenerateCreatesHTMLReport(t *testing.T) {
 		CommonName: "alt1.example.com",
 		DNSNames:   []string{"alt1.example.com", "alt2.example.com"},
 		Issuer:     "Example CA",
+		NotAfter:   "2032-01-01T00:00:00Z",
 	}).Marshal()
 	if err != nil {
 		t.Fatalf("marshal certOne: %v", err)
@@ -40,6 +42,7 @@ func TestGenerateCreatesHTMLReport(t *testing.T) {
 		CommonName: "service.test.com",
 		DNSNames:   []string{"service.test.com"},
 		Issuer:     "Example CA",
+		NotAfter:   "2029-06-15T00:00:00Z",
 	}).Marshal()
 	if err != nil {
 		t.Fatalf("marshal certTwo: %v", err)
@@ -48,6 +51,7 @@ func TestGenerateCreatesHTMLReport(t *testing.T) {
 		Source:     "crt.sh",
 		CommonName: "portal.example.com",
 		Issuer:     "Example CA",
+		NotAfter:   "2001-01-01T00:00:00Z",
 	}).Marshal()
 	if err != nil {
 		t.Fatalf("marshal certThree: %v", err)
@@ -78,9 +82,16 @@ func TestGenerateCreatesHTMLReport(t *testing.T) {
 		"http</td><td>1",
 		"https</td><td>2",
 		"Certificados únicos:</strong> 3",
+		"Emisores únicos:</strong> 1",
+		"Certificados vencidos:</strong> 1",
 		"Dominios registrables únicos:</strong> 2",
+		"Certificados por expirar (30 días):</strong> 0",
+		"Próximo vencimiento:</strong> 2029-06-15",
+		"Último vencimiento observado:</strong> 2032-01-01",
 		"Meta",
 		"subfinder: ok",
+		"Top emisores",
+		"Example CA</td><td>3",
 	}
 	for _, want := range checks {
 		if !strings.Contains(contents, want) {
@@ -133,6 +144,46 @@ func TestBuildCertStatsSkipsEmpty(t *testing.T) {
 	}
 	if stats.UniqueRegistrable != 1 {
 		t.Fatalf("UniqueRegistrable = %d, want 1", stats.UniqueRegistrable)
+	}
+	if stats.SoonThresholdDays != 30 {
+		t.Fatalf("SoonThresholdDays = %d, want 30", stats.SoonThresholdDays)
+	}
+}
+
+func TestBuildCertStatsExpiryCounters(t *testing.T) {
+	t.Parallel()
+
+	expired, err := (certs.Record{Issuer: "Example CA", NotAfter: "2020-01-01T00:00:00Z"}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal expired: %v", err)
+	}
+	soon, err := (certs.Record{Issuer: "Example CA", NotAfter: "2024-01-15T00:00:00Z"}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal soon: %v", err)
+	}
+	future, err := (certs.Record{Issuer: "Other CA", NotAfter: "2024-03-01T00:00:00Z"}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal future: %v", err)
+	}
+	now := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
+	stats := buildCertStatsAt([]string{expired, soon, future}, now)
+	if stats.Expired != 1 {
+		t.Fatalf("Expired = %d, want 1", stats.Expired)
+	}
+	if stats.ExpiringSoon != 1 {
+		t.Fatalf("ExpiringSoon = %d, want 1", stats.ExpiringSoon)
+	}
+	if stats.NextExpiration != "2024-01-15" {
+		t.Fatalf("NextExpiration = %q, want 2024-01-15", stats.NextExpiration)
+	}
+	if stats.LatestExpiration != "2024-03-01" {
+		t.Fatalf("LatestExpiration = %q, want 2024-03-01", stats.LatestExpiration)
+	}
+	if stats.UniqueIssuers != 2 {
+		t.Fatalf("UniqueIssuers = %d, want 2", stats.UniqueIssuers)
+	}
+	if len(stats.TopIssuers) == 0 {
+		t.Fatalf("expected TopIssuers to be populated")
 	}
 }
 
