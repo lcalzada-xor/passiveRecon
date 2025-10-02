@@ -104,6 +104,13 @@ type Sink struct {
 	seenRoutesActive   map[string]struct{}
 	seenHTMLPassive    map[string]struct{}
 	seenHTMLActive     map[string]struct{}
+	seenRoutesMaps     map[string]struct{}
+	seenRoutesJSON     map[string]struct{}
+	seenRoutesAPI      map[string]struct{}
+	seenRoutesWASM     map[string]struct{}
+	seenRoutesSVG      map[string]struct{}
+	seenRoutesCrawl    map[string]struct{}
+	seenRoutesMeta     map[string]struct{}
 	seenCertsPassive   map[string]struct{}
 	procMu             sync.Mutex
 	processing         int
@@ -274,6 +281,13 @@ func NewSink(outdir string, active bool) (*Sink, error) {
 		seenRoutesActive:   make(map[string]struct{}),
 		seenHTMLPassive:    make(map[string]struct{}),
 		seenHTMLActive:     make(map[string]struct{}),
+		seenRoutesMaps:     make(map[string]struct{}),
+		seenRoutesJSON:     make(map[string]struct{}),
+		seenRoutesAPI:      make(map[string]struct{}),
+		seenRoutesWASM:     make(map[string]struct{}),
+		seenRoutesSVG:      make(map[string]struct{}),
+		seenRoutesCrawl:    make(map[string]struct{}),
+		seenRoutesMeta:     make(map[string]struct{}),
 		seenCertsPassive:   make(map[string]struct{}),
 		activeMode:         active,
 	}
@@ -598,19 +612,33 @@ func (s *Sink) writeRouteCategories(route string, isActive bool) {
 	for _, cat := range categories {
 		switch cat {
 		case routeCategoryMaps:
-			s.RoutesMaps.WriteURL(route)
+			if s.RoutesMaps != nil && !s.markSeen(s.seenRoutesMaps, route) {
+				s.RoutesMaps.WriteURL(route)
+			}
 		case routeCategoryJSON:
-			s.RoutesJSON.WriteURL(route)
+			if s.RoutesJSON != nil && !s.markSeen(s.seenRoutesJSON, route) {
+				s.RoutesJSON.WriteURL(route)
+			}
 		case routeCategoryAPI:
-			s.RoutesAPI.WriteURL(route)
+			if s.RoutesAPI != nil && !s.markSeen(s.seenRoutesAPI, route) {
+				s.RoutesAPI.WriteURL(route)
+			}
 		case routeCategoryWASM:
-			s.RoutesWASM.WriteURL(route)
+			if s.RoutesWASM != nil && !s.markSeen(s.seenRoutesWASM, route) {
+				s.RoutesWASM.WriteURL(route)
+			}
 		case routeCategorySVG:
-			s.RoutesSVG.WriteURL(route)
+			if s.RoutesSVG != nil && !s.markSeen(s.seenRoutesSVG, route) {
+				s.RoutesSVG.WriteURL(route)
+			}
 		case routeCategoryCrawl:
-			s.RoutesCrawl.WriteURL(route)
+			if s.RoutesCrawl != nil && !s.markSeen(s.seenRoutesCrawl, route) {
+				s.RoutesCrawl.WriteURL(route)
+			}
 		case routeCategoryMeta:
-			s.RoutesMetaFindings.WriteURL(route)
+			if s.RoutesMetaFindings != nil && !s.markSeen(s.seenRoutesMeta, route) {
+				s.RoutesMetaFindings.WriteURL(route)
+			}
 		}
 	}
 }
