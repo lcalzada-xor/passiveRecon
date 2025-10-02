@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -415,7 +416,9 @@ func (s *Sink) processLine(ln string) {
 		if s.markSeen(seen, l) {
 			return
 		}
-		s.writeRouteCategories(base, isActive)
+		if !isActive || shouldCategorizeActiveRoute(l, base) {
+			s.writeRouteCategories(base, isActive)
+		}
 		_ = writer.WriteURL(l)
 		return
 	}
@@ -610,6 +613,53 @@ func (s *Sink) writeRouteCategories(route string, isActive bool) {
 			s.RoutesMetaFindings.WriteURL(route)
 		}
 	}
+}
+
+func shouldCategorizeActiveRoute(fullLine, base string) bool {
+	status, ok := parseActiveRouteStatus(fullLine, base)
+	if !ok {
+		return true
+	}
+	if status <= 0 {
+		return false
+	}
+	return status < 400
+}
+
+func parseActiveRouteStatus(fullLine, base string) (int, bool) {
+	if base == "" {
+		return 0, false
+	}
+	if !strings.HasPrefix(fullLine, base) {
+		return 0, false
+	}
+	meta := strings.TrimSpace(strings.TrimPrefix(fullLine, base))
+	if meta == "" {
+		return 0, false
+	}
+	if meta[0] != '[' {
+		return 0, false
+	}
+	end := strings.IndexRune(meta, ']')
+	if end <= 1 {
+		return 0, false
+	}
+	inside := strings.TrimSpace(meta[1:end])
+	if inside == "" {
+		return 0, false
+	}
+	i := 0
+	for i < len(inside) && inside[i] >= '0' && inside[i] <= '9' {
+		i++
+	}
+	if i == 0 {
+		return 0, false
+	}
+	code, err := strconv.Atoi(inside[:i])
+	if err != nil {
+		return 0, false
+	}
+	return code, true
 }
 
 func detectRouteCategories(route string) []routeCategory {

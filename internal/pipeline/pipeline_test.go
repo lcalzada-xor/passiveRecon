@@ -443,6 +443,28 @@ func TestRouteCategorizationActiveMode(t *testing.T) {
 	}
 }
 
+func TestRouteCategorizationActiveModeSkipsErrorStatus(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, true)
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "active: https://app.example.com/static/config.json [404] [Not Found]"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	jsonPath := filepath.Join(dir, "routes", "json", "json.active")
+	if _, err := os.Stat(jsonPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected no json.active file, got err=%v", err)
+	}
+}
+
 func readLines(t *testing.T, path string) []string {
 	t.Helper()
 
