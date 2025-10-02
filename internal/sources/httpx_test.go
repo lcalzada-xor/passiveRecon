@@ -263,7 +263,7 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 	}
 
 	htmlRoutes := readLines(filepath.Join(outputDir, "routes", "html", "html.active"))
-	if diff := cmp.Diff([]string{"https://app.example.com"}, htmlRoutes); diff != "" {
+	if diff := cmp.Diff([]string{"html: https://app.example.com"}, htmlRoutes); diff != "" {
 		t.Fatalf("unexpected html.active contents (-want +got):\n%s", diff)
 	}
 }

@@ -68,6 +68,20 @@ func (lw *lazyWriter) WriteURL(u string) {
 	_ = w.WriteURL(u)
 }
 
+func (lw *lazyWriter) WriteRaw(line string) {
+	if lw == nil {
+		return
+	}
+	if line == "" {
+		return
+	}
+	w, err := lw.ensure()
+	if err != nil {
+		return
+	}
+	_ = w.WriteRaw(line)
+}
+
 func (lw *lazyWriter) Close() {
 	if lw == nil {
 		return
@@ -361,7 +375,7 @@ func (s *Sink) processLine(ln string) {
 		}
 		if isActive {
 			if s.RoutesJS.active != nil {
-				_ = s.RoutesJS.active.WriteURL(js)
+				_ = s.RoutesJS.active.WriteRaw("js: " + js)
 			}
 			if s.RoutesJS.passive != nil {
 				_ = s.RoutesJS.passive.WriteURL(js)
@@ -389,6 +403,10 @@ func (s *Sink) processLine(ln string) {
 			return
 		}
 		if seen != nil && s.markSeen(seen, html) {
+			return
+		}
+		if isActive {
+			_ = writer.WriteRaw("html: " + html)
 			return
 		}
 		_ = writer.WriteURL(html)
@@ -613,31 +631,59 @@ func (s *Sink) writeRouteCategories(route string, isActive bool) {
 		switch cat {
 		case routeCategoryMaps:
 			if s.RoutesMaps != nil && !s.markSeen(s.seenRoutesMaps, route) {
-				s.RoutesMaps.WriteURL(route)
+				if s.activeMode && isActive {
+					s.RoutesMaps.WriteRaw("maps: " + route)
+				} else {
+					s.RoutesMaps.WriteURL(route)
+				}
 			}
 		case routeCategoryJSON:
 			if s.RoutesJSON != nil && !s.markSeen(s.seenRoutesJSON, route) {
-				s.RoutesJSON.WriteURL(route)
+				if s.activeMode && isActive {
+					s.RoutesJSON.WriteRaw("json: " + route)
+				} else {
+					s.RoutesJSON.WriteURL(route)
+				}
 			}
 		case routeCategoryAPI:
 			if s.RoutesAPI != nil && !s.markSeen(s.seenRoutesAPI, route) {
-				s.RoutesAPI.WriteURL(route)
+				if s.activeMode && isActive {
+					s.RoutesAPI.WriteRaw("api: " + route)
+				} else {
+					s.RoutesAPI.WriteURL(route)
+				}
 			}
 		case routeCategoryWASM:
 			if s.RoutesWASM != nil && !s.markSeen(s.seenRoutesWASM, route) {
-				s.RoutesWASM.WriteURL(route)
+				if s.activeMode && isActive {
+					s.RoutesWASM.WriteRaw("wasm: " + route)
+				} else {
+					s.RoutesWASM.WriteURL(route)
+				}
 			}
 		case routeCategorySVG:
 			if s.RoutesSVG != nil && !s.markSeen(s.seenRoutesSVG, route) {
-				s.RoutesSVG.WriteURL(route)
+				if s.activeMode && isActive {
+					s.RoutesSVG.WriteRaw("svg: " + route)
+				} else {
+					s.RoutesSVG.WriteURL(route)
+				}
 			}
 		case routeCategoryCrawl:
 			if s.RoutesCrawl != nil && !s.markSeen(s.seenRoutesCrawl, route) {
-				s.RoutesCrawl.WriteURL(route)
+				if s.activeMode && isActive {
+					s.RoutesCrawl.WriteRaw("crawl: " + route)
+				} else {
+					s.RoutesCrawl.WriteURL(route)
+				}
 			}
 		case routeCategoryMeta:
 			if s.RoutesMetaFindings != nil && !s.markSeen(s.seenRoutesMeta, route) {
-				s.RoutesMetaFindings.WriteURL(route)
+				if s.activeMode && isActive {
+					s.RoutesMetaFindings.WriteRaw("meta: " + route)
+				} else {
+					s.RoutesMetaFindings.WriteURL(route)
+				}
 			}
 		}
 	}
