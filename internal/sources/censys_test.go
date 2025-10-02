@@ -107,8 +107,49 @@ func TestCensysMissingCredentials(t *testing.T) {
 	if err := Censys(context.Background(), "example.com", "", "", out); err == nil {
 		t.Fatal("expected error for missing credentials")
 	}
-	if len(out) != 0 {
-		t.Fatalf("unexpected output when credentials missing: %d", len(out))
+	select {
+	case got := <-out:
+		want := "meta: censys missing API credentials"
+		if got != want {
+			t.Fatalf("unexpected meta message: got %q want %q", got, want)
+		}
+	default:
+		t.Fatal("expected meta message when credentials missing")
+	}
+}
+
+func TestCensysHTTPErrorIncludesMeta(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	oldURL := censysBaseURL
+	oldClient := censysHTTPClient
+	censysBaseURL = srv.URL
+	censysHTTPClient = srv.Client()
+	defer func() {
+		censysBaseURL = oldURL
+		censysHTTPClient = oldClient
+	}()
+
+	out := make(chan string, 1)
+	err := Censys(context.Background(), "example.com", "id", "secret", out)
+	if err == nil {
+		t.Fatal("expected error for non-200 response")
+	}
+	if !strings.Contains(err.Error(), "unexpected status") {
+		t.Fatalf("unexpected error value: %v", err)
+	}
+
+	select {
+	case got := <-out:
+		want := "meta: censys unexpected HTTP status 429"
+		if got != want {
+			t.Fatalf("unexpected meta message: got %q want %q", got, want)
+		}
+	default:
+		t.Fatal("expected meta message for HTTP error")
 	}
 }
 
