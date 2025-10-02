@@ -31,12 +31,15 @@ func TestHTTPXCombinesAllLists(t *testing.T) {
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
+	originalWorkerCount := httpxWorkerCount
 	t.Cleanup(func() {
 		httpxBinFinder = originalBinFinder
 		httpxRunCmd = originalRunCmd
+		httpxWorkerCount = originalWorkerCount
 	})
 
 	httpxBinFinder = func() (string, error) { return "httpx", nil }
+	httpxWorkerCount = 1
 
 	var mu sync.Mutex
 	var gotArgs [][]string
@@ -93,12 +96,15 @@ func TestHTTPXSkipsMissingLists(t *testing.T) {
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
+	originalWorkerCount := httpxWorkerCount
 	t.Cleanup(func() {
 		httpxBinFinder = originalBinFinder
 		httpxRunCmd = originalRunCmd
+		httpxWorkerCount = originalWorkerCount
 	})
 
 	httpxBinFinder = func() (string, error) { return "httpx", nil }
+	httpxWorkerCount = 1
 
 	var mu sync.Mutex
 	var captured [][]string
@@ -151,12 +157,15 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
+	originalWorkerCount := httpxWorkerCount
 	t.Cleanup(func() {
 		httpxBinFinder = originalBinFinder
 		httpxRunCmd = originalRunCmd
+		httpxWorkerCount = originalWorkerCount
 	})
 
 	httpxBinFinder = func() (string, error) { return "httpx", nil }
+	httpxWorkerCount = 1
 
 	httpxRunCmd = func(ctx context.Context, name string, args []string, out chan<- string) error {
 		out <- "https://app.example.com [200] [Title]"
@@ -284,14 +293,17 @@ func TestHTTPXBatchesLargeInputs(t *testing.T) {
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
 	originalBatchSize := httpxBatchSize
+	originalWorkerCount := httpxWorkerCount
 	t.Cleanup(func() {
 		httpxBinFinder = originalBinFinder
 		httpxRunCmd = originalRunCmd
 		httpxBatchSize = originalBatchSize
+		httpxWorkerCount = originalWorkerCount
 	})
 
 	httpxBinFinder = func() (string, error) { return "httpx", nil }
 	httpxBatchSize = 2
+	httpxWorkerCount = 2
 
 	var mu sync.Mutex
 	var captured [][]string
@@ -353,12 +365,15 @@ func TestHTTPXSkipsLowPriorityRoutes(t *testing.T) {
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
+	originalWorkerCount := httpxWorkerCount
 	t.Cleanup(func() {
 		httpxBinFinder = originalBinFinder
 		httpxRunCmd = originalRunCmd
+		httpxWorkerCount = originalWorkerCount
 	})
 
 	httpxBinFinder = func() (string, error) { return "httpx", nil }
+	httpxWorkerCount = 1
 
 	var mu sync.Mutex
 	var inputs [][]string
