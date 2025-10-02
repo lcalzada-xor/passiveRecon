@@ -465,6 +465,82 @@ func TestRouteCategorizationActiveModeSkipsErrorStatus(t *testing.T) {
 	}
 }
 
+func TestRouteCategorizationDeduplicatesCategoryOutputs(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false)
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(2)
+	inputs := []string{
+		"https://app.example.com/static/app.js.map",
+		"https://app.example.com/static/app.js.map",
+		"https://app.example.com/static/manifest.json",
+		"https://app.example.com/static/manifest.json",
+		"https://app.example.com/static/swagger.json",
+		"https://app.example.com/static/swagger.json",
+		"https://app.example.com/static/module.wasm",
+		"https://app.example.com/static/module.wasm",
+		"https://app.example.com/static/vector.svg",
+		"https://app.example.com/static/vector.svg",
+		"https://app.example.com/robots.txt",
+		"https://app.example.com/robots.txt",
+		"https://app.example.com/sitemap.xml",
+		"https://app.example.com/sitemap.xml",
+		"https://app.example.com/backup.tar.gz?download=1",
+		"https://app.example.com/backup.tar.gz?download=1",
+	}
+	for _, line := range inputs {
+		sink.In() <- line
+	}
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	mapsLines := readLines(t, filepath.Join(dir, "routes", "maps", "maps.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/app.js.map"}, mapsLines); diff != "" {
+		t.Fatalf("unexpected maps.passive contents (-want +got):\n%s", diff)
+	}
+
+	jsonLines := readLines(t, filepath.Join(dir, "routes", "json", "json.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/manifest.json"}, jsonLines); diff != "" {
+		t.Fatalf("unexpected json.passive contents (-want +got):\n%s", diff)
+	}
+
+	apiLines := readLines(t, filepath.Join(dir, "routes", "api", "api.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/swagger.json"}, apiLines); diff != "" {
+		t.Fatalf("unexpected api.passive contents (-want +got):\n%s", diff)
+	}
+
+	wasmLines := readLines(t, filepath.Join(dir, "routes", "wasm", "wasm.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/module.wasm"}, wasmLines); diff != "" {
+		t.Fatalf("unexpected wasm.passive contents (-want +got):\n%s", diff)
+	}
+
+	svgLines := readLines(t, filepath.Join(dir, "routes", "svg", "svg.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/vector.svg"}, svgLines); diff != "" {
+		t.Fatalf("unexpected svg.passive contents (-want +got):\n%s", diff)
+	}
+
+	crawlLines := readLines(t, filepath.Join(dir, "routes", "crawl", "crawl.passive"))
+	wantCrawl := []string{
+		"https://app.example.com/robots.txt",
+		"https://app.example.com/sitemap.xml",
+	}
+	if diff := cmp.Diff(wantCrawl, crawlLines); diff != "" {
+		t.Fatalf("unexpected crawl.passive contents (-want +got):\n%s", diff)
+	}
+
+	metaLines := readLines(t, filepath.Join(dir, "routes", "meta", "meta.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/backup.tar.gz?download=1"}, metaLines); diff != "" {
+		t.Fatalf("unexpected meta.passive contents (-want +got):\n%s", diff)
+	}
+}
+
 func readLines(t *testing.T, path string) []string {
 	t.Helper()
 
