@@ -22,6 +22,7 @@ type Sink struct {
 	Domains            writerPair
 	Routes             writerPair
 	RoutesJS           writerPair
+	RoutesHTML         writerPair
 	Certs              writerPair
 	Meta               writerPair
 	wg                 sync.WaitGroup
@@ -31,6 +32,8 @@ type Sink struct {
 	seenDomainsActive  map[string]struct{}
 	seenRoutesPassive  map[string]struct{}
 	seenRoutesActive   map[string]struct{}
+	seenHTMLPassive    map[string]struct{}
+	seenHTMLActive     map[string]struct{}
 	seenCertsPassive   map[string]struct{}
 	procMu             sync.Mutex
 	processing         int
@@ -153,6 +156,10 @@ func NewSink(outdir string) (*Sink, error) {
 	if err != nil {
 		return nil, err
 	}
+	htmlActive, err := newWriter(filepath.Join("routes", "html"), "html.active")
+	if err != nil {
+		return nil, err
+	}
 	cPassive, err := newWriter("certs", "certs.passive")
 	if err != nil {
 		return nil, err
@@ -170,6 +177,7 @@ func NewSink(outdir string) (*Sink, error) {
 		Domains:            writerPair{passive: dPassive, active: dActive},
 		Routes:             writerPair{passive: rPassive, active: rActive},
 		RoutesJS:           writerPair{passive: jsPassive},
+		RoutesHTML:         writerPair{active: htmlActive},
 		Certs:              writerPair{passive: cPassive},
 		Meta:               writerPair{passive: mPassive, active: mActive},
 		lines:              make(chan string, 1024),
@@ -177,6 +185,8 @@ func NewSink(outdir string) (*Sink, error) {
 		seenDomainsActive:  make(map[string]struct{}),
 		seenRoutesPassive:  make(map[string]struct{}),
 		seenRoutesActive:   make(map[string]struct{}),
+		seenHTMLPassive:    make(map[string]struct{}),
+		seenHTMLActive:     make(map[string]struct{}),
 		seenCertsPassive:   make(map[string]struct{}),
 	}
 	s.cond = sync.NewCond(&s.procMu)
@@ -256,6 +266,27 @@ func (s *Sink) processLine(ln string) {
 		return
 	}
 
+	if strings.HasPrefix(l, "html:") {
+		html := strings.TrimSpace(strings.TrimPrefix(l, "html:"))
+		if html == "" {
+			return
+		}
+		seen := s.seenHTMLPassive
+		writer := s.RoutesHTML.passive
+		if isActive {
+			seen = s.seenHTMLActive
+			writer = s.RoutesHTML.active
+		}
+		if writer == nil {
+			return
+		}
+		if seen != nil && s.markSeen(seen, html) {
+			return
+		}
+		_ = writer.WriteURL(html)
+		return
+	}
+
 	if strings.Contains(l, "-->") || strings.Contains(l, " (") {
 		target := s.Meta.passive
 		if isActive {
@@ -271,15 +302,14 @@ func (s *Sink) processLine(ln string) {
 	}
 
 	// Clasificación simple: URLs/rutas si contiene esquema o '/'
-	if strings.Contains(l, "http://") || strings.Contains(l, "https://") || strings.Contains(l, "/") {
+	base := extractRouteBase(l)
+	if base != "" && (strings.Contains(base, "://") || strings.HasPrefix(base, "/") || strings.Contains(base, "/")) {
 		// When the line includes metadata (e.g. httpx status/title), keep a
 		// clean copy of the URL in routes.passive so users always get a
 		// canonical list of discovered routes.
 		if isActive {
-			if base := extractRouteBase(l); base != "" {
-				if !s.markSeen(s.seenRoutesPassive, base) {
-					_ = s.Routes.passive.WriteURL(base)
-				}
+			if !s.markSeen(s.seenRoutesPassive, base) {
+				_ = s.Routes.passive.WriteURL(base)
 			}
 		}
 
@@ -348,6 +378,12 @@ func (s *Sink) Close() error {
 	}
 	if s.RoutesJS.active != nil {
 		_ = s.RoutesJS.active.Close()
+	}
+	if s.RoutesHTML.passive != nil {
+		_ = s.RoutesHTML.passive.Close()
+	}
+	if s.RoutesHTML.active != nil {
+		_ = s.RoutesHTML.active.Close()
 	}
 	if s.Certs.passive != nil {
 		_ = s.Certs.passive.Close()

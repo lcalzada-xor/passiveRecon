@@ -50,11 +50,22 @@ func TestHTTPXCombinesAllLists(t *testing.T) {
 		cp := append([]string{}, args...)
 		gotArgs = append(gotArgs, cp)
 
-		if len(args) != 5 {
+		if len(args) != 6 {
 			t.Fatalf("unexpected arg count %d", len(args))
 		}
 
-		data, err := os.ReadFile(args[4])
+		inputIdx := -1
+		for i := 0; i < len(args)-1; i++ {
+			if args[i] == "-l" {
+				inputIdx = i + 1
+				break
+			}
+		}
+		if inputIdx == -1 {
+			t.Fatalf("httpx args missing -l input flag: %v", args)
+		}
+
+		data, err := os.ReadFile(args[inputIdx])
 		if err != nil {
 			t.Fatalf("read httpx input: %v", err)
 		}
@@ -111,7 +122,18 @@ func TestHTTPXSkipsMissingLists(t *testing.T) {
 	httpxRunCmd = func(ctx context.Context, name string, args []string, out chan<- string) error {
 		mu.Lock()
 		defer mu.Unlock()
-		data, err := os.ReadFile(args[4])
+		inputIdx := -1
+		for i := 0; i < len(args)-1; i++ {
+			if args[i] == "-l" {
+				inputIdx = i + 1
+				break
+			}
+		}
+		if inputIdx == -1 {
+			t.Fatalf("httpx args missing -l input flag: %v", args)
+		}
+
+		data, err := os.ReadFile(args[inputIdx])
 		if err != nil {
 			t.Fatalf("read httpx input: %v", err)
 		}
@@ -168,7 +190,7 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 	httpxWorkerCount = 1
 
 	httpxRunCmd = func(ctx context.Context, name string, args []string, out chan<- string) error {
-		out <- "https://app.example.com [200] [Title]"
+		out <- "https://app.example.com [200] [Title] [text/html; charset=utf-8]"
 		return nil
 	}
 
@@ -182,7 +204,14 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 		forwarded = append(forwarded, <-outCh)
 	}
 
-	wantForwarded := []string{"active: https://app.example.com [200] [Title]", "active: app.example.com [200] [Title]", "active: meta: [200]", "active: meta: [Title]"}
+	wantForwarded := []string{
+		"active: https://app.example.com [200] [Title] [text/html; charset=utf-8]",
+		"active: app.example.com [200] [Title] [text/html; charset=utf-8]",
+		"active: html: https://app.example.com",
+		"active: meta: [200]",
+		"active: meta: [Title]",
+		"active: meta: [text/html; charset=utf-8]",
+	}
 	if diff := cmp.Diff(wantForwarded, forwarded); diff != "" {
 		t.Fatalf("unexpected forwarded lines (-want +got):\n%s", diff)
 	}
@@ -214,7 +243,7 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 	}
 
 	routes := readLines(filepath.Join(outputDir, "routes", "routes.active"))
-	if diff := cmp.Diff([]string{"https://app.example.com [200] [Title]"}, routes); diff != "" {
+	if diff := cmp.Diff([]string{"https://app.example.com [200] [Title] [text/html; charset=utf-8]"}, routes); diff != "" {
 		t.Fatalf("unexpected routes.active contents (-want +got):\n%s", diff)
 	}
 
@@ -224,13 +253,18 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 	}
 
 	domains := readLines(filepath.Join(outputDir, "domains", "domains.active"))
-	if diff := cmp.Diff([]string{"app.example.com [200] [Title]"}, domains); diff != "" {
+	if diff := cmp.Diff([]string{"app.example.com [200] [Title] [text/html; charset=utf-8]"}, domains); diff != "" {
 		t.Fatalf("unexpected domains.active contents (-want +got):\n%s", diff)
 	}
 
 	meta := readLines(filepath.Join(outputDir, "meta.active"))
-	if diff := cmp.Diff([]string{"[200]", "[Title]"}, meta); diff != "" {
+	if diff := cmp.Diff([]string{"[200]", "[Title]", "[text/html; charset=utf-8]"}, meta); diff != "" {
 		t.Fatalf("unexpected meta.active contents (-want +got):\n%s", diff)
+	}
+
+	htmlRoutes := readLines(filepath.Join(outputDir, "routes", "html", "html.active"))
+	if diff := cmp.Diff([]string{"https://app.example.com"}, htmlRoutes); diff != "" {
+		t.Fatalf("unexpected html.active contents (-want +got):\n%s", diff)
 	}
 }
 
@@ -356,7 +390,18 @@ func TestHTTPXBatchesLargeInputs(t *testing.T) {
 	var mu sync.Mutex
 	var captured [][]string
 	httpxRunCmd = func(ctx context.Context, name string, args []string, out chan<- string) error {
-		data, err := os.ReadFile(args[4])
+		inputIdx := -1
+		for i := 0; i < len(args)-1; i++ {
+			if args[i] == "-l" {
+				inputIdx = i + 1
+				break
+			}
+		}
+		if inputIdx == -1 {
+			t.Fatalf("httpx args missing -l input flag: %v", args)
+		}
+
+		data, err := os.ReadFile(args[inputIdx])
 		if err != nil {
 			t.Fatalf("read httpx input: %v", err)
 		}
@@ -428,7 +473,18 @@ func TestHTTPXSkipsLowPriorityRoutes(t *testing.T) {
 	httpxRunCmd = func(ctx context.Context, name string, args []string, out chan<- string) error {
 		mu.Lock()
 		defer mu.Unlock()
-		data, err := os.ReadFile(args[4])
+		inputIdx := -1
+		for i := 0; i < len(args)-1; i++ {
+			if args[i] == "-l" {
+				inputIdx = i + 1
+				break
+			}
+		}
+		if inputIdx == -1 {
+			t.Fatalf("httpx args missing -l input flag: %v", args)
+		}
+
+		data, err := os.ReadFile(args[inputIdx])
 		if err != nil {
 			t.Fatalf("read httpx input: %v", err)
 		}

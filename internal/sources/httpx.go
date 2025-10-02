@@ -143,6 +143,7 @@ func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- st
 				err = httpxRunCmd(groupCtx, bin, []string{
 					"-sc",
 					"-title",
+					"-content-type",
 					"-silent",
 					"-l",
 					tmpPath,
@@ -229,6 +230,7 @@ func normalizeHTTPXLine(line string) []string {
 
 	metas := splitHTTPXMeta(metaPart)
 	statusCode, hasStatus := parseHTTPXStatusCode(metas)
+	hasHTMLContent := httpxHasHTMLContentType(metas)
 
 	var out []string
 
@@ -248,6 +250,10 @@ func normalizeHTTPXLine(line string) []string {
 			}
 			out = append(out, combinedDomain)
 		}
+	}
+
+	if urlPart != "" && hasHTMLContent {
+		out = append(out, "html: "+urlPart)
 	}
 
 	for _, meta := range metas {
@@ -390,6 +396,23 @@ func parseHTTPXStatusCode(metas []string) (int, bool) {
 	}
 
 	return code, true
+}
+
+func httpxHasHTMLContentType(metas []string) bool {
+	for _, meta := range metas {
+		trimmed := strings.TrimSpace(meta)
+		if trimmed == "" {
+			continue
+		}
+		normalized := strings.ToLower(strings.Trim(trimmed, "[]"))
+		if normalized == "" {
+			continue
+		}
+		if strings.Contains(normalized, "text/html") {
+			return true
+		}
+	}
+	return false
 }
 
 func extractHTTPXDomain(rawURL string) string {
