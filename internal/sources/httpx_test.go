@@ -282,6 +282,49 @@ func TestHTTPXSkipsUnresponsiveResults(t *testing.T) {
 	}
 }
 
+func TestHTTPXIncludesRedirectDomains(t *testing.T) {
+	inputDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(inputDir, "routes"), 0o755); err != nil {
+		t.Fatalf("mkdir routes: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(inputDir, "routes", "routes.passive"), []byte("https://redirect.example.com\n"), 0o644); err != nil {
+		t.Fatalf("write routes list: %v", err)
+	}
+
+	originalBinFinder := httpxBinFinder
+	originalRunCmd := httpxRunCmd
+	t.Cleanup(func() {
+		httpxBinFinder = originalBinFinder
+		httpxRunCmd = originalRunCmd
+	})
+
+	httpxBinFinder = func() (string, error) { return "httpx", nil }
+
+	httpxRunCmd = func(ctx context.Context, name string, args []string, out chan<- string) error {
+		out <- "https://redirect.example.com [301] [Moved Permanently]"
+		return nil
+	}
+
+	outCh := make(chan string, 10)
+	if err := HTTPX(context.Background(), []string{"routes/routes.passive"}, inputDir, outCh); err != nil {
+		t.Fatalf("HTTPX returned error: %v", err)
+	}
+
+	var forwarded []string
+	for len(outCh) > 0 {
+		forwarded = append(forwarded, <-outCh)
+	}
+
+	if diff := cmp.Diff([]string{
+		"active: https://redirect.example.com [301] [Moved Permanently]",
+		"active: redirect.example.com [301] [Moved Permanently]",
+		"active: meta: [301]",
+		"active: meta: [Moved Permanently]",
+	}, forwarded); diff != "" {
+		t.Fatalf("unexpected forwarded lines (-want +got):\n%s", diff)
+	}
+}
+
 func TestHTTPXBatchesLargeInputs(t *testing.T) {
 	inputDir := t.TempDir()
 	var builder strings.Builder

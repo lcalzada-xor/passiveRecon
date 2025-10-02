@@ -348,10 +348,12 @@ func shouldForwardHTTPXRoute(hasStatus bool, status int) bool {
 }
 
 func shouldEmitHTTPXDomain(hasStatus bool, status int) bool {
-	if !hasStatus {
-		return true
-	}
-	return status == 200 || status == 0
+	// Emit domains for any status so users can see redirects or erroring hosts
+	// discovered by httpx. This mirrors httpx's output and avoids hiding
+	// potentially interesting infrastructure such as 3xx redirectors.
+	// Even when httpx doesn't report a status we still want to keep the
+	// domain entry.
+	return true
 }
 
 func parseHTTPXStatusCode(metas []string) (int, bool) {
