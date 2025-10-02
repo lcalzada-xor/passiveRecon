@@ -82,6 +82,51 @@ func TestGenerateHandlesMissingFiles(t *testing.T) {
 	}
 }
 
+func TestBuildDomainStatsSkipsEmpty(t *testing.T) {
+	t.Parallel()
+
+	stats := buildDomainStats([]string{"example.com", " ", "", "sub.example.com"})
+	if stats.Total != 2 {
+		t.Fatalf("Total = %d, want 2", stats.Total)
+	}
+	if stats.Unique != 2 {
+		t.Fatalf("Unique = %d, want 2", stats.Unique)
+	}
+}
+
+func TestBuildCertStatsSkipsEmpty(t *testing.T) {
+	t.Parallel()
+
+	stats := buildCertStats([]string{"alt.example.com", "   ", ""})
+	if stats.Total != 1 {
+		t.Fatalf("Total = %d, want 1", stats.Total)
+	}
+	if stats.Unique != 1 {
+		t.Fatalf("Unique = %d, want 1", stats.Unique)
+	}
+}
+
+func TestBuildRouteStatsIgnoresInvalidLines(t *testing.T) {
+	t.Parallel()
+
+	routes := []string{
+		"http://app.example.com/login",
+		"   ",
+		"http://[::1", // invalid URL, should be skipped
+		"https://secure.example.com/dashboard 200 OK",
+	}
+	stats := buildRouteStats(routes)
+	if stats.Total != 2 {
+		t.Fatalf("Total = %d, want 2", stats.Total)
+	}
+	if got := int(stats.SecurePercentage + 0.5); got != 50 {
+		t.Fatalf("SecurePercentage ≈ %.2f, want 50", stats.SecurePercentage)
+	}
+	if stats.UniqueHosts != 2 {
+		t.Fatalf("UniqueHosts = %d, want 2", stats.UniqueHosts)
+	}
+}
+
 func writeFixture(t *testing.T, path, contents string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

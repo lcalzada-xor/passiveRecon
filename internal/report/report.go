@@ -180,7 +180,7 @@ func readLines(ctx context.Context, path string) ([]string, error) {
 }
 
 func buildDomainStats(domains []string) domainStats {
-	stats := domainStats{Total: len(domains)}
+	stats := domainStats{}
 	if len(domains) == 0 {
 		return stats
 	}
@@ -189,10 +189,12 @@ func buildDomainStats(domains []string) domainStats {
 	uniqueDomains := make(map[string]struct{})
 	uniqueRegistrable := make(map[string]struct{})
 	var totalLabels int
-	for _, d := range domains {
+	for _, raw := range domains {
+		d := strings.TrimSpace(raw)
 		if d == "" {
 			continue
 		}
+		stats.Total++
 		uniqueDomains[strings.ToLower(d)] = struct{}{}
 		registrable := registrableDomain(d)
 		uniqueRegistrable[registrable] = struct{}{}
@@ -213,17 +215,19 @@ func buildDomainStats(domains []string) domainStats {
 }
 
 func buildCertStats(certs []string) certStats {
-	stats := certStats{Total: len(certs)}
+	stats := certStats{}
 	if len(certs) == 0 {
 		return stats
 	}
 	registrableCounts := make(map[string]int)
 	uniqueCerts := make(map[string]struct{})
 	uniqueRegistrable := make(map[string]struct{})
-	for _, c := range certs {
+	for _, raw := range certs {
+		c := strings.TrimSpace(raw)
 		if c == "" {
 			continue
 		}
+		stats.Total++
 		uniqueCerts[strings.ToLower(c)] = struct{}{}
 		registrable := registrableDomain(c)
 		uniqueRegistrable[registrable] = struct{}{}
@@ -236,7 +240,7 @@ func buildCertStats(certs []string) certStats {
 }
 
 func buildRouteStats(routes []string) routeStats {
-	stats := routeStats{Total: len(routes)}
+	stats := routeStats{}
 	if len(routes) == 0 {
 		return stats
 	}
@@ -260,6 +264,7 @@ func buildRouteStats(routes []string) routeStats {
 		if err != nil {
 			continue
 		}
+		stats.Total++
 		host := strings.TrimSpace(u.Host)
 		if host == "" {
 			host = "(sin host)"
