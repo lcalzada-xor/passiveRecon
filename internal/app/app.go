@@ -25,8 +25,8 @@ type sink interface {
 }
 
 var (
-	sinkFactory = func(outdir string) (sink, error) {
-		return pipeline.NewSink(outdir)
+	sinkFactory = func(outdir string, active bool) (sink, error) {
+		return pipeline.NewSink(outdir, active)
 	}
 	sourceSubfinder   = sources.Subfinder
 	sourceAssetfinder = sources.Assetfinder
@@ -47,7 +47,7 @@ func Run(cfg *config.Config) error {
 	cfg.OutDir = outDir
 
 	// preparar sink (writers)
-	sink, err := sinkFactory(cfg.OutDir)
+	sink, err := sinkFactory(cfg.OutDir, cfg.Active)
 	if err != nil {
 		return err
 	}
