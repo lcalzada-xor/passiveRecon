@@ -8,8 +8,18 @@ import (
 	"net/http"
 	"strings"
 
+	"passive-rec/internal/certs"
 	"passive-rec/internal/logx"
 )
+
+type crtshEntry struct {
+	CommonName   string `json:"common_name"`
+	NameValue    string `json:"name_value"`
+	IssuerName   string `json:"issuer_name"`
+	NotBefore    string `json:"not_before"`
+	NotAfter     string `json:"not_after"`
+	SerialNumber string `json:"serial_number"`
+}
 
 func CRTSH(ctx context.Context, domain string, out chan<- string) error {
 	logx.Debugf("crtsh query %s", domain)
@@ -35,20 +45,37 @@ func CRTSH(ctx context.Context, domain string, out chan<- string) error {
 	if err != nil {
 		return err
 	}
-	var arr []map[string]any
+	var arr []crtshEntry
 	if err := json.Unmarshal(body, &arr); err != nil {
 		logx.Errorf("crtsh json: %v", err)
 		return err
 	}
-	for _, o := range arr {
-		if v, ok := o["name_value"].(string); ok {
-			for _, p := range strings.Split(v, "\n") {
-				p = strings.TrimSpace(p)
-				if p != "" {
-					out <- "cert: " + p
-				}
-			}
+	seen := make(map[string]struct{})
+	for _, entry := range arr {
+		record := certs.Record{
+			Source:       "crt.sh",
+			CommonName:   entry.CommonName,
+			DNSNames:     strings.Split(entry.NameValue, "\n"),
+			Issuer:       entry.IssuerName,
+			NotBefore:    entry.NotBefore,
+			NotAfter:     entry.NotAfter,
+			SerialNumber: entry.SerialNumber,
 		}
+		record.Normalize()
+		key := record.Key()
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		encoded, err := record.Marshal()
+		if err != nil {
+			continue
+		}
+		out <- "cert: " + encoded
 	}
 	return nil
 }

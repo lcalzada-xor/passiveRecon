@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"passive-rec/internal/certs"
 	"passive-rec/internal/out"
 )
 
@@ -28,7 +29,6 @@ type Sink struct {
 	seenRoutesPassive  map[string]struct{}
 	seenRoutesActive   map[string]struct{}
 	seenCertsPassive   map[string]struct{}
-	seenCertsActive    map[string]struct{}
 	procMu             sync.Mutex
 	processing         int
 	cond               *sync.Cond
@@ -100,10 +100,6 @@ func NewSink(outdir string) (*Sink, error) {
 	if err != nil {
 		return nil, err
 	}
-	cActive, err := newWriter("certs", "certs.active")
-	if err != nil {
-		return nil, err
-	}
 	mPassive, err := newWriter("", "meta.passive")
 	if err != nil {
 		return nil, err
@@ -116,7 +112,7 @@ func NewSink(outdir string) (*Sink, error) {
 	s := &Sink{
 		Domains:            writerPair{passive: dPassive, active: dActive},
 		Routes:             writerPair{passive: rPassive, active: rActive},
-		Certs:              writerPair{passive: cPassive, active: cActive},
+		Certs:              writerPair{passive: cPassive},
 		Meta:               writerPair{passive: mPassive, active: mActive},
 		lines:              make(chan string, 1024),
 		seenDomainsPassive: make(map[string]struct{}),
@@ -124,7 +120,6 @@ func NewSink(outdir string) (*Sink, error) {
 		seenRoutesPassive:  make(map[string]struct{}),
 		seenRoutesActive:   make(map[string]struct{}),
 		seenCertsPassive:   make(map[string]struct{}),
-		seenCertsActive:    make(map[string]struct{}),
 	}
 	s.cond = sync.NewCond(&s.procMu)
 	return s, nil
@@ -199,7 +194,7 @@ func (s *Sink) processLine(ln string) {
 	}
 
 	if strings.HasPrefix(l, "cert:") {
-		s.writeCertLine(strings.TrimSpace(l[len("cert:"):]), isActive)
+		s.writeCertLine(strings.TrimSpace(l[len("cert:"):]))
 		return
 	}
 
@@ -231,7 +226,7 @@ func (s *Sink) processLine(ln string) {
 
 	// crt.sh name_value puede venir con commas/nuevas líneas ya partidos aguas arriba.
 	if strings.Contains(l, ",") || strings.Contains(l, "\n") {
-		s.writeCertLine(l, isActive)
+		s.writeCertLine(l)
 		return
 	}
 
@@ -264,14 +259,30 @@ func (s *Sink) Flush() {
 func (s *Sink) Close() error {
 	close(s.lines)
 	s.wg.Wait()
-	_ = s.Domains.passive.Close()
-	_ = s.Domains.active.Close()
-	_ = s.Routes.passive.Close()
-	_ = s.Routes.active.Close()
-	_ = s.Certs.passive.Close()
-	_ = s.Certs.active.Close()
-	_ = s.Meta.passive.Close()
-	_ = s.Meta.active.Close()
+	if s.Domains.passive != nil {
+		_ = s.Domains.passive.Close()
+	}
+	if s.Domains.active != nil {
+		_ = s.Domains.active.Close()
+	}
+	if s.Routes.passive != nil {
+		_ = s.Routes.passive.Close()
+	}
+	if s.Routes.active != nil {
+		_ = s.Routes.active.Close()
+	}
+	if s.Certs.passive != nil {
+		_ = s.Certs.passive.Close()
+	}
+	if s.Certs.active != nil {
+		_ = s.Certs.active.Close()
+	}
+	if s.Meta.passive != nil {
+		_ = s.Meta.passive.Close()
+	}
+	if s.Meta.active != nil {
+		_ = s.Meta.active.Close()
+	}
 	return nil
 }
 
@@ -288,34 +299,32 @@ func (s *Sink) markSeen(seen map[string]struct{}, key string) bool {
 	return false
 }
 
-func (s *Sink) writeCertLine(line string, isActive bool) {
+func (s *Sink) writeCertLine(line string) {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return
 	}
 
-	parts := []string{line}
-	if strings.ContainsAny(line, ",\n") {
-		parts = strings.FieldsFunc(line, func(r rune) bool { return r == ',' || r == '\n' })
+	record, err := certs.Parse(line)
+	if err != nil {
+		return
 	}
 
-	seen := s.seenCertsPassive
-	writer := s.Certs.passive
-	if isActive {
-		seen = s.seenCertsActive
-		writer = s.Certs.active
+	serialized, err := record.Marshal()
+	if err != nil {
+		return
 	}
 
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		key := strings.ToLower(p)
-		if s.markSeen(seen, key) {
-			continue
-		}
-		_ = writer.WriteRaw(p)
+	key := record.Key()
+	if key == "" {
+		key = strings.ToLower(serialized)
+	}
+	if s.markSeen(s.seenCertsPassive, key) {
+		return
+	}
+
+	if s.Certs.passive != nil {
+		_ = s.Certs.passive.WriteRaw(serialized)
 	}
 }
 

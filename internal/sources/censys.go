@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 
+	"passive-rec/internal/certs"
 	"passive-rec/internal/logx"
 )
 
@@ -20,12 +21,27 @@ var (
 type censysResponse struct {
 	Result struct {
 		Hits []struct {
-			Name   string `json:"name"`
-			Parsed struct {
+			Name              string `json:"name"`
+			FingerprintSHA256 string `json:"fingerprint_sha256"`
+			FingerprintSHA1   string `json:"fingerprint_sha1"`
+			FingerprintMD5    string `json:"fingerprint_md5"`
+			Parsed            struct {
 				Names   []string `json:"names"`
 				Subject struct {
 					CommonName string `json:"common_name"`
+					DN         string `json:"dn"`
 				} `json:"subject"`
+				Issuer struct {
+					CommonName string `json:"common_name"`
+					DN         string `json:"dn"`
+				} `json:"issuer"`
+				SubjectDN string `json:"subject_dn"`
+				IssuerDN  string `json:"issuer_dn"`
+				Validity  struct {
+					Start string `json:"start"`
+					End   string `json:"end"`
+				} `json:"validity"`
+				SerialNumber string `json:"serial_number"`
 			} `json:"parsed"`
 		} `json:"hits"`
 		Links struct {
@@ -49,18 +65,6 @@ func Censys(ctx context.Context, domain, apiID, apiSecret string, out chan<- str
 	values.Set("q", query)
 
 	seen := map[string]struct{}{}
-	send := func(value string) {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return
-		}
-		key := strings.ToLower(value)
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		out <- "cert: " + key
-	}
 
 	baseURL, err := url.Parse(censysBaseURL)
 	if err != nil {
@@ -101,15 +105,51 @@ func Censys(ctx context.Context, domain, apiID, apiSecret string, out chan<- str
 		resp.Body.Close()
 
 		for _, hit := range decoded.Result.Hits {
-			if hit.Name != "" {
-				send(hit.Name)
+			record := certs.Record{Source: "censys"}
+			record.CommonName = hit.Parsed.Subject.CommonName
+			if record.CommonName == "" {
+				record.CommonName = hit.Name
 			}
-			if cn := hit.Parsed.Subject.CommonName; cn != "" {
-				send(cn)
+			record.DNSNames = append(record.DNSNames, hit.Name)
+			record.DNSNames = append(record.DNSNames, hit.Parsed.Names...)
+			subjectDN := strings.TrimSpace(hit.Parsed.SubjectDN)
+			if subjectDN == "" {
+				subjectDN = hit.Parsed.Subject.DN
 			}
-			for _, name := range hit.Parsed.Names {
-				send(name)
+			issuerDN := strings.TrimSpace(hit.Parsed.IssuerDN)
+			if issuerDN == "" {
+				issuerDN = hit.Parsed.Issuer.DN
 			}
+			if subjectDN != "" {
+				record.Subject = subjectDN
+			}
+			if issuerDN != "" {
+				record.Issuer = issuerDN
+			} else if hit.Parsed.Issuer.CommonName != "" {
+				record.Issuer = hit.Parsed.Issuer.CommonName
+			}
+			record.NotBefore = hit.Parsed.Validity.Start
+			record.NotAfter = hit.Parsed.Validity.End
+			record.SerialNumber = hit.Parsed.SerialNumber
+			record.FingerprintSHA256 = hit.FingerprintSHA256
+			record.FingerprintSHA1 = hit.FingerprintSHA1
+			record.FingerprintMD5 = hit.FingerprintMD5
+			record.Normalize()
+
+			key := record.Key()
+			if key == "" {
+				continue
+			}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+
+			encoded, err := record.Marshal()
+			if err != nil {
+				continue
+			}
+			out <- "cert: " + encoded
 		}
 
 		next := strings.TrimSpace(decoded.Result.Links.Next)

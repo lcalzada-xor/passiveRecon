@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"passive-rec/internal/certs"
 	"passive-rec/internal/config"
 )
 
@@ -25,11 +26,33 @@ func TestGenerateCreatesHTMLReport(t *testing.T) {
 		"https://app.example.com/dashboard",
 		"https://static.example.com/assets/img/logo.png",
 	}, "\n"))
-	writeFixture(t, filepath.Join(dir, "certs", "certs.passive"), strings.Join([]string{
-		"alt1.example.com",
-		"alt2.example.com",
-		"service.test.com",
-	}, "\n"))
+	certOne, err := (certs.Record{
+		Source:     "crt.sh",
+		CommonName: "alt1.example.com",
+		DNSNames:   []string{"alt1.example.com", "alt2.example.com"},
+		Issuer:     "Example CA",
+	}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal certOne: %v", err)
+	}
+	certTwo, err := (certs.Record{
+		Source:     "censys",
+		CommonName: "service.test.com",
+		DNSNames:   []string{"service.test.com"},
+		Issuer:     "Example CA",
+	}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal certTwo: %v", err)
+	}
+	certThree, err := (certs.Record{
+		Source:     "crt.sh",
+		CommonName: "portal.example.com",
+		Issuer:     "Example CA",
+	}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal certThree: %v", err)
+	}
+	writeFixture(t, filepath.Join(dir, "certs", "certs.passive"), strings.Join([]string{certOne, certTwo, certThree}, "\n"))
 	writeFixture(t, filepath.Join(dir, "meta.passive"), strings.Join([]string{
 		"subfinder: ok",
 		"httpx: skipped",
@@ -97,12 +120,19 @@ func TestBuildDomainStatsSkipsEmpty(t *testing.T) {
 func TestBuildCertStatsSkipsEmpty(t *testing.T) {
 	t.Parallel()
 
-	stats := buildCertStats([]string{"alt.example.com", "   ", ""})
+	valid, err := (certs.Record{CommonName: "alt.example.com", DNSNames: []string{"sub.example.com"}}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal record: %v", err)
+	}
+	stats := buildCertStats([]string{valid, "   ", ""})
 	if stats.Total != 1 {
 		t.Fatalf("Total = %d, want 1", stats.Total)
 	}
 	if stats.Unique != 1 {
 		t.Fatalf("Unique = %d, want 1", stats.Unique)
+	}
+	if stats.UniqueRegistrable != 1 {
+		t.Fatalf("UniqueRegistrable = %d, want 1", stats.UniqueRegistrable)
 	}
 }
 

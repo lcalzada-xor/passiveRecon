@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -8,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+
+	"passive-rec/internal/certs"
 )
 
 func TestSinkClassification(t *testing.T) {
@@ -21,6 +24,31 @@ func TestSinkClassification(t *testing.T) {
 
 	sink.Start(1)
 
+	certOne, err := (certs.Record{
+		Source:       "test",
+		CommonName:   "direct-cert.example.com",
+		DNSNames:     []string{"alt1.example.com", "alt2.example.com"},
+		Issuer:       "Example CA",
+		NotBefore:    "2024-01-01T00:00:00Z",
+		NotAfter:     "2025-01-01T00:00:00Z",
+		SerialNumber: "01",
+	}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal certOne: %v", err)
+	}
+	certTwo, err := (certs.Record{
+		Source:       "test",
+		CommonName:   "alt3.example.com",
+		DNSNames:     []string{"alt3.example.com"},
+		Issuer:       "Example CA",
+		NotBefore:    "2023-06-01T00:00:00Z",
+		NotAfter:     "2024-06-01T00:00:00Z",
+		SerialNumber: "02",
+	}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal certTwo: %v", err)
+	}
+
 	inputs := []string{
 		"  example.com  ",
 		"https://app.example.com/login",
@@ -29,9 +57,8 @@ func TestSinkClassification(t *testing.T) {
 		"sub.example.com/path",
 		"www.example.com",
 		"meta: run started",
-		"alt1.example.com,alt2.example.com",
-		"alt2.example.com\nalt3.example.com",
-		"cert: direct-cert.example.com",
+		"cert: " + certOne,
+		"cert: " + certTwo,
 		"   ",
 	}
 
@@ -67,14 +94,45 @@ func TestSinkClassification(t *testing.T) {
 		t.Fatalf("expected empty routes.active, got %v", activeRoutes)
 	}
 
-	certs := readLines(t, filepath.Join(dir, "certs", "certs.passive"))
-	wantCerts := []string{"alt1.example.com", "alt2.example.com", "alt3.example.com", "direct-cert.example.com"}
-	if diff := cmp.Diff(wantCerts, certs); diff != "" {
-		t.Fatalf("unexpected certs (-want +got):\n%s", diff)
+	certLines := readLines(t, filepath.Join(dir, "certs", "certs.passive"))
+	if len(certLines) != 2 {
+		t.Fatalf("expected two certificate records, got %d", len(certLines))
+	}
+	var gotCerts []certs.Record
+	for _, line := range certLines {
+		record, err := certs.Parse(line)
+		if err != nil {
+			t.Fatalf("parse certificate line: %v", err)
+		}
+		gotCerts = append(gotCerts, record)
 	}
 
-	if activeCerts := readLines(t, filepath.Join(dir, "certs", "certs.active")); activeCerts != nil {
-		t.Fatalf("expected empty certs.active, got %v", activeCerts)
+	wantRecords := []certs.Record{{
+		Source:       "test",
+		CommonName:   "alt3.example.com",
+		DNSNames:     []string{"alt3.example.com"},
+		Issuer:       "Example CA",
+		NotBefore:    "2023-06-01T00:00:00Z",
+		NotAfter:     "2024-06-01T00:00:00Z",
+		SerialNumber: "02",
+	}, {
+		Source:       "test",
+		CommonName:   "direct-cert.example.com",
+		DNSNames:     []string{"alt1.example.com", "alt2.example.com"},
+		Issuer:       "Example CA",
+		NotBefore:    "2024-01-01T00:00:00Z",
+		NotAfter:     "2025-01-01T00:00:00Z",
+		SerialNumber: "01",
+	}}
+
+	sort.Slice(gotCerts, func(i, j int) bool { return gotCerts[i].CommonName < gotCerts[j].CommonName })
+	sort.Slice(wantRecords, func(i, j int) bool { return wantRecords[i].CommonName < wantRecords[j].CommonName })
+	if diff := cmp.Diff(wantRecords, gotCerts); diff != "" {
+		t.Fatalf("unexpected certificate records (-want +got):\n%s", diff)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "certs", "certs.active")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected certs.active to be absent, got err=%v", err)
 	}
 
 	meta := readLines(t, filepath.Join(dir, "meta.passive"))
