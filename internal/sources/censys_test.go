@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"passive-rec/internal/certs"
 )
 
 func TestCensysPagination(t *testing.T) {
@@ -74,21 +76,29 @@ func TestCensysPagination(t *testing.T) {
 		t.Fatalf("censys returned error: %v", err)
 	}
 
-	results := make(map[string]bool)
+	var names []string
 	for len(out) > 0 {
 		raw := <-out
-		value := strings.TrimSpace(strings.TrimPrefix(raw, "cert:"))
-		results[value] = true
+		record, err := certs.Parse(strings.TrimSpace(strings.TrimPrefix(raw, "cert:")))
+		if err != nil {
+			t.Fatalf("parse record: %v", err)
+		}
+		if record.Source != "censys" {
+			t.Fatalf("unexpected source %q", record.Source)
+		}
+		names = append(names, record.AllNames()...)
 	}
 
-	expected := []string{"example.com", "www.example.com", "alt.example.com", "legacy.example.com"}
-	for _, name := range expected {
-		if !results[name] {
-			t.Fatalf("missing result %s", name)
-		}
+	want := []string{"alt.example.com", "example.com", "legacy.example.com", "www.example.com"}
+	sort.Strings(names)
+	sort.Strings(want)
+	if len(names) != len(want) {
+		t.Fatalf("unexpected name count %d want %d", len(names), len(want))
 	}
-	if len(results) != len(expected) {
-		t.Fatalf("unexpected number of results: %d", len(results))
+	for i := range want {
+		if names[i] != want[i] {
+			t.Fatalf("unexpected names set: got %#v want %#v", names, want)
+		}
 	}
 }
 
@@ -136,22 +146,30 @@ func TestCensysDeduplicatesCaseInsensitive(t *testing.T) {
 		t.Fatalf("censys returned error: %v", err)
 	}
 
-	var results []string
+	var records []certs.Record
 	for len(out) > 0 {
 		raw := <-out
-		results = append(results, strings.TrimSpace(strings.TrimPrefix(raw, "cert:")))
+		record, err := certs.Parse(strings.TrimSpace(strings.TrimPrefix(raw, "cert:")))
+		if err != nil {
+			t.Fatalf("parse record: %v", err)
+		}
+		records = append(records, record)
 	}
 
-	if len(results) != 2 {
-		t.Fatalf("expected two unique results, got %d: %#v", len(results), results)
+	if len(records) != 1 {
+		t.Fatalf("expected a single record, got %d", len(records))
 	}
 
-	seen := map[string]bool{}
-	for _, r := range results {
-		seen[r] = true
+	names := records[0].AllNames()
+	sort.Strings(names)
+	want := []string{"example.com", "www.example.com"}
+	if len(names) != len(want) {
+		t.Fatalf("unexpected names count %d want %d", len(names), len(want))
 	}
-	if !seen["example.com"] || !seen["www.example.com"] {
-		t.Fatalf("expected example.com and www.example.com, got %#v", results)
+	for i := range want {
+		if names[i] != want[i] {
+			t.Fatalf("unexpected names: got %#v want %#v", names, want)
+		}
 	}
 }
 
@@ -198,20 +216,27 @@ func TestCensysRelativeNextLink(t *testing.T) {
 		t.Fatalf("censys returned error: %v", err)
 	}
 
-	var results []string
+	var records []certs.Record
 	for len(out) > 0 {
 		raw := <-out
-		results = append(results, strings.TrimSpace(strings.TrimPrefix(raw, "cert:")))
+		record, err := certs.Parse(strings.TrimSpace(strings.TrimPrefix(raw, "cert:")))
+		if err != nil {
+			t.Fatalf("parse record: %v", err)
+		}
+		records = append(records, record)
 	}
 
-	sort.Strings(results)
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].CommonName < records[j].CommonName
+	})
 	want := []string{"page1.example.com", "page2.example.com"}
-	if len(results) != len(want) {
-		t.Fatalf("unexpected result length %d (want %d)", len(results), len(want))
+	if len(records) != len(want) {
+		t.Fatalf("unexpected result length %d (want %d)", len(records), len(want))
 	}
 	for i, v := range want {
-		if results[i] != v {
-			t.Fatalf("unexpected result set: got %#v want %#v", results, want)
+		names := records[i].AllNames()
+		if len(names) != 1 || names[0] != v {
+			t.Fatalf("unexpected record %d: names=%#v want %s", i, names, v)
 		}
 	}
 }

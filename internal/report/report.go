@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"passive-rec/internal/certs"
 	"passive-rec/internal/config"
 )
 
@@ -214,24 +215,33 @@ func buildDomainStats(domains []string) domainStats {
 	return stats
 }
 
-func buildCertStats(certs []string) certStats {
+func buildCertStats(certsLines []string) certStats {
 	stats := certStats{}
-	if len(certs) == 0 {
+	if len(certsLines) == 0 {
 		return stats
 	}
 	registrableCounts := make(map[string]int)
 	uniqueCerts := make(map[string]struct{})
 	uniqueRegistrable := make(map[string]struct{})
-	for _, raw := range certs {
-		c := strings.TrimSpace(raw)
-		if c == "" {
+	for _, raw := range certsLines {
+		record, err := certs.Parse(raw)
+		if err != nil {
 			continue
 		}
 		stats.Total++
-		uniqueCerts[strings.ToLower(c)] = struct{}{}
-		registrable := registrableDomain(c)
-		uniqueRegistrable[registrable] = struct{}{}
-		registrableCounts[registrable]++
+		key := record.Key()
+		if key == "" {
+			key = strings.TrimSpace(strings.ToLower(raw))
+		}
+		uniqueCerts[key] = struct{}{}
+		for _, name := range record.AllNames() {
+			registrable := registrableDomain(name)
+			if registrable == "" {
+				continue
+			}
+			uniqueRegistrable[registrable] = struct{}{}
+			registrableCounts[registrable]++
+		}
 	}
 	stats.TopRegistrable = topItems(registrableCounts, topN)
 	stats.Unique = len(uniqueCerts)
