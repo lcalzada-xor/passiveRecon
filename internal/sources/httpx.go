@@ -252,7 +252,7 @@ func normalizeHTTPXLine(line string) []string {
 		}
 	}
 
-	if urlPart != "" && hasHTMLContent {
+	if urlPart != "" && shouldEmitHTTPXHTML(hasHTMLContent, hasStatus, statusCode) {
 		out = append(out, "html: "+urlPart)
 	}
 
@@ -396,6 +396,16 @@ func parseHTTPXStatusCode(metas []string) (int, bool) {
 	}
 
 	return code, true
+}
+
+func shouldEmitHTTPXHTML(hasHTML bool, hasStatus bool, status int) bool {
+	if !hasHTML {
+		return false
+	}
+	if !hasStatus {
+		return true
+	}
+	return status >= 200 && status < 400
 }
 
 func httpxHasHTMLContentType(metas []string) bool {
