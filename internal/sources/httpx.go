@@ -21,6 +21,16 @@ var (
 	httpxBinFinder = runner.HTTPXBin
 	httpxRunCmd    = runner.RunCommand
 	httpxBatchSize = 5000
+
+	lowPriorityHTTPXExtensions = map[string]struct{}{
+		".ico": {},
+		".cur": {},
+		".bmp": {},
+		".gif": {},
+		".pbm": {},
+		".pgm": {},
+		".pnm": {},
+	}
 )
 
 func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- string) error {
@@ -57,6 +67,9 @@ func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- st
 				continue
 			}
 			if strings.HasPrefix(line, "#") {
+				continue
+			}
+			if shouldSkipHTTPXInput(line) {
 				continue
 			}
 			if _, ok := seen[line]; ok {
@@ -198,6 +211,77 @@ func normalizeHTTPXLine(line string) []string {
 	}
 
 	return out
+}
+
+func shouldSkipHTTPXInput(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return false
+	}
+
+	path := extractHTTPXPath(trimmed)
+	if path == "" {
+		return false
+	}
+
+	path = strings.ToLower(path)
+	if idx := strings.IndexAny(path, "?#"); idx != -1 {
+		path = path[:idx]
+	}
+
+	base := filepath.Base(path)
+	if base == "" || base == "/" || base == "." {
+		return false
+	}
+
+	if base == "thumbs.db" {
+		return true
+	}
+
+	ext := filepath.Ext(base)
+	if ext != "" {
+		if _, ok := lowPriorityHTTPXExtensions[ext]; ok {
+			return true
+		}
+	}
+
+	name := strings.TrimSuffix(base, ext)
+	if strings.Contains(name, "thumb") {
+		switch ext {
+		case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp":
+			return true
+		}
+	}
+
+	if strings.Contains(name, "sprite") {
+		switch ext {
+		case ".png", ".svg", ".jpg", ".jpeg", ".webp":
+			return true
+		}
+	}
+
+	return false
+}
+
+func extractHTTPXPath(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+
+	if strings.Contains(trimmed, "://") {
+		if parsed, err := url.Parse(trimmed); err == nil {
+			if parsed.Path != "" {
+				return parsed.Path
+			}
+		}
+	}
+
+	if idx := strings.Index(trimmed, "/"); idx != -1 {
+		return trimmed[idx:]
+	}
+
+	return ""
 }
 
 func shouldForwardHTTPXRoute(hasStatus bool, status int) bool {

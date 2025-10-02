@@ -316,3 +316,57 @@ func TestHTTPXBatchesLargeInputs(t *testing.T) {
 		t.Fatalf("unexpected combined batch contents (-want +got):\n%s", diff)
 	}
 }
+
+func TestHTTPXSkipsLowPriorityRoutes(t *testing.T) {
+	tmp := t.TempDir()
+	contents := strings.Join([]string{
+		"https://app.example.com/login",
+		"https://app.example.com/favicon.ico",
+		"https://app.example.com/favicon.ico?version=2",
+		"https://app.example.com/images/logo_thumb.jpg",
+		"https://app.example.com/static/sprite.png",
+		"https://app.example.com/static/sprite.svg#section",
+		"https://app.example.com/img/banner.GIF",
+		"https://app.example.com/files/THUMBS.DB",
+		"https://app.example.com/assets/raw.pgm",
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(tmp, "routes.passive"), []byte(contents), 0644); err != nil {
+		t.Fatalf("write routes list: %v", err)
+	}
+
+	originalBinFinder := httpxBinFinder
+	originalRunCmd := httpxRunCmd
+	t.Cleanup(func() {
+		httpxBinFinder = originalBinFinder
+		httpxRunCmd = originalRunCmd
+	})
+
+	httpxBinFinder = func() (string, error) { return "httpx", nil }
+
+	var mu sync.Mutex
+	var inputs [][]string
+	httpxRunCmd = func(ctx context.Context, name string, args []string, out chan<- string) error {
+		mu.Lock()
+		defer mu.Unlock()
+		data, err := os.ReadFile(args[4])
+		if err != nil {
+			t.Fatalf("read httpx input: %v", err)
+		}
+		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+		inputs = append(inputs, lines)
+		return nil
+	}
+
+	if err := HTTPX(context.Background(), []string{"routes.passive"}, tmp, make(chan string, 10)); err != nil {
+		t.Fatalf("HTTPX returned error: %v", err)
+	}
+
+	if len(inputs) != 1 {
+		t.Fatalf("expected to capture a single input slice, got %d", len(inputs))
+	}
+
+	want := []string{"https://app.example.com/login"}
+	if diff := cmp.Diff(want, inputs[0]); diff != "" {
+		t.Fatalf("unexpected httpx input (-want +got):\n%s", diff)
+	}
+}
