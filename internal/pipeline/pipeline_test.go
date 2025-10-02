@@ -288,7 +288,7 @@ func TestJSLinesAreWrittenToFile(t *testing.T) {
 
 	activePath := filepath.Join(dir, "routes", "js", "js.active")
 	activeLines := readLines(t, activePath)
-	if diff := cmp.Diff([]string{"https://static.example.com/app.js"}, activeLines); diff != "" {
+	if diff := cmp.Diff([]string{"js: https://static.example.com/app.js"}, activeLines); diff != "" {
 		t.Fatalf("unexpected js.active contents (-want +got):\n%s", diff)
 	}
 }
@@ -311,7 +311,7 @@ func TestHTMLLinesAreWrittenToActiveFile(t *testing.T) {
 
 	htmlPath := filepath.Join(dir, "routes", "html", "html.active")
 	htmlLines := readLines(t, htmlPath)
-	if diff := cmp.Diff([]string{"https://app.example.com"}, htmlLines); diff != "" {
+	if diff := cmp.Diff([]string{"html: https://app.example.com"}, htmlLines); diff != "" {
 		t.Fatalf("unexpected html.active contents (-want +got):\n%s", diff)
 	}
 }
@@ -421,17 +421,17 @@ func TestRouteCategorizationActiveMode(t *testing.T) {
 
 	mapsPath := filepath.Join(dir, "routes", "maps", "maps.active")
 	mapsLines := readLines(t, mapsPath)
-	if diff := cmp.Diff([]string{"https://app.example.com/static/app.js.map"}, mapsLines); diff != "" {
+	if diff := cmp.Diff([]string{"maps: https://app.example.com/static/app.js.map"}, mapsLines); diff != "" {
 		t.Fatalf("unexpected maps.active contents (-want +got):\n%s", diff)
 	}
 
 	jsonLines := readLines(t, filepath.Join(dir, "routes", "json", "json.active"))
-	if diff := cmp.Diff([]string{"https://app.example.com/static/manifest.json"}, jsonLines); diff != "" {
+	if diff := cmp.Diff([]string{"json: https://app.example.com/static/manifest.json"}, jsonLines); diff != "" {
 		t.Fatalf("unexpected json.active contents (-want +got):\n%s", diff)
 	}
 
 	apiLines := readLines(t, filepath.Join(dir, "routes", "api", "api.active"))
-	if diff := cmp.Diff([]string{"https://app.example.com/static/swagger.json"}, apiLines); diff != "" {
+	if diff := cmp.Diff([]string{"api: https://app.example.com/static/swagger.json"}, apiLines); diff != "" {
 		t.Fatalf("unexpected api.active contents (-want +got):\n%s", diff)
 	}
 
