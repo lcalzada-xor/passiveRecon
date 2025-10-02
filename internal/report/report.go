@@ -26,9 +26,9 @@ type SinkFiles struct {
 // DefaultSinkFiles returns the expected sink file paths within outDir.
 func DefaultSinkFiles(outDir string) SinkFiles {
 	return SinkFiles{
-		Domains: filepath.Join(outDir, "domains.passive"),
-		Routes:  filepath.Join(outDir, "routes.passive"),
-		Certs:   filepath.Join(outDir, "certs.passive"),
+		Domains: filepath.Join(outDir, "domains", "domains.passive"),
+		Routes:  filepath.Join(outDir, "routes", "routes.passive"),
+		Certs:   filepath.Join(outDir, "certs", "certs.passive"),
 		Meta:    filepath.Join(outDir, "meta.passive"),
 	}
 }

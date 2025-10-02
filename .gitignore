@@ -27,6 +27,11 @@ go.work.sum
 # Passive Recon build artifacts
 *.passive
 passive-rec
+**/report.html
+**/*_*/certs/
+**/*_*/domains/
+**/*_*/routes/
+**/*_*/dns/
 
 # env file
 .env

@@ -14,18 +14,18 @@ func TestGenerateCreatesHTMLReport(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	writeFixture(t, filepath.Join(dir, "domains.passive"), strings.Join([]string{
+	writeFixture(t, filepath.Join(dir, "domains", "domains.passive"), strings.Join([]string{
 		"app.example.com",
 		"api.example.com",
 		"static.test.com",
 		"deep.a.b.example.com",
 	}, "\n"))
-	writeFixture(t, filepath.Join(dir, "routes.passive"), strings.Join([]string{
+	writeFixture(t, filepath.Join(dir, "routes", "routes.passive"), strings.Join([]string{
 		"http://app.example.com/login",
 		"https://app.example.com/dashboard",
 		"https://static.example.com/assets/img/logo.png",
 	}, "\n"))
-	writeFixture(t, filepath.Join(dir, "certs.passive"), strings.Join([]string{
+	writeFixture(t, filepath.Join(dir, "certs", "certs.passive"), strings.Join([]string{
 		"alt1.example.com",
 		"alt2.example.com",
 		"service.test.com",
@@ -84,6 +84,9 @@ func TestGenerateHandlesMissingFiles(t *testing.T) {
 
 func writeFixture(t *testing.T, path, contents string) {
 	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", filepath.Dir(path), err)
+	}
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatalf("WriteFile(%q): %v", path, err)
 	}

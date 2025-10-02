@@ -96,7 +96,7 @@ func TestRunFlushesBeforeReportForDeferredSources(t *testing.T) {
 		t.Fatalf("expected at least two flushes, got %d", flushCount)
 	}
 
-	reportPath := filepath.Join(dir, "report.html")
+	reportPath := filepath.Join(dir, sanitizeTargetDir(cfg.Target), "report.html")
 	reportData, err := os.ReadFile(reportPath)
 	if err != nil {
 		t.Fatalf("read report: %v", err)
@@ -160,12 +160,12 @@ drained:
 		if trimmed == "" {
 			continue
 		}
-		targetFile := "domains.passive"
+		targetFile := filepath.Join("domains", "domains.passive")
 		if strings.HasPrefix(trimmed, "meta: ") {
 			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "meta: "))
 			targetFile = "meta.passive"
 		} else if strings.Contains(trimmed, "://") || strings.Contains(trimmed, "/") {
-			targetFile = "routes.passive"
+			targetFile = filepath.Join("routes", "routes.passive")
 		}
 		appendLine(filepath.Join(s.outdir, targetFile), trimmed)
 	}
@@ -177,6 +177,9 @@ func (s *testSink) Close() error {
 }
 
 func appendLine(path, line string) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		panic(err)
+	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		panic(err)

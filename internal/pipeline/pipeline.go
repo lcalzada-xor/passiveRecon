@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -26,8 +28,12 @@ type Sink struct {
 
 func NewSink(outdir string) (*Sink, error) {
 	var opened []*out.Writer
-	newWriter := func(name string) (*out.Writer, error) {
-		w, err := out.New(outdir, name)
+	newWriter := func(subdir, name string) (*out.Writer, error) {
+		targetDir := outdir
+		if subdir != "" {
+			targetDir = filepath.Join(outdir, subdir)
+		}
+		w, err := out.New(targetDir, name)
 		if err != nil {
 			for _, ow := range opened {
 				_ = ow.Close()
@@ -38,19 +44,23 @@ func NewSink(outdir string) (*Sink, error) {
 		return w, nil
 	}
 
-	d, err := newWriter("domains.passive")
+	if err := os.MkdirAll(filepath.Join(outdir, "dns"), 0o755); err != nil {
+		return nil, err
+	}
+
+	d, err := newWriter("domains", "domains.passive")
 	if err != nil {
 		return nil, err
 	}
-	r, err := newWriter("routes.passive")
+	r, err := newWriter("routes", "routes.passive")
 	if err != nil {
 		return nil, err
 	}
-	c, err := newWriter("certs.passive")
+	c, err := newWriter("certs", "certs.passive")
 	if err != nil {
 		return nil, err
 	}
-	m, err := newWriter("meta.passive")
+	m, err := newWriter("", "meta.passive")
 	if err != nil {
 		return nil, err
 	}
