@@ -162,7 +162,7 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 		forwarded = append(forwarded, <-outCh)
 	}
 
-	wantForwarded := []string{"https://app.example.com [200] [Title]", "meta: [200]", "meta: [Title]"}
+	wantForwarded := []string{"https://app.example.com [200] [Title]", "app.example.com", "meta: [200]", "meta: [Title]"}
 	if diff := cmp.Diff(wantForwarded, forwarded); diff != "" {
 		t.Fatalf("unexpected forwarded lines (-want +got):\n%s", diff)
 	}
@@ -196,6 +196,11 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 	routes := readLines(filepath.Join(outputDir, "routes.passive"))
 	if diff := cmp.Diff([]string{"https://app.example.com [200] [Title]"}, routes); diff != "" {
 		t.Fatalf("unexpected routes.passive contents (-want +got):\n%s", diff)
+	}
+
+	domains := readLines(filepath.Join(outputDir, "domains.passive"))
+	if diff := cmp.Diff([]string{"app.example.com"}, domains); diff != "" {
+		t.Fatalf("unexpected domains.passive contents (-want +got):\n%s", diff)
 	}
 
 	meta := readLines(filepath.Join(outputDir, "meta.passive"))
@@ -235,7 +240,15 @@ func TestHTTPXSkipsUnresponsiveResults(t *testing.T) {
 		forwarded = append(forwarded, <-outCh)
 	}
 
-	want := []string{"https://up.example.com [200] [OK]", "meta: [200]", "meta: [OK]"}
+	want := []string{
+		"down.example.com",
+		"meta: [0]",
+		"meta: [connection refused]",
+		"https://up.example.com [200] [OK]",
+		"up.example.com",
+		"meta: [200]",
+		"meta: [OK]",
+	}
 	if diff := cmp.Diff(want, forwarded); diff != "" {
 		t.Fatalf("unexpected forwarded lines (-want +got):\n%s", diff)
 	}

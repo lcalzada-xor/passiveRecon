@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -170,17 +171,22 @@ func normalizeHTTPXLine(line string) []string {
 	}
 
 	metas := splitHTTPXMeta(metaPart)
-	if shouldDiscardHTTPXLine(metas) {
-		return nil
-	}
+	statusCode, hasStatus := parseHTTPXStatusCode(metas)
 
 	var out []string
-	if urlPart != "" {
+
+	if urlPart != "" && shouldForwardHTTPXRoute(hasStatus, statusCode) {
 		combined := urlPart
 		if metaPart != "" {
 			combined = strings.TrimSpace(urlPart + " " + metaPart)
 		}
 		out = append(out, combined)
+	}
+
+	if urlPart != "" {
+		if domain := extractHTTPXDomain(urlPart); domain != "" && shouldEmitHTTPXDomain(hasStatus, statusCode) {
+			out = append(out, domain)
+		}
 	}
 
 	for _, meta := range metas {
@@ -194,19 +200,33 @@ func normalizeHTTPXLine(line string) []string {
 	return out
 }
 
-func shouldDiscardHTTPXLine(metas []string) bool {
+func shouldForwardHTTPXRoute(hasStatus bool, status int) bool {
+	if !hasStatus {
+		return true
+	}
+	return status != 0
+}
+
+func shouldEmitHTTPXDomain(hasStatus bool, status int) bool {
+	if !hasStatus {
+		return true
+	}
+	return status == 200 || status == 0
+}
+
+func parseHTTPXStatusCode(metas []string) (int, bool) {
 	if len(metas) == 0 {
-		return false
+		return 0, false
 	}
 
 	status := strings.TrimSpace(metas[0])
 	if len(status) < 2 || status[0] != '[' || status[len(status)-1] != ']' {
-		return false
+		return 0, false
 	}
 
 	inside := strings.TrimSpace(status[1 : len(status)-1])
 	if inside == "" {
-		return false
+		return 0, false
 	}
 
 	// Some httpx status fields may include additional information (e.g. "301,301").
@@ -219,15 +239,40 @@ func shouldDiscardHTTPXLine(metas []string) bool {
 	}
 
 	if inside == "" {
-		return false
+		return 0, false
 	}
 
 	code, err := strconv.Atoi(inside)
 	if err != nil {
-		return false
+		return 0, false
 	}
 
-	return code == 0
+	return code, true
+}
+
+func extractHTTPXDomain(rawURL string) string {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return ""
+	}
+
+	if strings.Contains(trimmed, "://") {
+		parsed, err := url.Parse(trimmed)
+		if err == nil {
+			host := parsed.Hostname()
+			return strings.TrimSpace(host)
+		}
+	}
+
+	// Fallback: split on '/', then ':' for host:port.
+	if idx := strings.Index(trimmed, "/"); idx != -1 {
+		trimmed = trimmed[:idx]
+	}
+	if idx := strings.Index(trimmed, ":"); idx != -1 {
+		trimmed = trimmed[:idx]
+	}
+
+	return strings.TrimSpace(trimmed)
 }
 
 func splitHTTPXMeta(meta string) []string {
