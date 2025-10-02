@@ -154,6 +154,33 @@ func TestNewSinkClosesWritersOnError(t *testing.T) {
 	}
 }
 
+func TestActiveRoutesPopulatePassive(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir)
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "active: https://app.example.com/login [200] [Title]"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	passive := readLines(t, filepath.Join(dir, "routes", "routes.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/login"}, passive); diff != "" {
+		t.Fatalf("unexpected routes.passive contents (-want +got):\n%s", diff)
+	}
+
+	active := readLines(t, filepath.Join(dir, "routes", "routes.active"))
+	if diff := cmp.Diff([]string{"https://app.example.com/login [200] [Title]"}, active); diff != "" {
+		t.Fatalf("unexpected routes.active contents (-want +got):\n%s", diff)
+	}
+}
+
 func readLines(t *testing.T, path string) []string {
 	t.Helper()
 

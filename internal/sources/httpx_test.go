@@ -218,6 +218,11 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 		t.Fatalf("unexpected routes.active contents (-want +got):\n%s", diff)
 	}
 
+	passiveRoutes := readLines(filepath.Join(outputDir, "routes", "routes.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com"}, passiveRoutes); diff != "" {
+		t.Fatalf("unexpected routes.passive contents (-want +got):\n%s", diff)
+	}
+
 	domains := readLines(filepath.Join(outputDir, "domains", "domains.active"))
 	if diff := cmp.Diff([]string{"app.example.com"}, domains); diff != "" {
 		t.Fatalf("unexpected domains.active contents (-want +got):\n%s", diff)

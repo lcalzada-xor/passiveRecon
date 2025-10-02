@@ -181,6 +181,17 @@ func (s *Sink) processLine(ln string) {
 
 	// Clasificación simple: URLs/rutas si contiene esquema o '/'
 	if strings.Contains(l, "http://") || strings.Contains(l, "https://") || strings.Contains(l, "/") {
+		// When the line includes metadata (e.g. httpx status/title), keep a
+		// clean copy of the URL in routes.passive so users always get a
+		// canonical list of discovered routes.
+		if isActive {
+			if base := extractRouteBase(l); base != "" {
+				if !s.markSeen(s.seenRoutesPassive, base) {
+					_ = s.Routes.passive.WriteURL(base)
+				}
+			}
+		}
+
 		seen := s.seenRoutesPassive
 		writer := s.Routes.passive
 		if isActive {
@@ -278,4 +289,15 @@ func (s *Sink) writeCertLine(line string, isActive bool) {
 		}
 		_ = writer.WriteRaw(p)
 	}
+}
+
+func extractRouteBase(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return ""
+	}
+	if idx := strings.IndexAny(trimmed, " \t"); idx != -1 {
+		trimmed = trimmed[:idx]
+	}
+	return strings.TrimSpace(trimmed)
 }
