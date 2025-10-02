@@ -156,6 +156,10 @@ func NewSink(outdir string) (*Sink, error) {
 	if err != nil {
 		return nil, err
 	}
+	jsActive, err := newWriter(filepath.Join("routes", "js"), "js.active")
+	if err != nil {
+		return nil, err
+	}
 	htmlActive, err := newWriter(filepath.Join("routes", "html"), "html.active")
 	if err != nil {
 		return nil, err
@@ -176,7 +180,7 @@ func NewSink(outdir string) (*Sink, error) {
 	s := &Sink{
 		Domains:            writerPair{passive: dPassive, active: dActive},
 		Routes:             writerPair{passive: rPassive, active: rActive},
-		RoutesJS:           writerPair{passive: jsPassive},
+		RoutesJS:           writerPair{passive: jsPassive, active: jsActive},
 		RoutesHTML:         writerPair{active: htmlActive},
 		Certs:              writerPair{passive: cPassive},
 		Meta:               writerPair{passive: mPassive, active: mActive},
@@ -257,11 +261,17 @@ func (s *Sink) processLine(ln string) {
 		if js == "" {
 			return
 		}
+		if isActive {
+			if s.RoutesJS.active != nil {
+				_ = s.RoutesJS.active.WriteURL(js)
+			}
+			if s.RoutesJS.passive != nil {
+				_ = s.RoutesJS.passive.WriteURL(js)
+			}
+			return
+		}
 		if s.RoutesJS.passive != nil {
 			_ = s.RoutesJS.passive.WriteURL(js)
-		}
-		if isActive && s.RoutesJS.active != nil {
-			_ = s.RoutesJS.active.WriteURL(js)
 		}
 		return
 	}

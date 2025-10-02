@@ -280,10 +280,39 @@ func TestJSLinesAreWrittenToFile(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	jsPath := filepath.Join(dir, "routes", "js", "js.passive")
-	jsLines := readLines(t, jsPath)
-	if diff := cmp.Diff([]string{"https://static.example.com/app.js"}, jsLines); diff != "" {
+	passivePath := filepath.Join(dir, "routes", "js", "js.passive")
+	passiveLines := readLines(t, passivePath)
+	if diff := cmp.Diff([]string{"https://static.example.com/app.js"}, passiveLines); diff != "" {
 		t.Fatalf("unexpected js.passive contents (-want +got):\n%s", diff)
+	}
+
+	activePath := filepath.Join(dir, "routes", "js", "js.active")
+	activeLines := readLines(t, activePath)
+	if diff := cmp.Diff([]string{"https://static.example.com/app.js"}, activeLines); diff != "" {
+		t.Fatalf("unexpected js.active contents (-want +got):\n%s", diff)
+	}
+}
+
+func TestHTMLLinesAreWrittenToActiveFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir)
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "active: html: https://app.example.com"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	htmlPath := filepath.Join(dir, "routes", "html", "html.active")
+	htmlLines := readLines(t, htmlPath)
+	if diff := cmp.Diff([]string{"https://app.example.com"}, htmlLines); diff != "" {
+		t.Fatalf("unexpected html.active contents (-want +got):\n%s", diff)
 	}
 }
 
