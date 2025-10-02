@@ -18,11 +18,80 @@ type writerPair struct {
 	active  *out.Writer
 }
 
+type lazyWriter struct {
+	outdir  string
+	subdir  string
+	name    string
+	mu      sync.Mutex
+	writer  *out.Writer
+	initErr error
+}
+
+func newLazyWriter(outdir, subdir, name string) *lazyWriter {
+	return &lazyWriter{outdir: outdir, subdir: subdir, name: name}
+}
+
+func (lw *lazyWriter) ensure() (*out.Writer, error) {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	if lw.initErr != nil {
+		return nil, lw.initErr
+	}
+	if lw.writer != nil {
+		return lw.writer, nil
+	}
+	targetDir := lw.outdir
+	if lw.subdir != "" {
+		targetDir = filepath.Join(targetDir, lw.subdir)
+	}
+	w, err := out.New(targetDir, lw.name)
+	if err != nil {
+		lw.initErr = err
+		return nil, err
+	}
+	lw.writer = w
+	return lw.writer, nil
+}
+
+func (lw *lazyWriter) WriteURL(u string) {
+	if lw == nil {
+		return
+	}
+	if u == "" {
+		return
+	}
+	w, err := lw.ensure()
+	if err != nil {
+		return
+	}
+	_ = w.WriteURL(u)
+}
+
+func (lw *lazyWriter) Close() {
+	if lw == nil {
+		return
+	}
+	lw.mu.Lock()
+	w := lw.writer
+	lw.writer = nil
+	lw.mu.Unlock()
+	if w != nil {
+		_ = w.Close()
+	}
+}
+
 type Sink struct {
 	Domains            writerPair
 	Routes             writerPair
 	RoutesJS           writerPair
 	RoutesHTML         writerPair
+	RoutesMaps         *lazyWriter
+	RoutesJSON         *lazyWriter
+	RoutesAPI          *lazyWriter
+	RoutesWASM         *lazyWriter
+	RoutesSVG          *lazyWriter
+	RoutesCrawl        *lazyWriter
+	RoutesMetaFindings *lazyWriter
 	Certs              writerPair
 	Meta               writerPair
 	wg                 sync.WaitGroup
@@ -38,6 +107,7 @@ type Sink struct {
 	procMu             sync.Mutex
 	processing         int
 	cond               *sync.Cond
+	activeMode         bool
 }
 
 func normalizeDomainKey(input string) string {
@@ -114,7 +184,7 @@ func extractHost(raw string) string {
 	return candidate
 }
 
-func NewSink(outdir string) (*Sink, error) {
+func NewSink(outdir string, active bool) (*Sink, error) {
 	var opened []*out.Writer
 	newWriter := func(subdir, name string) (*out.Writer, error) {
 		targetDir := outdir
@@ -177,11 +247,23 @@ func NewSink(outdir string) (*Sink, error) {
 		return nil, err
 	}
 
+	suffix := ".passive"
+	if active {
+		suffix = ".active"
+	}
+
 	s := &Sink{
 		Domains:            writerPair{passive: dPassive, active: dActive},
 		Routes:             writerPair{passive: rPassive, active: rActive},
 		RoutesJS:           writerPair{passive: jsPassive, active: jsActive},
 		RoutesHTML:         writerPair{active: htmlActive},
+		RoutesMaps:         newLazyWriter(outdir, filepath.Join("routes", "maps"), "maps"+suffix),
+		RoutesJSON:         newLazyWriter(outdir, filepath.Join("routes", "json"), "json"+suffix),
+		RoutesAPI:          newLazyWriter(outdir, filepath.Join("routes", "api"), "api"+suffix),
+		RoutesWASM:         newLazyWriter(outdir, filepath.Join("routes", "wasm"), "wasm"+suffix),
+		RoutesSVG:          newLazyWriter(outdir, filepath.Join("routes", "svg"), "svg"+suffix),
+		RoutesCrawl:        newLazyWriter(outdir, filepath.Join("routes", "crawl"), "crawl"+suffix),
+		RoutesMetaFindings: newLazyWriter(outdir, filepath.Join("routes", "meta"), "meta"+suffix),
 		Certs:              writerPair{passive: cPassive},
 		Meta:               writerPair{passive: mPassive, active: mActive},
 		lines:              make(chan string, 1024),
@@ -192,6 +274,7 @@ func NewSink(outdir string) (*Sink, error) {
 		seenHTMLPassive:    make(map[string]struct{}),
 		seenHTMLActive:     make(map[string]struct{}),
 		seenCertsPassive:   make(map[string]struct{}),
+		activeMode:         active,
 	}
 	s.cond = sync.NewCond(&s.procMu)
 	return s, nil
@@ -332,6 +415,7 @@ func (s *Sink) processLine(ln string) {
 		if s.markSeen(seen, l) {
 			return
 		}
+		s.writeRouteCategories(base, isActive)
 		_ = writer.WriteURL(l)
 		return
 	}
@@ -394,6 +478,27 @@ func (s *Sink) Close() error {
 	}
 	if s.RoutesHTML.active != nil {
 		_ = s.RoutesHTML.active.Close()
+	}
+	if s.RoutesMaps != nil {
+		s.RoutesMaps.Close()
+	}
+	if s.RoutesJSON != nil {
+		s.RoutesJSON.Close()
+	}
+	if s.RoutesAPI != nil {
+		s.RoutesAPI.Close()
+	}
+	if s.RoutesWASM != nil {
+		s.RoutesWASM.Close()
+	}
+	if s.RoutesSVG != nil {
+		s.RoutesSVG.Close()
+	}
+	if s.RoutesCrawl != nil {
+		s.RoutesCrawl.Close()
+	}
+	if s.RoutesMetaFindings != nil {
+		s.RoutesMetaFindings.Close()
 	}
 	if s.Certs.passive != nil {
 		_ = s.Certs.passive.Close()
@@ -461,4 +566,220 @@ func extractRouteBase(line string) string {
 		trimmed = trimmed[:idx]
 	}
 	return strings.TrimSpace(trimmed)
+}
+
+type routeCategory int
+
+const (
+	routeCategoryNone routeCategory = iota
+	routeCategoryMaps
+	routeCategoryJSON
+	routeCategoryAPI
+	routeCategoryWASM
+	routeCategorySVG
+	routeCategoryCrawl
+	routeCategoryMeta
+)
+
+func (s *Sink) writeRouteCategories(route string, isActive bool) {
+	if route == "" {
+		return
+	}
+	if s.activeMode && !isActive {
+		return
+	}
+	categories := detectRouteCategories(route)
+	if len(categories) == 0 {
+		return
+	}
+	for _, cat := range categories {
+		switch cat {
+		case routeCategoryMaps:
+			s.RoutesMaps.WriteURL(route)
+		case routeCategoryJSON:
+			s.RoutesJSON.WriteURL(route)
+		case routeCategoryAPI:
+			s.RoutesAPI.WriteURL(route)
+		case routeCategoryWASM:
+			s.RoutesWASM.WriteURL(route)
+		case routeCategorySVG:
+			s.RoutesSVG.WriteURL(route)
+		case routeCategoryCrawl:
+			s.RoutesCrawl.WriteURL(route)
+		case routeCategoryMeta:
+			s.RoutesMetaFindings.WriteURL(route)
+		}
+	}
+}
+
+func detectRouteCategories(route string) []routeCategory {
+	trimmed := strings.TrimSpace(route)
+	if trimmed == "" {
+		return nil
+	}
+
+	lowerFull := strings.ToLower(trimmed)
+	pathComponent := trimmed
+	if u, err := url.Parse(trimmed); err == nil {
+		if u.Path != "" {
+			pathComponent = u.Path
+		}
+		lowerFull = strings.ToLower(u.Path)
+		if u.RawQuery != "" {
+			lowerFull += "?" + strings.ToLower(u.RawQuery)
+		}
+	}
+
+	if idx := strings.IndexAny(pathComponent, "?#"); idx != -1 {
+		pathComponent = pathComponent[:idx]
+	}
+	pathComponent = strings.TrimSpace(pathComponent)
+	lowerPath := strings.ToLower(pathComponent)
+
+	base := strings.ToLower(filepath.Base(pathComponent))
+	if base == "." || base == "/" {
+		base = ""
+	}
+	ext := strings.ToLower(filepath.Ext(base))
+	nameNoExt := strings.TrimSuffix(base, ext)
+
+	appendCat := func(categories []routeCategory, cat routeCategory) []routeCategory {
+		for _, existing := range categories {
+			if existing == cat {
+				return categories
+			}
+		}
+		return append(categories, cat)
+	}
+
+	var categories []routeCategory
+
+	switch ext {
+	case ".map":
+		categories = appendCat(categories, routeCategoryMaps)
+	case ".wasm":
+		categories = appendCat(categories, routeCategoryWASM)
+	case ".svg":
+		categories = appendCat(categories, routeCategorySVG)
+	case ".jsonld":
+		categories = appendCat(categories, routeCategoryJSON)
+	case ".json":
+		if isAPIDocument(lowerPath, base, nameNoExt, lowerFull) {
+			categories = appendCat(categories, routeCategoryAPI)
+		} else {
+			categories = appendCat(categories, routeCategoryJSON)
+		}
+	case ".yaml", ".yml":
+		if isAPIDocument(lowerPath, base, nameNoExt, lowerFull) {
+			categories = appendCat(categories, routeCategoryAPI)
+		}
+	case ".xml":
+		if isCrawlFile(base, nameNoExt) {
+			categories = appendCat(categories, routeCategoryCrawl)
+		}
+	case ".txt":
+		if base == "robots.txt" {
+			categories = appendCat(categories, routeCategoryCrawl)
+		}
+	case ".gz":
+		if strings.HasSuffix(base, "sitemap.xml.gz") || strings.HasSuffix(nameNoExt, "sitemap.xml") {
+			categories = appendCat(categories, routeCategoryCrawl)
+		}
+	}
+
+	if base == "robots.txt" {
+		categories = appendCat(categories, routeCategoryCrawl)
+	}
+	if ext == "" && isCrawlPathWithoutExt(lowerPath) {
+		categories = appendCat(categories, routeCategoryCrawl)
+	}
+
+	if shouldCategorizeMeta(base, nameNoExt, ext, lowerFull) {
+		categories = appendCat(categories, routeCategoryMeta)
+	}
+
+	return categories
+}
+
+func isAPIDocument(lowerPath, base, nameNoExt, lowerFull string) bool {
+	keywords := []string{"swagger", "openapi", "api-doc", "api_docs", "apispec", "api-spec", "api_spec", "api-definition", "api_definition"}
+	for _, kw := range keywords {
+		if strings.Contains(lowerPath, kw) {
+			return true
+		}
+	}
+	for _, kw := range keywords {
+		if strings.Contains(base, kw) {
+			return true
+		}
+	}
+	if nameNoExt == "api" && (strings.Contains(lowerFull, "openapi") || strings.Contains(lowerFull, "swagger")) {
+		return true
+	}
+	return false
+}
+
+func isCrawlFile(base, nameNoExt string) bool {
+	if strings.Contains(nameNoExt, "sitemap") {
+		return true
+	}
+	return false
+}
+
+func isCrawlPathWithoutExt(lowerPath string) bool {
+	if strings.HasSuffix(lowerPath, "/robots") || strings.HasSuffix(lowerPath, "/robots/") {
+		return true
+	}
+	return false
+}
+
+func shouldCategorizeMeta(base, nameNoExt, ext, lowerFull string) bool {
+	if base == "" {
+		return false
+	}
+
+	sensitiveExts := map[string]struct{}{
+		".bak":    {},
+		".old":    {},
+		".swp":    {},
+		".sql":    {},
+		".db":     {},
+		".sqlite": {},
+		".env":    {},
+		".ini":    {},
+		".cfg":    {},
+		".config": {},
+		".conf":   {},
+		".log":    {},
+	}
+
+	if _, ok := sensitiveExts[ext]; ok {
+		return true
+	}
+
+	archiveExts := []string{".zip", ".rar", ".7z", ".tar", ".tgz", ".gz"}
+	for _, archiveExt := range archiveExts {
+		if strings.HasSuffix(base, archiveExt) {
+			if strings.Contains(nameNoExt, "backup") || strings.Contains(nameNoExt, "config") || strings.Contains(nameNoExt, "secret") || strings.Contains(nameNoExt, "database") || strings.Contains(nameNoExt, "db") {
+				return true
+			}
+		}
+	}
+
+	lowerBase := base
+	keywords := []string{"backup", "secret", "token", "password", "passwd", "credential", "creds", "config", "database", "db", "id_rsa", ".env", ".git", ".svn", "ssh", "private"}
+	for _, kw := range keywords {
+		if strings.Contains(lowerBase, kw) {
+			return true
+		}
+	}
+
+	queryKeywords := []string{"token=", "secret=", "password=", "passwd=", "key=", "apikey=", "api_key=", "access_token=", "auth=", "credential"}
+	for _, kw := range queryKeywords {
+		if strings.Contains(lowerFull, kw) {
+			return true
+		}
+	}
+
+	return false
 }
