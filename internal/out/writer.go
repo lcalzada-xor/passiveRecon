@@ -38,16 +38,29 @@ func normalizeDomain(d string) string {
 	if d == "" {
 		return ""
 	}
+
+	var meta string
+	if i := strings.IndexAny(d, " \t"); i != -1 {
+		meta = strings.TrimSpace(d[i:])
+		d = strings.TrimSpace(d[:i])
+	}
+
 	if i := strings.Index(d, "://"); i != -1 {
 		d = d[i+3:]
 	}
 	if i := strings.IndexAny(d, ":/"); i != -1 {
 		d = d[:i]
 	}
-	if strings.HasPrefix(strings.ToLower(d), "www.") {
-		d = d[4:]
+
+	lower := strings.ToLower(d)
+	if strings.HasPrefix(lower, "www.") {
+		lower = lower[4:]
 	}
-	return strings.ToLower(d)
+
+	if meta != "" {
+		return lower + " " + meta
+	}
+	return lower
 }
 
 func normalizeURL(u string) string {

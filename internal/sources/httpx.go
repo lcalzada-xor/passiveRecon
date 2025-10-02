@@ -242,7 +242,11 @@ func normalizeHTTPXLine(line string) []string {
 
 	if urlPart != "" {
 		if domain := extractHTTPXDomain(urlPart); domain != "" && shouldEmitHTTPXDomain(hasStatus, statusCode) {
-			out = append(out, domain)
+			combinedDomain := domain
+			if metaPart != "" {
+				combinedDomain = strings.TrimSpace(domain + " " + metaPart)
+			}
+			out = append(out, combinedDomain)
 		}
 	}
 

@@ -34,6 +34,30 @@ type Sink struct {
 	cond               *sync.Cond
 }
 
+func normalizeDomainKey(input string) string {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return ""
+	}
+
+	if idx := strings.IndexAny(trimmed, " \t"); idx != -1 {
+		trimmed = trimmed[:idx]
+	}
+
+	if i := strings.Index(trimmed, "://"); i != -1 {
+		trimmed = trimmed[i+3:]
+	}
+	if i := strings.IndexAny(trimmed, ":/"); i != -1 {
+		trimmed = trimmed[:i]
+	}
+
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "www.") {
+		lower = lower[4:]
+	}
+	return lower
+}
+
 func NewSink(outdir string) (*Sink, error) {
 	var opened []*out.Writer
 	newWriter := func(subdir, name string) (*out.Writer, error) {
@@ -212,7 +236,11 @@ func (s *Sink) processLine(ln string) {
 	}
 
 	// defecto: dominio
-	key := strings.ToLower(l)
+	key := normalizeDomainKey(l)
+	if key == "" {
+		return
+	}
+
 	seen := s.seenDomainsPassive
 	writer := s.Domains.passive
 	if isActive {
