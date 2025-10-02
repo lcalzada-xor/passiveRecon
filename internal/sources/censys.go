@@ -18,6 +18,17 @@ var (
 	censysHTTPClient = http.DefaultClient
 )
 
+func censysMeta(out chan<- string, format string, args ...interface{}) {
+	if out == nil {
+		return
+	}
+	msg := fmt.Sprintf(format, args...)
+	if strings.TrimSpace(msg) == "" {
+		return
+	}
+	out <- "meta: censys " + msg
+}
+
 type censysResponse struct {
 	Result struct {
 		Hits []struct {
@@ -53,9 +64,11 @@ type censysResponse struct {
 // Censys consulta la Search API de certificados y emite posibles subdominios.
 func Censys(ctx context.Context, domain, apiID, apiSecret string, out chan<- string) error {
 	if strings.TrimSpace(domain) == "" {
+		censysMeta(out, "skipped empty domain")
 		return errors.New("censys: empty domain")
 	}
 	if apiID == "" || apiSecret == "" {
+		censysMeta(out, "missing API credentials")
 		return errors.New("censys: missing API credentials")
 	}
 
@@ -68,6 +81,7 @@ func Censys(ctx context.Context, domain, apiID, apiSecret string, out chan<- str
 
 	baseURL, err := url.Parse(censysBaseURL)
 	if err != nil {
+		censysMeta(out, "invalid base URL")
 		return fmt.Errorf("censys: invalid base url: %w", err)
 	}
 
@@ -80,6 +94,7 @@ func Censys(ctx context.Context, domain, apiID, apiSecret string, out chan<- str
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
 		if err != nil {
+			censysMeta(out, "failed creating request: %v", err)
 			return err
 		}
 		req.SetBasicAuth(apiID, apiSecret)
@@ -88,18 +103,21 @@ func Censys(ctx context.Context, domain, apiID, apiSecret string, out chan<- str
 
 		resp, err := censysHTTPClient.Do(req)
 		if err != nil {
+			censysMeta(out, "request failed: %v", err)
 			return err
 		}
 		if resp.StatusCode != http.StatusOK {
 			if resp.Body != nil {
 				resp.Body.Close()
 			}
+			censysMeta(out, "unexpected HTTP status %d", resp.StatusCode)
 			return fmt.Errorf("censys: unexpected status %d", resp.StatusCode)
 		}
 
 		var decoded censysResponse
 		if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 			resp.Body.Close()
+			censysMeta(out, "failed decoding response: %v", err)
 			return err
 		}
 		resp.Body.Close()
@@ -160,6 +178,7 @@ func Censys(ctx context.Context, domain, apiID, apiSecret string, out chan<- str
 
 		parsedNext, err := url.Parse(next)
 		if err != nil {
+			censysMeta(out, "failed parsing next link: %v", err)
 			return fmt.Errorf("censys: parse next link: %w", err)
 		}
 		if !parsedNext.IsAbs() {
