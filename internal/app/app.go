@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -37,6 +39,12 @@ var (
 )
 
 func Run(cfg *config.Config) error {
+	outDir, err := prepareOutputDir(cfg.OutDir, cfg.Target)
+	if err != nil {
+		return err
+	}
+	cfg.OutDir = outDir
+
 	// preparar sink (writers)
 	sink, err := sinkFactory(cfg.OutDir)
 	if err != nil {
@@ -92,8 +100,8 @@ func Run(cfg *config.Config) error {
 		case "httpx":
 			if cfg.Active {
 				deferreds = append(deferreds, bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
-					// leer de domains/routes.passive generado
-					return sourceHTTPX(c, []string{"domains.passive", "routes.passive"}, cfg.OutDir, sink.In())
+					// leer de domains/domains.passive y routes/routes.passive generado
+					return sourceHTTPX(c, []string{"domains/domains.passive", "routes/routes.passive"}, cfg.OutDir, sink.In())
 				})))
 			} else {
 				sink.In() <- "meta: httpx skipped (requires --active)"
@@ -158,4 +166,45 @@ func runWithTimeout(parent context.Context, seconds int, fn func(context.Context
 		defer cancel()
 		return fn(ctx)
 	}
+}
+
+func prepareOutputDir(baseOutDir, target string) (string, error) {
+	sanitized := sanitizeTargetDir(target)
+	finalOutDir := filepath.Join(baseOutDir, sanitized)
+	if err := os.MkdirAll(finalOutDir, 0o755); err != nil {
+		return "", err
+	}
+	return finalOutDir, nil
+}
+
+func sanitizeTargetDir(target string) string {
+	trimmed := strings.TrimSpace(target)
+	if trimmed == "" {
+		return "passive_rec"
+	}
+
+	if strings.Contains(trimmed, "://") {
+		if u, err := url.Parse(trimmed); err == nil {
+			if host := u.Hostname(); host != "" {
+				trimmed = host
+			}
+		}
+	}
+
+	trimmed = strings.Trim(trimmed, "/")
+	if trimmed == "" {
+		return "passive_rec"
+	}
+
+	replacer := strings.NewReplacer(
+		".", "_",
+		"/", "_",
+		"\\", "_",
+	)
+	sanitized := replacer.Replace(trimmed)
+	sanitized = strings.Trim(sanitized, "_")
+	if sanitized == "" {
+		return "passive_rec"
+	}
+	return sanitized
 }

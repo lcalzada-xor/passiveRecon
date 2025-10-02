@@ -18,12 +18,16 @@ import (
 func TestHTTPXCombinesAllLists(t *testing.T) {
 	tmp := t.TempDir()
 	mustWrite := func(name, contents string) {
-		if err := os.WriteFile(filepath.Join(tmp, name), []byte(contents), 0644); err != nil {
+		fullPath := filepath.Join(tmp, name)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", name, err)
+		}
+		if err := os.WriteFile(fullPath, []byte(contents), 0644); err != nil {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
-	mustWrite("domains.passive", "example.com\nsub.example.com\n")
-	mustWrite("routes.passive", "https://app.example.com/login\n")
+	mustWrite(filepath.Join("domains", "domains.passive"), "example.com\nsub.example.com\n")
+	mustWrite(filepath.Join("routes", "routes.passive"), "https://app.example.com/login\n")
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
@@ -56,7 +60,7 @@ func TestHTTPXCombinesAllLists(t *testing.T) {
 		return nil
 	}
 
-	if err := HTTPX(context.Background(), []string{"domains.passive", "routes.passive"}, tmp, make(chan string, 10)); err != nil {
+	if err := HTTPX(context.Background(), []string{"domains/domains.passive", "routes/routes.passive"}, tmp, make(chan string, 10)); err != nil {
 		t.Fatalf("HTTPX returned error: %v", err)
 	}
 
@@ -77,11 +81,15 @@ func TestHTTPXCombinesAllLists(t *testing.T) {
 func TestHTTPXSkipsMissingLists(t *testing.T) {
 	tmp := t.TempDir()
 	mustWrite := func(name, contents string) {
-		if err := os.WriteFile(filepath.Join(tmp, name), []byte(contents), 0644); err != nil {
+		fullPath := filepath.Join(tmp, name)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", name, err)
+		}
+		if err := os.WriteFile(fullPath, []byte(contents), 0644); err != nil {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
-	mustWrite("routes.passive", "https://app.example.com/login\n")
+	mustWrite(filepath.Join("routes", "routes.passive"), "https://app.example.com/login\n")
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
@@ -107,7 +115,7 @@ func TestHTTPXSkipsMissingLists(t *testing.T) {
 	}
 
 	outCh := make(chan string, 5)
-	if err := HTTPX(context.Background(), []string{"domains.passive", "routes.passive"}, tmp, outCh); err != nil {
+	if err := HTTPX(context.Background(), []string{"domains/domains.passive", "routes/routes.passive"}, tmp, outCh); err != nil {
 		t.Fatalf("HTTPX returned error: %v", err)
 	}
 
@@ -126,7 +134,7 @@ func TestHTTPXSkipsMissingLists(t *testing.T) {
 	}
 	sort.Strings(meta)
 
-	wantMeta := []string{"meta: httpx skipped missing input domains.passive"}
+	wantMeta := []string{"meta: httpx skipped missing input domains/domains.passive"}
 	if diff := cmp.Diff(wantMeta, meta); diff != "" {
 		t.Fatalf("unexpected meta lines (-want +got):\n%s", diff)
 	}
@@ -134,7 +142,10 @@ func TestHTTPXSkipsMissingLists(t *testing.T) {
 
 func TestHTTPXNormalizesOutput(t *testing.T) {
 	inputDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(inputDir, "routes.passive"), []byte("https://app.example.com\n"), 0644); err != nil {
+	if err := os.MkdirAll(filepath.Join(inputDir, "routes"), 0o755); err != nil {
+		t.Fatalf("mkdir routes: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(inputDir, "routes", "routes.passive"), []byte("https://app.example.com\n"), 0644); err != nil {
 		t.Fatalf("write routes list: %v", err)
 	}
 
@@ -153,7 +164,7 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 	}
 
 	outCh := make(chan string, 10)
-	if err := HTTPX(context.Background(), []string{"routes.passive"}, inputDir, outCh); err != nil {
+	if err := HTTPX(context.Background(), []string{"routes/routes.passive"}, inputDir, outCh); err != nil {
 		t.Fatalf("HTTPX returned error: %v", err)
 	}
 
@@ -193,12 +204,12 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 		return strings.Split(trimmed, "\n")
 	}
 
-	routes := readLines(filepath.Join(outputDir, "routes.passive"))
+	routes := readLines(filepath.Join(outputDir, "routes", "routes.passive"))
 	if diff := cmp.Diff([]string{"https://app.example.com [200] [Title]"}, routes); diff != "" {
 		t.Fatalf("unexpected routes.passive contents (-want +got):\n%s", diff)
 	}
 
-	domains := readLines(filepath.Join(outputDir, "domains.passive"))
+	domains := readLines(filepath.Join(outputDir, "domains", "domains.passive"))
 	if diff := cmp.Diff([]string{"app.example.com"}, domains); diff != "" {
 		t.Fatalf("unexpected domains.passive contents (-want +got):\n%s", diff)
 	}
@@ -211,7 +222,10 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 
 func TestHTTPXSkipsUnresponsiveResults(t *testing.T) {
 	inputDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(inputDir, "routes.passive"), []byte("https://app.example.com\n"), 0644); err != nil {
+	if err := os.MkdirAll(filepath.Join(inputDir, "routes"), 0o755); err != nil {
+		t.Fatalf("mkdir routes: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(inputDir, "routes", "routes.passive"), []byte("https://app.example.com\n"), 0644); err != nil {
 		t.Fatalf("write routes list: %v", err)
 	}
 
@@ -231,7 +245,7 @@ func TestHTTPXSkipsUnresponsiveResults(t *testing.T) {
 	}
 
 	outCh := make(chan string, 10)
-	if err := HTTPX(context.Background(), []string{"routes.passive"}, inputDir, outCh); err != nil {
+	if err := HTTPX(context.Background(), []string{"routes/routes.passive"}, inputDir, outCh); err != nil {
 		t.Fatalf("HTTPX returned error: %v", err)
 	}
 
@@ -260,7 +274,10 @@ func TestHTTPXBatchesLargeInputs(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		builder.WriteString(fmt.Sprintf("https://example.com/path-%d\n", i))
 	}
-	if err := os.WriteFile(filepath.Join(inputDir, "routes.passive"), []byte(builder.String()), 0644); err != nil {
+	if err := os.MkdirAll(filepath.Join(inputDir, "routes"), 0o755); err != nil {
+		t.Fatalf("mkdir routes: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(inputDir, "routes", "routes.passive"), []byte(builder.String()), 0644); err != nil {
 		t.Fatalf("write routes list: %v", err)
 	}
 
@@ -290,7 +307,7 @@ func TestHTTPXBatchesLargeInputs(t *testing.T) {
 		return nil
 	}
 
-	if err := HTTPX(context.Background(), []string{"routes.passive"}, inputDir, make(chan string, 10)); err != nil {
+	if err := HTTPX(context.Background(), []string{"routes/routes.passive"}, inputDir, make(chan string, 10)); err != nil {
 		t.Fatalf("HTTPX returned error: %v", err)
 	}
 

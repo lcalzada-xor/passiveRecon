@@ -43,13 +43,13 @@ func TestSinkClassification(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	domains := readLines(t, filepath.Join(dir, "domains.passive"))
+	domains := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
 	wantDomains := []string{"example.com"}
 	if diff := cmp.Diff(wantDomains, domains); diff != "" {
 		t.Fatalf("unexpected domains (-want +got):\n%s", diff)
 	}
 
-	routes := readLines(t, filepath.Join(dir, "routes.passive"))
+	routes := readLines(t, filepath.Join(dir, "routes", "routes.passive"))
 	wantRoutes := []string{
 		"https://app.example.com/login",
 		"http://example.com/about",
@@ -59,7 +59,7 @@ func TestSinkClassification(t *testing.T) {
 		t.Fatalf("unexpected routes (-want +got):\n%s", diff)
 	}
 
-	certs := readLines(t, filepath.Join(dir, "certs.passive"))
+	certs := readLines(t, filepath.Join(dir, "certs", "certs.passive"))
 	wantCerts := []string{"alt1.example.com", "alt2.example.com", "alt3.example.com", "direct-cert.example.com"}
 	if diff := cmp.Diff(wantCerts, certs); diff != "" {
 		t.Fatalf("unexpected certs (-want +got):\n%s", diff)
@@ -88,7 +88,7 @@ func TestSinkFlush(t *testing.T) {
 
 	sink.Flush()
 
-	domains := readLines(t, filepath.Join(dir, "domains.passive"))
+	domains := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
 	wantDomains := []string{"one.example.com", "two.example.com"}
 	sort.Strings(domains)
 	if diff := cmp.Diff(wantDomains, domains); diff != "" {
@@ -109,11 +109,15 @@ func TestNewSinkClosesWritersOnError(t *testing.T) {
 	// Force the second writer creation to fail by pre-creating a directory with
 	// the same name. os.OpenFile will return an error because the path points to
 	// a directory instead of a regular file.
-	if err := os.Mkdir(filepath.Join(dir, "routes.passive"), 0o755); err != nil {
+	routesDir := filepath.Join(dir, "routes")
+	if err := os.MkdirAll(routesDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll routes dir: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(routesDir, "routes.passive"), 0o755); err != nil {
 		t.Fatalf("Mkdir routes.passive: %v", err)
 	}
 
-	domainPath := filepath.Join(dir, "domains.passive")
+	domainPath := filepath.Join(dir, "domains", "domains.passive")
 	if got := countOpenFDs(t, domainPath); got != 0 {
 		t.Fatalf("unexpected open descriptors before NewSink: %d", got)
 	}
