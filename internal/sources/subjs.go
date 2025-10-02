@@ -34,7 +34,8 @@ var (
 
 // SubJS executes the subjs binary using the routes active list as input. It collects
 // the discovered JavaScript URLs, validates that they respond with HTTP 200 and
-// writes the surviving URLs to the sink using the "js:" prefix.
+// writes the surviving URLs to the sink using the "active: js:" prefix so they
+// are tracked as active findings.
 func SubJS(ctx context.Context, routesFile string, outdir string, out chan<- string) error {
 	bin, ok := subjsFindBin("subjs")
 	if !ok {
@@ -96,7 +97,7 @@ func SubJS(ctx context.Context, routesFile string, outdir string, out chan<- str
 		return err
 	}
 	for _, url := range valid {
-		out <- "js: " + url
+		out <- "active: js: " + url
 	}
 	return nil
 }

@@ -145,7 +145,7 @@ func TestSubJSSuccess(t *testing.T) {
 
 	select {
 	case line := <-out:
-		if line != "js: https://cdn.example.com/lib.js" {
+		if line != "active: js: https://cdn.example.com/lib.js" {
 			t.Fatalf("unexpected sink output: %q", line)
 		}
 	case <-time.After(time.Second):
