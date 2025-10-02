@@ -9,3 +9,5 @@ require (
 	golang.org/x/net v0.44.0
 	golang.org/x/sync v0.17.0
 )
+
+require gopkg.in/yaml.v3 v3.0.1 // indirect

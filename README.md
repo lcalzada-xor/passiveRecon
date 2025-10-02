@@ -29,6 +29,63 @@ go run ./cmd/passive-rec -target example.com -outdir out -report
 
 The report is saved as `report.html` inside the selected output directory.
 
+### Configuration file
+
+You can pre-populate the CLI flags with a YAML or JSON configuration file by passing its path through `--config`:
+
+```
+go run ./cmd/passive-rec --config config.yaml
+```
+
+If a value is present both in the config file and as a CLI flag, the CLI flag wins. Supported keys are:
+
+| Campo              | Tipo                | Descripción                                      |
+|--------------------|---------------------|--------------------------------------------------|
+| `target`           | string              | Dominio objetivo                                 |
+| `outdir`           | string              | Directorio de salida                             |
+| `workers`          | int                 | Número de workers concurrentes                   |
+| `active`           | bool                | Ejecuta comprobaciones activas                   |
+| `tools`            | lista o CSV         | Herramientas a ejecutar                          |
+| `timeout`          | int                 | Timeout por herramienta en segundos              |
+| `verbosity`        | int                 | Nivel de verbosidad (0-3)                        |
+| `report`           | bool                | Genera informe HTML                              |
+| `censys_api_id`    | string              | Credencial Censys API ID                         |
+| `censys_api_secret`| string              | Credencial Censys API Secret                     |
+
+A YAML example:
+
+```yaml
+target: example.com
+outdir: out
+workers: 10
+active: true
+tools:
+  - subfinder
+  - amass
+timeout: 180
+verbosity: 1
+report: true
+censys_api_id: "${CENSYS_API_ID}"
+censys_api_secret: "${CENSYS_API_SECRET}"
+```
+
+The same configuration in JSON:
+
+```json
+{
+  "target": "example.com",
+  "outdir": "out",
+  "workers": 10,
+  "active": true,
+  "tools": ["subfinder", "amass"],
+  "timeout": 180,
+  "verbosity": 1,
+  "report": true,
+  "censys_api_id": "${CENSYS_API_ID}",
+  "censys_api_secret": "${CENSYS_API_SECRET}"
+}
+```
+
 ## Censys certificates integration
 
 The `censys` source consumes the [Censys Search API](https://search.censys.io/api) to enumerate hosts from the certificate corpus. You must supply your account credentials through the new flags or environment variables:
