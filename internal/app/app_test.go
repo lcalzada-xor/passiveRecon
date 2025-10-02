@@ -160,12 +160,34 @@ drained:
 		if trimmed == "" {
 			continue
 		}
+
+		isActive := false
+		if strings.HasPrefix(trimmed, "active:") {
+			isActive = true
+			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "active:"))
+			if trimmed == "" {
+				continue
+			}
+		}
+
 		targetFile := filepath.Join("domains", "domains.passive")
+		if isActive {
+			targetFile = filepath.Join("domains", "domains.active")
+		}
+
 		if strings.HasPrefix(trimmed, "meta: ") {
 			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "meta: "))
-			targetFile = "meta.passive"
+			if isActive {
+				targetFile = "meta.active"
+			} else {
+				targetFile = "meta.passive"
+			}
 		} else if strings.Contains(trimmed, "://") || strings.Contains(trimmed, "/") {
-			targetFile = filepath.Join("routes", "routes.passive")
+			if isActive {
+				targetFile = filepath.Join("routes", "routes.active")
+			} else {
+				targetFile = filepath.Join("routes", "routes.passive")
+			}
 		}
 		appendLine(filepath.Join(s.outdir, targetFile), trimmed)
 	}

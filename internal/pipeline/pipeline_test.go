@@ -49,6 +49,10 @@ func TestSinkClassification(t *testing.T) {
 		t.Fatalf("unexpected domains (-want +got):\n%s", diff)
 	}
 
+	if activeDomains := readLines(t, filepath.Join(dir, "domains", "domains.active")); activeDomains != nil {
+		t.Fatalf("expected empty domains.active, got %v", activeDomains)
+	}
+
 	routes := readLines(t, filepath.Join(dir, "routes", "routes.passive"))
 	wantRoutes := []string{
 		"https://app.example.com/login",
@@ -59,16 +63,28 @@ func TestSinkClassification(t *testing.T) {
 		t.Fatalf("unexpected routes (-want +got):\n%s", diff)
 	}
 
+	if activeRoutes := readLines(t, filepath.Join(dir, "routes", "routes.active")); activeRoutes != nil {
+		t.Fatalf("expected empty routes.active, got %v", activeRoutes)
+	}
+
 	certs := readLines(t, filepath.Join(dir, "certs", "certs.passive"))
 	wantCerts := []string{"alt1.example.com", "alt2.example.com", "alt3.example.com", "direct-cert.example.com"}
 	if diff := cmp.Diff(wantCerts, certs); diff != "" {
 		t.Fatalf("unexpected certs (-want +got):\n%s", diff)
 	}
 
+	if activeCerts := readLines(t, filepath.Join(dir, "certs", "certs.active")); activeCerts != nil {
+		t.Fatalf("expected empty certs.active, got %v", activeCerts)
+	}
+
 	meta := readLines(t, filepath.Join(dir, "meta.passive"))
 	wantMeta := []string{"run started"}
 	if diff := cmp.Diff(wantMeta, meta); diff != "" {
 		t.Fatalf("unexpected meta (-want +got):\n%s", diff)
+	}
+
+	if activeMeta := readLines(t, filepath.Join(dir, "meta.active")); activeMeta != nil {
+		t.Fatalf("expected empty meta.active, got %v", activeMeta)
 	}
 }
 
