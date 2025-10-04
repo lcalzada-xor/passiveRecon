@@ -26,6 +26,8 @@ var (
 	httpxBatchSize   = 5000
 	httpxWorkerCount = runtime.NumCPU()
 
+	httpxMetaEmit = func(string) {}
+
 	lowPriorityHTTPXExtensions = map[string]struct{}{
 		".ico": {},
 		".cur": {},
@@ -44,6 +46,30 @@ func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- st
 		return err
 	}
 
+	originalMeta := httpxMetaEmit
+	httpxMetaEmit = func(line string) {
+		out <- line
+	}
+	defer func() {
+		httpxMetaEmit = originalMeta
+	}()
+
+	combined, err := collectHTTPXInputs(outdir, listFiles)
+	if err != nil {
+		return err
+	}
+
+	if len(combined) == 0 {
+		return nil
+	}
+
+	intermediate, cleanup := forwardHTTPXOutput(out)
+	defer cleanup()
+
+	return runHTTPXWorkers(ctx, bin, combined, intermediate, httpxRunCmd, writeHTTPXInput)
+}
+
+func collectHTTPXInputs(outdir string, listFiles []string) ([]string, error) {
 	var combined []string
 	seen := make(map[string]struct{})
 
@@ -57,10 +83,10 @@ func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- st
 		data, err := os.ReadFile(inputPath)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				out <- "active: meta: httpx skipped missing input " + list
+				httpxMetaEmit("active: meta: httpx skipped missing input " + list)
 				continue
 			}
-			return err
+			return nil, err
 		}
 
 		scanner := bufio.NewScanner(bytes.NewReader(data))
@@ -83,14 +109,14 @@ func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- st
 			combined = append(combined, line)
 		}
 		if err := scanner.Err(); err != nil {
-			return fmt.Errorf("scan %s: %w", list, err)
+			return nil, fmt.Errorf("scan %s: %w", list, err)
 		}
 	}
 
-	if len(combined) == 0 {
-		return nil
-	}
+	return combined, nil
+}
 
+func forwardHTTPXOutput(out chan<- string) (chan<- string, func()) {
 	intermediate := make(chan string)
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -103,10 +129,25 @@ func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- st
 		}
 	}()
 
-	defer func() {
+	cleanup := func() {
 		close(intermediate)
 		wg.Wait()
-	}()
+	}
+
+	return intermediate, cleanup
+}
+
+func runHTTPXWorkers(
+	ctx context.Context,
+	bin string,
+	combined []string,
+	intermediate chan<- string,
+	runCmd func(context.Context, string, []string, chan<- string) error,
+	inputWriter func([]string) (string, func(), error),
+) error {
+	if len(combined) == 0 {
+		return nil
+	}
 
 	batchSize := httpxBatchSize
 	if batchSize <= 0 || batchSize > len(combined) {
@@ -126,6 +167,24 @@ func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- st
 	jobs := make(chan batchRange)
 	group, groupCtx := errgroup.WithContext(ctx)
 
+	group.Go(func() error {
+		defer close(jobs)
+		for start := 0; start < len(combined); start += batchSize {
+			end := start + batchSize
+			if end > len(combined) {
+				end = len(combined)
+			}
+
+			br := batchRange{start: start, end: end}
+			select {
+			case <-groupCtx.Done():
+				return nil
+			case jobs <- br:
+			}
+		}
+		return nil
+	})
+
 	for i := 0; i < workerCount; i++ {
 		group.Go(func() error {
 			for br := range jobs {
@@ -135,12 +194,12 @@ func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- st
 				default:
 				}
 
-				tmpPath, cleanup, err := writeHTTPXInput(combined[br.start:br.end])
+				tmpPath, cleanup, err := inputWriter(combined[br.start:br.end])
 				if err != nil {
 					return err
 				}
 
-				err = httpxRunCmd(groupCtx, bin, []string{
+				err = runCmd(groupCtx, bin, []string{
 					"-sc",
 					"-title",
 					"-content-type",
@@ -156,23 +215,6 @@ func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- st
 			return nil
 		})
 	}
-
-	go func() {
-		defer close(jobs)
-		for start := 0; start < len(combined); start += batchSize {
-			end := start + batchSize
-			if end > len(combined) {
-				end = len(combined)
-			}
-
-			br := batchRange{start: start, end: end}
-			select {
-			case <-groupCtx.Done():
-				return
-			case jobs <- br:
-			}
-		}
-	}()
 
 	if err := group.Wait(); err != nil {
 		return err
