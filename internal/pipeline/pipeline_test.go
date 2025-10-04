@@ -590,6 +590,11 @@ func TestRouteCategorizationActiveMode(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
+	mapsPassive := readLines(t, filepath.Join(dir, "routes", "maps", "maps.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/app.js.map"}, mapsPassive); diff != "" {
+		t.Fatalf("unexpected maps.passive contents (-want +got):\n%s", diff)
+	}
+
 	mapsPath := filepath.Join(dir, "routes", "maps", "maps.active")
 	mapsLines := readLines(t, mapsPath)
 	if diff := cmp.Diff([]string{"https://app.example.com/static/app.js.map"}, mapsLines); diff != "" {
@@ -599,6 +604,11 @@ func TestRouteCategorizationActiveMode(t *testing.T) {
 	jsonLines := readLines(t, filepath.Join(dir, "routes", "json", "json.active"))
 	if diff := cmp.Diff([]string{"https://app.example.com/static/manifest.json"}, jsonLines); diff != "" {
 		t.Fatalf("unexpected json.active contents (-want +got):\n%s", diff)
+	}
+
+	apiPassive := readLines(t, filepath.Join(dir, "routes", "api", "api.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/swagger.json"}, apiPassive); diff != "" {
+		t.Fatalf("unexpected api.passive contents (-want +got):\n%s", diff)
 	}
 
 	apiLines := readLines(t, filepath.Join(dir, "routes", "api", "api.active"))
@@ -633,6 +643,32 @@ func TestRouteCategorizationActiveModeSkipsErrorStatus(t *testing.T) {
 	jsonPath := filepath.Join(dir, "routes", "json", "json.active")
 	if _, err := os.Stat(jsonPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected no json.active file, got err=%v", err)
+	}
+}
+
+func TestRouteCategorizationPassiveModeEmitsActiveFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false)
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "active: https://app.example.com/static/app.js.map [200]"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	activeLines := readLines(t, filepath.Join(dir, "routes", "maps", "maps.active"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/app.js.map"}, activeLines); diff != "" {
+		t.Fatalf("unexpected maps.active contents (-want +got):\n%s", diff)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "routes", "maps", "maps.passive")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected maps.passive to be absent, got err=%v", err)
 	}
 }
 
