@@ -109,12 +109,12 @@ func runPipeline(ctx context.Context, steps []toolStep, opts orchestratorOptions
 	return state
 }
 
-func runSingleStep(ctx context.Context, step toolStep, state *pipelineState, opts orchestratorOptions) {
+func executeStep(ctx context.Context, step toolStep, state *pipelineState, opts orchestratorOptions) (func() error, bool) {
 	if !opts.requested[step.Name] {
-		return
+		return nil, false
 	}
 	if !shouldRunStep(step, state, opts) {
-		return
+		return nil, false
 	}
 
 	timeout := computeStepTimeout(step, state, opts)
@@ -124,30 +124,34 @@ func runSingleStep(ctx context.Context, step toolStep, state *pipelineState, opt
 	if opts.bar != nil {
 		task = opts.bar.Wrap(step.Name, task)
 	}
-	if err := task(); err != nil {
-		if errors.Is(err, runner.ErrMissingBinary) {
-			return
+
+	wrapped := func() error {
+		if err := task(); err != nil {
+			if errors.Is(err, runner.ErrMissingBinary) {
+				return runner.ErrMissingBinary
+			}
+			logx.Warnf("source error: %v", err)
 		}
-		logx.Warnf("source error: %v", err)
+		return nil
 	}
+
+	return wrapped, true
+}
+
+func runSingleStep(ctx context.Context, step toolStep, state *pipelineState, opts orchestratorOptions) {
+	task, ok := executeStep(ctx, step, state, opts)
+	if !ok {
+		return
+	}
+	task()
 }
 
 func runConcurrentSteps(ctx context.Context, steps []toolStep, state *pipelineState, opts orchestratorOptions) {
 	var wg runnerWaitGroup
 	for _, step := range steps {
-		if !opts.requested[step.Name] {
+		task, ok := executeStep(ctx, step, state, opts)
+		if !ok {
 			continue
-		}
-		if !shouldRunStep(step, state, opts) {
-			continue
-		}
-		current := step
-		timeout := computeStepTimeout(current, state, opts)
-		task := runWithTimeout(ctx, timeout, func(c context.Context) error {
-			return current.Run(c, state, opts)
-		})
-		if opts.bar != nil {
-			task = opts.bar.Wrap(current.Name, task)
 		}
 		wg.Go(task)
 	}
