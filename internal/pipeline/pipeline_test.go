@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"passive-rec/internal/certs"
+	"passive-rec/internal/netutil"
 )
 
 func TestSinkClassification(t *testing.T) {
@@ -178,7 +179,7 @@ func TestSinkFlush(t *testing.T) {
 	}
 }
 
-func TestNormalizeDomainKeyIPv6(t *testing.T) {
+func TestNormalizeDomainIPv6(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]string{
@@ -193,8 +194,8 @@ func TestNormalizeDomainKeyIPv6(t *testing.T) {
 		input, want := input, want
 		t.Run(input, func(t *testing.T) {
 			t.Parallel()
-			if got := normalizeDomainKey(input); got != want {
-				t.Fatalf("normalizeDomainKey(%q) = %q, want %q", input, got, want)
+			if got := netutil.NormalizeDomain(input); got != want {
+				t.Fatalf("NormalizeDomain(%q) = %q, want %q", input, got, want)
 			}
 		})
 	}
@@ -380,11 +381,11 @@ func TestRouteCategorizationPassive(t *testing.T) {
 		t.Fatalf("unexpected svg.passive contents (-want +got):\n%s", diff)
 	}
 
-        crawlLines := readLines(t, filepath.Join(dir, "routes", "crawl", "crawl.passive"))
-        wantCrawl := []string{
-                "https://app.example.com/robots.txt",
-                "https://app.example.com/sitemap.xml",
-        }
+	crawlLines := readLines(t, filepath.Join(dir, "routes", "crawl", "crawl.passive"))
+	wantCrawl := []string{
+		"https://app.example.com/robots.txt",
+		"https://app.example.com/sitemap.xml",
+	}
 	if diff := cmp.Diff(wantCrawl, crawlLines); diff != "" {
 		t.Fatalf("unexpected crawl.passive contents (-want +got):\n%s", diff)
 	}

@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -11,6 +10,7 @@ import (
 	"sync"
 
 	"passive-rec/internal/certs"
+	"passive-rec/internal/netutil"
 	"passive-rec/internal/out"
 )
 
@@ -130,80 +130,6 @@ type Sink struct {
 	processing         int
 	cond               *sync.Cond
 	activeMode         bool
-}
-
-func normalizeDomainKey(input string) string {
-	trimmed := strings.TrimSpace(input)
-	if trimmed == "" {
-		return ""
-	}
-
-	if idx := strings.IndexAny(trimmed, " \t"); idx != -1 {
-		trimmed = trimmed[:idx]
-	}
-
-	host := extractHost(trimmed)
-	if host == "" {
-		return ""
-	}
-
-	lower := strings.ToLower(host)
-	if strings.HasPrefix(lower, "www.") {
-		lower = lower[4:]
-	}
-	return lower
-}
-
-func extractHost(raw string) string {
-	if raw == "" {
-		return ""
-	}
-
-	candidate := raw
-	var parsed *url.URL
-	var err error
-
-	if strings.Contains(candidate, "://") {
-		parsed, err = url.Parse(candidate)
-	} else {
-		parsed, err = url.Parse("http://" + candidate)
-	}
-	if err == nil && parsed != nil {
-		hostPort := parsed.Host
-		hostname := parsed.Hostname()
-		if hostname != "" && !(strings.Count(hostPort, ":") > 1 && !strings.Contains(hostPort, "[")) {
-			return hostname
-		}
-		if hostPort != "" {
-			candidate = hostPort
-		}
-	}
-
-	if candidate == "" {
-		return ""
-	}
-
-	if at := strings.LastIndex(candidate, "@"); at != -1 {
-		candidate = candidate[at+1:]
-	}
-
-	if idx := strings.IndexAny(candidate, "/?#"); idx != -1 {
-		candidate = candidate[:idx]
-	}
-
-	if candidate == "" {
-		return ""
-	}
-
-	if host, _, err := net.SplitHostPort(candidate); err == nil {
-		return host
-	}
-
-	if strings.HasPrefix(candidate, "[") && strings.HasSuffix(candidate, "]") {
-		return strings.Trim(candidate, "[]")
-	}
-
-	return candidate
 }
 
 func NewSink(outdir string, active bool) (*Sink, error) {
@@ -462,7 +388,7 @@ func (s *Sink) processLine(ln string) {
 	}
 
 	// defecto: dominio
-	key := normalizeDomainKey(l)
+	key := netutil.NormalizeDomain(l)
 	if key == "" {
 		return
 	}
