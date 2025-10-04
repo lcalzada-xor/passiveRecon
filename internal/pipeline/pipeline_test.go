@@ -151,8 +151,8 @@ func TestSinkClassification(t *testing.T) {
 		t.Fatalf("unexpected certificate records (-want +got):\n%s", diff)
 	}
 
-	if _, err := os.Stat(filepath.Join(dir, "certs", "certs.active")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("expected certs.active to be absent, got err=%v", err)
+	if activeCerts := readLines(t, filepath.Join(dir, "certs", "certs.active")); activeCerts != nil {
+		t.Fatalf("expected empty certs.active, got %v", activeCerts)
 	}
 
 	meta := readLines(t, filepath.Join(dir, "meta.passive"))
@@ -163,6 +163,76 @@ func TestSinkClassification(t *testing.T) {
 
 	if activeMeta := readLines(t, filepath.Join(dir, "meta.active")); activeMeta != nil {
 		t.Fatalf("expected empty meta.active, got %v", activeMeta)
+	}
+}
+
+func TestActiveCertLines(t *testing.T) {
+	t.Parallel()
+
+	sink, dir := newTestSink(t, true)
+	sink.Start(1)
+
+	passiveRecord, err := (certs.Record{
+		Source:       "passive",
+		CommonName:   "passive-cert.example.com",
+		DNSNames:     []string{"passive-san.example.com"},
+		Issuer:       "Example CA",
+		NotBefore:    "2023-01-01T00:00:00Z",
+		NotAfter:     "2024-01-01T00:00:00Z",
+		SerialNumber: "p-01",
+	}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal passive record: %v", err)
+	}
+
+	activeRecord, err := (certs.Record{
+		Source:       "active",
+		CommonName:   "active-cert.example.com",
+		DNSNames:     []string{"active-san-one.example.com", "active-san-two.example.com"},
+		Issuer:       "Example Active CA",
+		NotBefore:    "2024-02-02T00:00:00Z",
+		NotAfter:     "2025-02-02T00:00:00Z",
+		SerialNumber: "a-01",
+	}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal active record: %v", err)
+	}
+
+	sink.In() <- "cert: " + passiveRecord
+	sink.In() <- "active: cert: " + activeRecord
+	sink.In() <- "active: cert: " + activeRecord
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	passiveLines := readLines(t, filepath.Join(dir, "certs", "certs.passive"))
+	if diff := cmp.Diff([]string{passiveRecord}, passiveLines); diff != "" {
+		t.Fatalf("unexpected certs.passive contents (-want +got):\n%s", diff)
+	}
+
+	activeLines := readLines(t, filepath.Join(dir, "certs", "certs.active"))
+	if diff := cmp.Diff([]string{activeRecord}, activeLines); diff != "" {
+		t.Fatalf("unexpected certs.active contents (-want +got):\n%s", diff)
+	}
+
+	passiveDomains := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
+	sort.Strings(passiveDomains)
+	wantPassiveDomains := []string{
+		"active-cert.example.com",
+		"active-san-one.example.com",
+		"active-san-two.example.com",
+		"passive-cert.example.com",
+		"passive-san.example.com",
+	}
+	if diff := cmp.Diff(wantPassiveDomains, passiveDomains); diff != "" {
+		t.Fatalf("unexpected domains.passive contents (-want +got):\n%s", diff)
+	}
+
+	activeDomains := readLines(t, filepath.Join(dir, "domains", "domains.active"))
+	sort.Strings(activeDomains)
+	if diff := cmp.Diff(wantPassiveDomains, activeDomains); diff != "" {
+		t.Fatalf("unexpected domains.active contents (-want +got):\n%s", diff)
 	}
 }
 

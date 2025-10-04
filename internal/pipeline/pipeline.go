@@ -151,6 +151,7 @@ type Sink struct {
 	seenRoutesCrawl       map[string]struct{}
 	seenRoutesMeta        map[string]struct{}
 	seenCertsPassive      map[string]struct{}
+	seenCertsActive       map[string]struct{}
 	procMu                sync.Mutex
 	processing            int
 	cond                  *sync.Cond
@@ -215,6 +216,10 @@ func NewSink(outdir string, active bool) (*Sink, error) {
 	if err != nil {
 		return nil, err
 	}
+	cActive, err := newWriter("certs", "certs.active")
+	if err != nil {
+		return nil, err
+	}
 	mPassive, err := newWriter("", "meta.passive")
 	if err != nil {
 		return nil, err
@@ -237,7 +242,7 @@ func NewSink(outdir string, active bool) (*Sink, error) {
 		RoutesSVG:             writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "svg"), "svg.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "svg"), "svg.active")},
 		RoutesCrawl:           writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "crawl"), "crawl.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "crawl"), "crawl.active")},
 		RoutesMetaFindings:    writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "meta"), "meta.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "meta"), "meta.active")},
-		Certs:                 writerPair{passive: cPassive},
+		Certs:                 writerPair{passive: cPassive, active: cActive},
 		Meta:                  writerPair{passive: mPassive, active: mActive},
 		lines:                 make(chan string, 1024),
 		seenDomainsPassive:    make(map[string]struct{}),
@@ -256,6 +261,7 @@ func NewSink(outdir string, active bool) (*Sink, error) {
 		seenRoutesCrawl:       make(map[string]struct{}),
 		seenRoutesMeta:        make(map[string]struct{}),
 		seenCertsPassive:      make(map[string]struct{}),
+		seenCertsActive:       make(map[string]struct{}),
 		activeMode:            active,
 	}
 	s.cond = sync.NewCond(&s.procMu)
@@ -501,15 +507,13 @@ func handleRoute(s *Sink, line string, isActive bool) bool {
 }
 
 func handleCert(s *Sink, line string, isActive bool) bool {
-	_ = isActive // currently unused but kept for signature consistency
-
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
 		return true
 	}
 
 	if strings.HasPrefix(trimmed, "cert:") {
-		s.writeCertLine(strings.TrimSpace(strings.TrimPrefix(trimmed, "cert:")))
+		s.writeCertLine(strings.TrimSpace(strings.TrimPrefix(trimmed, "cert:")), isActive)
 		return true
 	}
 
@@ -682,7 +686,7 @@ func (s *Sink) writeLazyCategory(route string, isActive bool, writers writerPair
 	_ = target.WriteURL(route)
 }
 
-func (s *Sink) writeCertLine(line string) {
+func (s *Sink) writeCertLine(line string, isActive bool) {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return
@@ -721,12 +725,19 @@ func (s *Sink) writeCertLine(line string) {
 	if key == "" {
 		key = strings.ToLower(serialized)
 	}
-	if s.markSeen(s.seenCertsPassive, key) {
+
+	seen := s.seenCertsPassive
+	target := s.Certs.passive
+	if isActive {
+		seen = s.seenCertsActive
+		target = s.Certs.active
+	}
+	if seen != nil && s.markSeen(seen, key) {
 		return
 	}
 
-	if s.Certs.passive != nil {
-		_ = s.Certs.passive.WriteRaw(serialized)
+	if target != nil {
+		_ = target.WriteRaw(serialized)
 	}
 }
 
