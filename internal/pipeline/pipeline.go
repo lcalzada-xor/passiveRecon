@@ -403,7 +403,22 @@ func handleHTML(s *Sink, line string, isActive bool) bool {
 		return true
 	}
 
-	if isImageURL(html) {
+	base := html
+	if isActive {
+		base = extractRouteBase(html)
+		if status, ok := parseActiveRouteStatus(html, base); ok {
+			if status <= 0 || status >= 400 {
+				return true
+			}
+		}
+	}
+
+	imageTarget := html
+	if base != "" {
+		imageTarget = base
+	}
+
+	if isImageURL(imageTarget) {
 		seen := s.seenHTMLImagesPassive
 		writer := s.RoutesImages.passive
 		if isActive {

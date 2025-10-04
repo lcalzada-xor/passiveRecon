@@ -454,6 +454,28 @@ func TestHTMLLinesAreWrittenToActiveFile(t *testing.T) {
 	}
 }
 
+func TestHTMLActiveSkipsErrorResponses(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false)
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "active: html: https://app.example.com [404] [Not Found]"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	htmlPath := filepath.Join(dir, "routes", "html", "html.active")
+	if lines := readLines(t, htmlPath); len(lines) != 0 {
+		t.Fatalf("expected html.active to be empty, got %v", lines)
+	}
+}
+
 func TestHTMLImageLinesAreRedirectedToImagesFile(t *testing.T) {
 	t.Parallel()
 
