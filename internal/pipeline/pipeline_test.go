@@ -14,6 +14,16 @@ import (
 	"passive-rec/internal/netutil"
 )
 
+func newTestSink(t *testing.T, active bool) (*Sink, string) {
+	t.Helper()
+	dir := t.TempDir()
+	sink, err := NewSink(dir, active)
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+	return sink, dir
+}
+
 func TestSinkClassification(t *testing.T) {
 	t.Parallel()
 
