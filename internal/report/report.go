@@ -24,6 +24,11 @@ type SinkFiles struct {
 	Routes  string
 	Certs   string
 	Meta    string
+
+	ActiveDomains string
+	ActiveRoutes  string
+	ActiveCerts   string
+	ActiveMeta    string
 }
 
 // DefaultSinkFiles returns the expected sink file paths within outDir.
@@ -62,6 +67,39 @@ func Generate(ctx context.Context, cfg *config.Config, files SinkFiles) error {
 		return fmt.Errorf("report: meta: %w", err)
 	}
 
+	var active activeData
+	if cfg.Active {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		activeDomains, err := readLines(ctx, files.ActiveDomains)
+		if err != nil {
+			return fmt.Errorf("report: domains active: %w", err)
+		}
+		activeRoutes, err := readLines(ctx, files.ActiveRoutes)
+		if err != nil {
+			return fmt.Errorf("report: routes active: %w", err)
+		}
+		activeCerts, err := readLines(ctx, files.ActiveCerts)
+		if err != nil {
+			return fmt.Errorf("report: certs active: %w", err)
+		}
+		activeMeta, err := readLines(ctx, files.ActiveMeta)
+		if err != nil {
+			return fmt.Errorf("report: meta active: %w", err)
+		}
+
+		active = activeData{
+			RawDomains: activeDomains,
+			RawRoutes:  activeRoutes,
+			Meta:       activeMeta,
+		}
+		active.Domains = buildDomainStats(activeDomains)
+		active.Routes = buildRouteStats(activeRoutes)
+		active.Certificates = buildCertStats(activeCerts)
+		active.Highlights = buildHighlights(active.Domains, active.Routes, active.Certificates)
+	}
+
 	domainStats := buildDomainStats(domains)
 	routeStats := buildRouteStats(routes)
 	certStats := buildCertStats(certs)
@@ -83,6 +121,8 @@ func Generate(ctx context.Context, cfg *config.Config, files SinkFiles) error {
 		Certificates: certStats,
 		Meta:         meta,
 		Highlights:   buildHighlights(domainStats, routeStats, certStats),
+		ActiveMode:   cfg.Active,
+		Active:       active,
 	}
 
 	reportPath := filepath.Join(cfg.OutDir, "report.html")
@@ -170,6 +210,18 @@ type reportData struct {
 	Certificates certStats
 	Meta         []string
 	Highlights   []string
+	ActiveMode   bool
+	Active       activeData
+}
+
+type activeData struct {
+	Domains      domainStats
+	Routes       routeStats
+	Certificates certStats
+	Meta         []string
+	RawDomains   []string
+	RawRoutes    []string
+	Highlights   []string
 }
 
 const (
@@ -189,6 +241,7 @@ var certTimeLayouts = []string{
 var reportTmpl = template.Must(template.New("report").Funcs(template.FuncMap{
 	"hasData":    func(items []countItem) bool { return len(items) > 0 },
 	"hasStrings": func(items []string) bool { return len(items) > 0 },
+	"limit":      func(items []string, n int) []string { return limitStrings(items, n) },
 }).Parse(reportTemplate))
 
 var (
@@ -916,5 +969,98 @@ const reportTemplate = `<!DOCTYPE html>
                 <p class="muted">Sin entradas meta.</p>
                 {{end}}
         </section>
+        {{if .ActiveMode}}
+        <section>
+                <h2>Resultados de recolección activa</h2>
+                <p class="subtext">Hallazgos derivados de validaciones activas contra los activos descubiertos.</p>
+                {{if or (gt .Active.Domains.Total 0) (gt .Active.Routes.Total 0) (gt (len .Active.Meta) 0) (gt .Active.Certificates.Total 0)}}
+                <div class="cards">
+                        <div class="card">
+                                <h3>Dominios activos detectados</h3>
+                                <p class="metric">{{.Active.Domains.Total}}</p>
+                                <p class="subtext">{{.Active.Domains.Unique}} dominios únicos observados.</p>
+                        </div>
+                        <div class="card">
+                                <h3>Rutas activas evaluadas</h3>
+                                <p class="metric">{{.Active.Routes.Total}}</p>
+                                <p class="subtext">{{.Active.Routes.UniqueHosts}} hosts; {{printf "%.1f" .Active.Routes.SecurePercentage}}% con HTTPS.</p>
+                        </div>
+                        <div class="card">
+                                <h3>Certificados activos observados</h3>
+                                <p class="metric">{{.Active.Certificates.Total}}</p>
+                                <p class="subtext">{{.Active.Certificates.Unique}} certificados únicos.</p>
+                        </div>
+                </div>
+                {{if hasStrings .Active.Highlights}}
+                <h3>Hallazgos activos clave</h3>
+                <ul>
+                        {{range .Active.Highlights}}
+                        <li>{{.}}</li>
+                        {{end}}
+                </ul>
+                {{else}}
+                <p class="muted">Sin hallazgos activos destacados.</p>
+                {{end}}
+                <h3>Dominios detectados</h3>
+                {{if hasStrings .Active.RawDomains}}
+                <ul>
+                        {{range (limit .Active.RawDomains 25)}}
+                        <li>{{.}}</li>
+                        {{end}}
+                </ul>
+                {{if gt (len .Active.RawDomains) 25}}
+                <p class="muted">Mostrando 25 de {{len .Active.RawDomains}} dominios activos.</p>
+                {{end}}
+                {{else}}
+                <p class="muted">No se recolectaron dominios activos.</p>
+                {{end}}
+                <h3>Rutas activas</h3>
+                {{if hasStrings .Active.RawRoutes}}
+                <ul>
+                        {{range (limit .Active.RawRoutes 25)}}
+                        <li>{{.}}</li>
+                        {{end}}
+                </ul>
+                {{if gt (len .Active.RawRoutes) 25}}
+                <p class="muted">Mostrando 25 de {{len .Active.RawRoutes}} rutas activas.</p>
+                {{end}}
+                {{else}}
+                <p class="muted">No se registraron rutas activas.</p>
+                {{end}}
+                {{if gt .Active.Certificates.Total 0}}
+                <h3>Certificados (activos)</h3>
+                <p><strong>Total recolectado:</strong> {{.Active.Certificates.Total}} (únicos: {{.Active.Certificates.Unique}})</p>
+                {{if hasStrings .Active.Certificates.ExpiredList}}
+                <h4>Certificados vencidos detectados</h4>
+                <ul>
+                        {{range .Active.Certificates.ExpiredList}}
+                        <li>{{.}}</li>
+                        {{end}}
+                </ul>
+                {{end}}
+                {{if hasStrings .Active.Certificates.ExpiringSoonList}}
+                <h4>Certificados por expirar pronto</h4>
+                <ul>
+                        {{range .Active.Certificates.ExpiringSoonList}}
+                        <li>{{.}}</li>
+                        {{end}}
+                </ul>
+                {{end}}
+                {{end}}
+                <h3>Meta activa</h3>
+                {{if hasStrings .Active.Meta}}
+                <ul>
+                        {{range .Active.Meta}}
+                        <li>{{.}}</li>
+                        {{end}}
+                </ul>
+                {{else}}
+                <p class="muted">Sin entradas meta activas.</p>
+                {{end}}
+                {{else}}
+                <p class="muted">Modo activo habilitado pero no se generaron artefactos para mostrar.</p>
+                {{end}}
+        </section>
+        {{end}}
 </body>
 </html>`

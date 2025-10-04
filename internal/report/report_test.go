@@ -120,6 +120,45 @@ func TestGenerateCreatesHTMLReport(t *testing.T) {
 	}
 }
 
+func TestGenerateIncludesActiveData(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeFixture(t, filepath.Join(dir, "domains", "domains.passive"), "example.com\n")
+	writeFixture(t, filepath.Join(dir, "routes", "routes.passive"), "https://example.com\n")
+	writeFixture(t, filepath.Join(dir, "certs", "certs.passive"), "")
+	writeFixture(t, filepath.Join(dir, "meta.passive"), "passive: ok\n")
+
+	activeDomain := "vpn-admin.example.com"
+	activeRoute := "http://vpn-admin.example.com/login [200]"
+	writeFixture(t, filepath.Join(dir, "domains", "domains.active"), activeDomain)
+	writeFixture(t, filepath.Join(dir, "routes", "routes.active"), activeRoute)
+	writeFixture(t, filepath.Join(dir, "meta.active"), "httpx(active): 1/1 ok\n")
+
+	cfg := &config.Config{Target: "example.com", OutDir: dir, Active: true}
+	files := DefaultSinkFiles(dir)
+	files.ActiveDomains = filepath.Join(dir, "domains", "domains.active")
+	files.ActiveRoutes = filepath.Join(dir, "routes", "routes.active")
+	files.ActiveMeta = filepath.Join(dir, "meta.active")
+
+	if err := Generate(context.Background(), cfg, files); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	contents := readFile(t, filepath.Join(dir, "report.html"))
+	checks := []string{
+		"Resultados de recolección activa",
+		activeDomain,
+		activeRoute,
+		"httpx(active): 1/1 ok",
+	}
+	for _, want := range checks {
+		if !strings.Contains(contents, want) {
+			t.Fatalf("expected report.html to contain %q\nreport contents:\n%s", want, contents)
+		}
+	}
+}
+
 func TestGenerateHandlesMissingFiles(t *testing.T) {
 	t.Parallel()
 
