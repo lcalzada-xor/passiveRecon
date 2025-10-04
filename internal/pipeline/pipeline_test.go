@@ -84,7 +84,14 @@ func TestSinkClassification(t *testing.T) {
 	}
 
 	domains := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
-	wantDomains := []string{"example.com", "2001:db8::1"}
+	wantDomains := []string{
+		"example.com",
+		"2001:db8::1",
+		"alt1.example.com",
+		"alt2.example.com",
+		"direct-cert.example.com",
+		"alt3.example.com",
+	}
 	if diff := cmp.Diff(wantDomains, domains); diff != "" {
 		t.Fatalf("unexpected domains (-want +got):\n%s", diff)
 	}
@@ -244,6 +251,70 @@ func TestNewSinkClosesWritersOnError(t *testing.T) {
 
 	if got := countOpenFDs(t, domainPath); got != 0 {
 		t.Fatalf("domains writer file descriptor leaked: %d", got)
+	}
+}
+
+func TestCertLinesPopulateDomainsPassiveSink(t *testing.T) {
+	t.Parallel()
+
+	sink, dir := newTestSink(t, false)
+	sink.Start(1)
+
+	raw, err := (certs.Record{
+		CommonName: "cn.example.com",
+		DNSNames:   []string{"alt1.example.com"},
+	}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal certificate: %v", err)
+	}
+
+	sink.In() <- "cert: " + raw
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	domains := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
+	want := []string{"alt1.example.com", "cn.example.com"}
+	if diff := cmp.Diff(want, domains); diff != "" {
+		t.Fatalf("unexpected domains.passive contents (-want +got):\n%s", diff)
+	}
+
+	if active := readLines(t, filepath.Join(dir, "domains", "domains.active")); active != nil {
+		t.Fatalf("expected empty domains.active, got %v", active)
+	}
+}
+
+func TestCertLinesPopulateDomainsActiveSink(t *testing.T) {
+	t.Parallel()
+
+	sink, dir := newTestSink(t, true)
+	sink.Start(1)
+
+	raw, err := (certs.Record{
+		CommonName: "api.example.com",
+		DNSNames:   []string{"service.example.com"},
+	}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal certificate: %v", err)
+	}
+
+	sink.In() <- "cert: " + raw
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	want := []string{"api.example.com", "service.example.com"}
+
+	passive := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
+	if diff := cmp.Diff(want, passive); diff != "" {
+		t.Fatalf("unexpected domains.passive contents (-want +got):\n%s", diff)
+	}
+
+	active := readLines(t, filepath.Join(dir, "domains", "domains.active"))
+	if diff := cmp.Diff(want, active); diff != "" {
+		t.Fatalf("unexpected domains.active contents (-want +got):\n%s", diff)
 	}
 }
 
