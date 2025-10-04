@@ -46,7 +46,7 @@ type pipelineState struct {
 }
 
 var defaultPipeline = []toolStep{
-	{Name: "amass", Run: stepAmass},
+	{Name: "amass", Group: "subdomain-sources", Run: stepAmass},
 	{Name: "subfinder", Group: "subdomain-sources", Run: stepSubfinder},
 	{Name: "assetfinder", Group: "subdomain-sources", Run: stepAssetfinder},
 	{Name: "crtsh", Group: "cert-sources", Run: stepCRTSh},
