@@ -24,6 +24,8 @@ func TestNormalizeDomain(t *testing.T) {
 		"http://example.com/path/to/page":                       "example.com",
 		"https://example.com?query=1":                           "example.com",
 		"http://[2001:db8::1]/path":                             "2001:db8::1",
+		"No results found":                                      "",
+		"NO":                                                    "",
 	}
 
 	for input, want := range tests {

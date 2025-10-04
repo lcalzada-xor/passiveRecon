@@ -75,5 +75,9 @@ func NormalizeDomain(line string) string {
 		return ""
 	}
 
+	if net.ParseIP(lowered) == nil && !strings.Contains(lowered, ".") {
+		return ""
+	}
+
 	return lowered
 }

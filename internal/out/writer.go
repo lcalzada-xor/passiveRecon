@@ -56,6 +56,10 @@ func normalizeDomain(d string) string {
 		lower = lower[4:]
 	}
 
+	if net.ParseIP(lower) == nil && !strings.Contains(lower, ".") {
+		return ""
+	}
+
 	if meta != "" {
 		return lower + " " + meta
 	}
