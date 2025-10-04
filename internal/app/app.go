@@ -46,7 +46,6 @@ func Run(cfg *config.Config) error {
 	}
 	cfg.OutDir = outDir
 
-	// preparar sink (writers)
 	sink, err := sinkFactory(cfg.OutDir, cfg.Active)
 	if err != nil {
 		return err
@@ -54,86 +53,249 @@ func Run(cfg *config.Config) error {
 	defer sink.Close()
 	sink.Start(cfg.Workers)
 
-	// context base
 	ctx := context.Background()
 
-	// lanzar fuentes según tools
-	bar := newProgressBar(len(cfg.Tools), nil)
-	if bar != nil && len(cfg.Tools) > 0 {
-		logx.SetOutput(bar.Writer())
-		defer logx.SetOutput(nil)
+	normalizeTool := func(name string) string {
+		return strings.ToLower(strings.TrimSpace(name))
 	}
-	var (
-		wg        runnerWaitGroup
-		deferreds []func() error
-	)
-	for _, t := range cfg.Tools {
-		toolName := strings.TrimSpace(t)
-		switch strings.ToLower(toolName) {
-		case "subfinder":
-			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
-				return sourceSubfinder(c, cfg.Target, sink.In())
-			})))
-		case "assetfinder":
-			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
-				return sourceAssetfinder(c, cfg.Target, sink.In())
-			})))
-		case "amass":
-			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
-				return sourceAmass(c, cfg.Target, sink.In())
-			})))
-		case "waybackurls":
-			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
-				return sourceWayback(c, cfg.Target, sink.In())
-			})))
-		case "gau":
-			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
-				return sourceGAU(c, cfg.Target, sink.In())
-			})))
-		case "crtsh":
-			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
-				return sourceCRTSh(c, cfg.Target, sink.In())
-			})))
-		case "censys":
-			wg.Go(bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
-				return sourceCensys(c, cfg.Target, cfg.CensysAPIID, cfg.CensysAPISecret, sink.In())
-			})))
-		case "httpx":
-			if cfg.Active {
-				deferreds = append(deferreds, bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
-					// leer de domains/domains.passive y routes/routes.passive generado
-					return sourceHTTPX(c, []string{"domains/domains.passive", "routes/routes.passive"}, cfg.OutDir, sink.In())
-				})))
-			} else {
-				sink.In() <- "meta: httpx skipped (requires --active)"
-				bar.StepDone(toolName, "omitido")
-			}
-		case "subjs":
-			if cfg.Active {
-				deferreds = append(deferreds, bar.Wrap(toolName, runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
-					return sourceSubJS(c, filepath.Join("routes", "routes.active"), cfg.OutDir, sink.In())
-				})))
-			} else {
-				sink.In() <- "meta: subjs skipped (requires --active)"
-				bar.StepDone(toolName, "omitido")
-			}
-		default:
-			sink.In() <- fmt.Sprintf("meta: unknown tool: %s", t)
-			bar.StepDone(toolName, "desconocido")
+
+	requested := make(map[string]bool)
+	var normalizedOrder []string
+	for _, raw := range cfg.Tools {
+		tool := normalizeTool(raw)
+		if tool == "" {
+			continue
+		}
+		normalizedOrder = append(normalizedOrder, tool)
+		requested[tool] = true
+	}
+	if (requested["waybackurls"] || requested["gau"]) && !requested["dedupe"] {
+		requested["dedupe"] = true
+	}
+
+	known := map[string]struct{}{
+		"amass": {}, "subfinder": {}, "assetfinder": {}, "crtsh": {},
+		"censys": {}, "dedupe": {}, "waybackurls": {}, "gau": {},
+		"httpx": {}, "subjs": {},
+	}
+	pipelineOrder := []string{"amass", "subfinder", "assetfinder", "crtsh", "censys", "dedupe", "waybackurls", "gau", "httpx", "subjs"}
+
+	var ordered []string
+	seenOrdered := make(map[string]bool)
+	for _, tool := range pipelineOrder {
+		if requested[tool] {
+			ordered = append(ordered, tool)
+			seenOrdered[tool] = true
 		}
 	}
 
-	wg.Wait()
-	sink.Flush()
-	for _, task := range deferreds {
+	var unknown []string
+	for _, tool := range normalizedOrder {
+		if seenOrdered[tool] {
+			continue
+		}
+		if _, ok := known[tool]; !ok {
+			ordered = append(ordered, tool)
+			unknown = append(unknown, tool)
+			seenOrdered[tool] = true
+		}
+	}
+
+	bar := newProgressBar(len(ordered), nil)
+	if bar != nil && len(ordered) > 0 {
+		logx.SetOutput(bar.Writer())
+		defer logx.SetOutput(nil)
+	}
+
+	runSequential := func(name string, fn func(context.Context) error) {
+		if !requested[name] {
+			return
+		}
+		task := runWithTimeout(ctx, cfg.TimeoutS, fn)
+		if bar != nil {
+			task = bar.Wrap(name, task)
+		}
 		if err := task(); err != nil {
 			if errors.Is(err, runner.ErrMissingBinary) {
-				continue
+				return
 			}
 			logx.Warnf("source error: %v", err)
 		}
 	}
+
+	runConcurrent := func(names []string, builder func(string) func(context.Context) error) {
+		var wg runnerWaitGroup
+		for _, name := range names {
+			if !requested[name] {
+				continue
+			}
+			fn := builder(name)
+			if fn == nil {
+				continue
+			}
+			task := runWithTimeout(ctx, cfg.TimeoutS, fn)
+			if bar != nil {
+				task = bar.Wrap(name, task)
+			}
+			wg.Go(task)
+		}
+		wg.Wait()
+	}
+
+	runSequential("amass", func(c context.Context) error {
+		return sourceAmass(c, cfg.Target, sink.In())
+	})
+
+	runConcurrent([]string{"subfinder", "assetfinder"}, func(name string) func(context.Context) error {
+		switch name {
+		case "subfinder":
+			return func(c context.Context) error {
+				return sourceSubfinder(c, cfg.Target, sink.In())
+			}
+		case "assetfinder":
+			return func(c context.Context) error {
+				return sourceAssetfinder(c, cfg.Target, sink.In())
+			}
+		default:
+			return nil
+		}
+	})
+
+	runConcurrent([]string{"crtsh", "censys"}, func(name string) func(context.Context) error {
+		switch name {
+		case "crtsh":
+			return func(c context.Context) error {
+				return sourceCRTSh(c, cfg.Target, sink.In())
+			}
+		case "censys":
+			return func(c context.Context) error {
+				return sourceCensys(c, cfg.Target, cfg.CensysAPIID, cfg.CensysAPISecret, sink.In())
+			}
+		default:
+			return nil
+		}
+	})
+
 	sink.Flush()
+
+	domainListFile := filepath.Join("domains", "domains.passive")
+	var (
+		dedupedDomains []string
+		dedupeExecuted bool
+	)
+	if requested["dedupe"] {
+		runSequential("dedupe", func(context.Context) error {
+			domains, err := dedupeDomainList(cfg.OutDir)
+			if err != nil {
+				return err
+			}
+			dedupedDomains = domains
+			domainListFile = filepath.Join("domains", "domains.dedupe")
+			dedupeExecuted = true
+			sink.In() <- fmt.Sprintf("meta: dedupe retained %d domains", len(domains))
+			return nil
+		})
+	}
+
+	if dedupeExecuted && len(dedupedDomains) == 0 {
+		sink.In() <- "meta: dedupe produced no domains"
+	}
+
+	if requested["waybackurls"] || requested["gau"] {
+		if len(dedupedDomains) == 0 {
+			if requested["waybackurls"] {
+				sink.In() <- "meta: waybackurls skipped (no domains after dedupe)"
+				if bar != nil {
+					bar.StepDone("waybackurls", "omitido")
+				}
+			}
+			if requested["gau"] {
+				sink.In() <- "meta: gau skipped (no domains after dedupe)"
+				if bar != nil {
+					bar.StepDone("gau", "omitido")
+				}
+			}
+		} else {
+			var wg runnerWaitGroup
+			if requested["waybackurls"] {
+				task := runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
+					return sourceWayback(c, dedupedDomains, sink.In())
+				})
+				if bar != nil {
+					task = bar.Wrap("waybackurls", task)
+				}
+				wg.Go(task)
+			}
+			if requested["gau"] {
+				task := runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
+					return sourceGAU(c, dedupedDomains, sink.In())
+				})
+				if bar != nil {
+					task = bar.Wrap("gau", task)
+				}
+				wg.Go(task)
+			}
+			wg.Wait()
+		}
+	}
+
+	sink.Flush()
+
+	if requested["httpx"] {
+		if !cfg.Active {
+			sink.In() <- "meta: httpx skipped (requires --active)"
+			if bar != nil {
+				bar.StepDone("httpx", "omitido")
+			}
+		} else {
+			sink.Flush()
+			inputs := []string{domainListFile, filepath.Join("routes", "routes.passive")}
+			task := runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
+				return sourceHTTPX(c, inputs, cfg.OutDir, sink.In())
+			})
+			if bar != nil {
+				task = bar.Wrap("httpx", task)
+			}
+			if err := task(); err != nil {
+				if !errors.Is(err, runner.ErrMissingBinary) {
+					logx.Warnf("source error: %v", err)
+				}
+			}
+		}
+	}
+
+	sink.Flush()
+
+	if requested["subjs"] {
+		if !cfg.Active {
+			sink.In() <- "meta: subjs skipped (requires --active)"
+			if bar != nil {
+				bar.StepDone("subjs", "omitido")
+			}
+		} else {
+			task := runWithTimeout(ctx, cfg.TimeoutS, func(c context.Context) error {
+				return sourceSubJS(c, filepath.Join("routes", "routes.active"), cfg.OutDir, sink.In())
+			})
+			if bar != nil {
+				task = bar.Wrap("subjs", task)
+			}
+			if err := task(); err != nil {
+				if !errors.Is(err, runner.ErrMissingBinary) {
+					logx.Warnf("source error: %v", err)
+				}
+			}
+		}
+	}
+
+	sink.Flush()
+
+	for _, tool := range unknown {
+		sink.In() <- fmt.Sprintf("meta: unknown tool: %s", tool)
+		if bar != nil {
+			bar.StepDone(tool, "desconocido")
+		}
+	}
+
 	if cfg.Report {
 		sinkFiles := report.DefaultSinkFiles(cfg.OutDir)
 		if err := report.Generate(ctx, cfg, sinkFiles); err != nil {

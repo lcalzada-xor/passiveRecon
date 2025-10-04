@@ -350,7 +350,13 @@ func shouldForwardHTTPXRoute(hasStatus bool, status int) bool {
 	if !hasStatus {
 		return true
 	}
-	return status != 0
+	if status == 0 {
+		return false
+	}
+	if status == 404 {
+		return false
+	}
+	return true
 }
 
 func shouldEmitHTTPXDomain(hasStatus bool, status int) bool {

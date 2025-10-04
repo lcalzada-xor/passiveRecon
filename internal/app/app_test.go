@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
 	"passive-rec/internal/config"
 )
 
@@ -103,6 +105,54 @@ func TestRunFlushesBeforeReportForDeferredSources(t *testing.T) {
 	}
 	if !strings.Contains(string(reportData), "deferred.test") {
 		t.Fatalf("expected report to include deferred source data, got:\n%s", string(reportData))
+	}
+}
+
+func TestDedupeDomainListNormalizesAndFilters(t *testing.T) {
+	dir := t.TempDir()
+	domainsDir := filepath.Join(dir, "domains")
+	if err := os.MkdirAll(domainsDir, 0o755); err != nil {
+		t.Fatalf("mkdir domains: %v", err)
+	}
+
+	contents := strings.Join([]string{
+		"Example.com",
+		"api.example.com ",
+		"*.ignored.example.com",
+		"https://WWW.Example.com/path",
+		"login.example.com [source]",
+		"  # comment",
+		"[2001:db8::1]:443",
+		"api.example.com",
+	}, "\n")
+
+	inputPath := filepath.Join(domainsDir, "domains.passive")
+	if err := os.WriteFile(inputPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write domains.passive: %v", err)
+	}
+
+	got, err := dedupeDomainList(dir)
+	if err != nil {
+		t.Fatalf("dedupeDomainList returned error: %v", err)
+	}
+
+	want := []string{"2001:db8::1", "api.example.com", "example.com", "login.example.com"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("unexpected dedupe output (-want +got):\n%s", diff)
+	}
+
+	dedupePath := filepath.Join(domainsDir, "domains.dedupe")
+	data, err := os.ReadFile(dedupePath)
+	if err != nil {
+		t.Fatalf("read domains.dedupe: %v", err)
+	}
+	trimmed := strings.TrimSpace(string(data))
+	var lines []string
+	if trimmed != "" {
+		lines = strings.Split(trimmed, "\n")
+	}
+	if diff := cmp.Diff(want, lines); diff != "" {
+		t.Fatalf("unexpected domains.dedupe contents (-want +got):\n%s", diff)
 	}
 }
 
