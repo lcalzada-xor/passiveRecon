@@ -103,17 +103,14 @@ func normalizeRequestedTools(cfg *config.Config) (map[string]bool, []string, []s
 		requested["dedupe"] = true
 	}
 
-	known := map[string]struct{}{
-		"amass": {}, "subfinder": {}, "assetfinder": {}, "crtsh": {},
-		"censys": {}, "dedupe": {}, "waybackurls": {}, "gau": {},
-		"httpx": {}, "subjs": {},
+	known := make(map[string]struct{}, len(defaultToolOrder))
+	for _, tool := range defaultToolOrder {
+		known[tool] = struct{}{}
 	}
-
-	pipelineOrder := []string{"amass", "subfinder", "assetfinder", "crtsh", "censys", "dedupe", "waybackurls", "gau", "httpx", "subjs"}
 
 	var ordered []string
 	seenOrdered := make(map[string]bool)
-	for _, tool := range pipelineOrder {
+	for _, tool := range defaultToolOrder {
 		if requested[tool] {
 			ordered = append(ordered, tool)
 			seenOrdered[tool] = true
