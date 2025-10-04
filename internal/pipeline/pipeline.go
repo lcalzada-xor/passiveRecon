@@ -634,6 +634,25 @@ func (s *Sink) writeCertLine(line string) {
 		return
 	}
 
+	for _, name := range record.AllNames() {
+		domain := netutil.NormalizeDomain(name)
+		if domain == "" {
+			continue
+		}
+		if !s.markSeen(s.seenDomainsPassive, domain) {
+			if s.Domains.passive != nil {
+				_ = s.Domains.passive.WriteDomain(domain)
+			}
+		}
+		if s.activeMode {
+			if !s.markSeen(s.seenDomainsActive, domain) {
+				if s.Domains.active != nil {
+					_ = s.Domains.active.WriteDomain(domain)
+				}
+			}
+		}
+	}
+
 	key := record.Key()
 	if key == "" {
 		key = strings.ToLower(serialized)

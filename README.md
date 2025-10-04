@@ -88,7 +88,7 @@ The same configuration in JSON:
 
 ## Censys certificates integration
 
-The `censys` source consumes the [Censys Search API](https://search.censys.io/api) to enumerate hosts from the certificate corpus. You must supply your account credentials through the new flags or environment variables:
+The `censys` source consumes the [Censys Search API](https://search.censys.io/api) to enumerate hosts from the certificate corpus. When certificate records are ingested their common name and SAN entries are now added to the domain artifacts, feeding both the passive list (and the active list when running in active mode). You must supply your account credentials through the new flags or environment variables:
 
 ```bash
 passive-rec --tools censys --censys-api-id "$CENSYS_API_ID" --censys-api-secret "$CENSYS_API_SECRET"
