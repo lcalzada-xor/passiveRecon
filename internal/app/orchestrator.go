@@ -24,7 +24,14 @@ type toolStep struct {
 	SkipInactiveMessage string
 	Run                 stepFunc
 	Precondition        preconditionFunc
+	Timeout             func(*pipelineState, orchestratorOptions) int
 }
+
+const (
+	defaultToolTimeoutSeconds = 120
+	minToolTimeoutSeconds     = 30
+	maxToolTimeoutSeconds     = 1200
+)
 
 type orchestratorOptions struct {
 	cfg       *config.Config
@@ -50,18 +57,21 @@ var defaultPipeline = []toolStep{
 		Group:        "archive-sources",
 		Run:          stepWayback,
 		Precondition: requireDedupedDomains("meta: waybackurls skipped (no domains after dedupe)"),
+		Timeout:      timeoutWaybackurls,
 	},
 	{
 		Name:         "gau",
 		Group:        "archive-sources",
 		Run:          stepGAU,
 		Precondition: requireDedupedDomains("meta: gau skipped (no domains after dedupe)"),
+		Timeout:      timeoutGAU,
 	},
 	{
 		Name:                "httpx",
 		Run:                 stepHTTPX,
 		RequiresActive:      true,
 		SkipInactiveMessage: "meta: httpx skipped (requires --active)",
+		Timeout:             timeoutHTTPX,
 	},
 	{
 		Name:                "subjs",
@@ -107,7 +117,8 @@ func runSingleStep(ctx context.Context, step toolStep, state *pipelineState, opt
 		return
 	}
 
-	task := runWithTimeout(ctx, opts.cfg.TimeoutS, func(c context.Context) error {
+	timeout := computeStepTimeout(step, state, opts)
+	task := runWithTimeout(ctx, timeout, func(c context.Context) error {
 		return step.Run(c, state, opts)
 	})
 	if opts.bar != nil {
@@ -131,7 +142,8 @@ func runConcurrentSteps(ctx context.Context, steps []toolStep, state *pipelineSt
 			continue
 		}
 		current := step
-		task := runWithTimeout(ctx, opts.cfg.TimeoutS, func(c context.Context) error {
+		timeout := computeStepTimeout(current, state, opts)
+		task := runWithTimeout(ctx, timeout, func(c context.Context) error {
 			return current.Run(c, state, opts)
 		})
 		if opts.bar != nil {
@@ -140,6 +152,29 @@ func runConcurrentSteps(ctx context.Context, steps []toolStep, state *pipelineSt
 		wg.Go(task)
 	}
 	wg.Wait()
+}
+
+func computeStepTimeout(step toolStep, state *pipelineState, opts orchestratorOptions) int {
+	timeout := baseTimeoutSeconds(opts.cfg.TimeoutS)
+	if step.Timeout != nil {
+		if custom := step.Timeout(state, opts); custom > 0 {
+			timeout = custom
+		}
+	}
+	if timeout < minToolTimeoutSeconds {
+		timeout = minToolTimeoutSeconds
+	}
+	if timeout > maxToolTimeoutSeconds {
+		timeout = maxToolTimeoutSeconds
+	}
+	return timeout
+}
+
+func baseTimeoutSeconds(configured int) int {
+	if configured <= 0 {
+		return defaultToolTimeoutSeconds
+	}
+	return configured
 }
 
 func shouldRunStep(step toolStep, state *pipelineState, opts orchestratorOptions) bool {
@@ -240,6 +275,49 @@ func stepHTTPX(ctx context.Context, state *pipelineState, opts orchestratorOptio
 	err := sourceHTTPX(ctx, inputs, opts.cfg.OutDir, opts.sink.In())
 	opts.sink.Flush()
 	return err
+}
+
+func timeoutWaybackurls(state *pipelineState, opts orchestratorOptions) int {
+	base := baseTimeoutSeconds(opts.cfg.TimeoutS)
+	domains := len(state.DedupedDomains)
+	if domains == 0 {
+		return base
+	}
+	extra := domains / 20
+	if extra > 600 {
+		extra = 600
+	}
+	return base + extra
+}
+
+func timeoutGAU(state *pipelineState, opts orchestratorOptions) int {
+	base := baseTimeoutSeconds(opts.cfg.TimeoutS)
+	domains := len(state.DedupedDomains)
+	if domains == 0 {
+		return base
+	}
+	extra := domains / 15
+	if extra > 600 {
+		extra = 600
+	}
+	return base + extra
+}
+
+func timeoutHTTPX(state *pipelineState, opts orchestratorOptions) int {
+	base := baseTimeoutSeconds(opts.cfg.TimeoutS)
+	domains := len(state.DedupedDomains)
+	if domains == 0 {
+		return base
+	}
+	workers := opts.cfg.Workers
+	if workers <= 0 {
+		workers = 1
+	}
+	extra := domains / (workers * 2)
+	if extra > 900 {
+		extra = 900
+	}
+	return base + extra
 }
 
 func stepSubJS(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {

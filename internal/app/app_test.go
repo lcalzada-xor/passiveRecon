@@ -162,6 +162,80 @@ func TestRunFlushesBeforeReportForDeferredSources(t *testing.T) {
 	}
 }
 
+func TestComputeStepTimeoutUsesBaseAndDynamicCalculator(t *testing.T) {
+	state := &pipelineState{DedupedDomains: make([]string, 300)}
+	opts := orchestratorOptions{cfg: &config.Config{TimeoutS: 150, Workers: 3}}
+	base := baseTimeoutSeconds(opts.cfg.TimeoutS)
+	clamp := func(v int) int {
+		if v < minToolTimeoutSeconds {
+			return minToolTimeoutSeconds
+		}
+		if v > maxToolTimeoutSeconds {
+			return maxToolTimeoutSeconds
+		}
+		return v
+	}
+
+	tests := []struct {
+		name string
+		step toolStep
+		want int
+	}{
+		{
+			name: "default base",
+			step: toolStep{Name: "noop"},
+			want: clamp(base),
+		},
+		{
+			name: "waybackurls dynamic",
+			step: toolStep{Name: "waybackurls", Timeout: timeoutWaybackurls},
+			want: clamp(base + len(state.DedupedDomains)/20),
+		},
+		{
+			name: "gau dynamic",
+			step: toolStep{Name: "gau", Timeout: timeoutGAU},
+			want: clamp(base + len(state.DedupedDomains)/15),
+		},
+		{
+			name: "httpx dynamic",
+			step: toolStep{Name: "httpx", Timeout: timeoutHTTPX},
+			want: clamp(base + len(state.DedupedDomains)/(opts.cfg.Workers*2)),
+		},
+	}
+
+	for _, tt := range tests {
+		tc := tt
+		t.Run(tt.name, func(t *testing.T) {
+			got := computeStepTimeout(tc.step, state, opts)
+			if got != tc.want {
+				t.Fatalf("computeStepTimeout() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestComputeStepTimeoutClampAndFallback(t *testing.T) {
+	state := &pipelineState{DedupedDomains: make([]string, 1000)}
+	opts := orchestratorOptions{cfg: &config.Config{TimeoutS: 0, Workers: 0}}
+	step := toolStep{
+		Name: "httpx",
+		Timeout: func(state *pipelineState, opts orchestratorOptions) int {
+			return maxToolTimeoutSeconds * 2
+		},
+	}
+
+	got := computeStepTimeout(step, state, opts)
+	if got != maxToolTimeoutSeconds {
+		t.Fatalf("expected timeout to be clamped to max (%d), got %d", maxToolTimeoutSeconds, got)
+	}
+
+	defaultStep := toolStep{Name: "noop"}
+	gotBase := computeStepTimeout(defaultStep, state, opts)
+	if gotBase != defaultToolTimeoutSeconds {
+		t.Fatalf("expected fallback timeout %d, got %d", defaultToolTimeoutSeconds, gotBase)
+	}
+}
+
 func TestDedupeDomainListNormalizesAndFilters(t *testing.T) {
 	dir := t.TempDir()
 	domainsDir := filepath.Join(dir, "domains")
