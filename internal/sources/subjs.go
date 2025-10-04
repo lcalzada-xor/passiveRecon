@@ -246,11 +246,14 @@ func validateJSURLs(ctx context.Context, urls []string) ([]string, error) {
 }
 
 func checkJSURL(ctx context.Context, client *http.Client, url string) bool {
-	if status, err := doJSRequest(ctx, client, http.MethodHead, url); err == nil && status == http.StatusOK {
-		return true
+	if status, err := doJSRequest(ctx, client, http.MethodHead, url); err == nil {
+		if status < http.StatusBadRequest {
+			return true
+		}
 	}
+
 	status, err := doJSRequest(ctx, client, http.MethodGet, url)
-	return err == nil && status == http.StatusOK
+	return err == nil && status < http.StatusBadRequest
 }
 
 func doJSRequest(ctx context.Context, client *http.Client, method, url string) (int, error) {
