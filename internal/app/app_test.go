@@ -13,6 +13,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"passive-rec/internal/config"
+	"passive-rec/internal/runner"
 )
 
 func TestRunWithTimeoutDefault(t *testing.T) {
@@ -233,6 +234,113 @@ func TestComputeStepTimeoutClampAndFallback(t *testing.T) {
 	gotBase := computeStepTimeout(defaultStep, state, opts)
 	if gotBase != defaultToolTimeoutSeconds {
 		t.Fatalf("expected fallback timeout %d, got %d", defaultToolTimeoutSeconds, gotBase)
+	}
+}
+
+func TestExecuteStepSkipsWhenNotRequested(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	sink, err := newTestSink(dir)
+	if err != nil {
+		t.Fatalf("newTestSink: %v", err)
+	}
+
+	step := toolStep{
+		Name: "custom",
+		Run: func(context.Context, *pipelineState, orchestratorOptions) error {
+			t.Fatalf("step should not run when not requested")
+			return nil
+		},
+	}
+	opts := orchestratorOptions{
+		cfg:       &config.Config{},
+		sink:      sink,
+		requested: map[string]bool{"custom": false},
+	}
+
+	if task, ok := executeStep(ctx, step, &pipelineState{}, opts); ok || task != nil {
+		t.Fatalf("expected executeStep to skip when not requested")
+	}
+}
+
+func TestExecuteStepRespectsPreconditions(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	sink, err := newTestSink(dir)
+	if err != nil {
+		t.Fatalf("newTestSink: %v", err)
+	}
+
+	called := false
+	step := toolStep{
+		Name: "conditional",
+		Run: func(context.Context, *pipelineState, orchestratorOptions) error {
+			called = true
+			return nil
+		},
+		Precondition: func(*pipelineState, orchestratorOptions) (bool, string) {
+			return false, ""
+		},
+	}
+	opts := orchestratorOptions{
+		cfg:       &config.Config{},
+		sink:      sink,
+		requested: map[string]bool{"conditional": true},
+	}
+
+	if task, ok := executeStep(ctx, step, &pipelineState{}, opts); ok || task != nil {
+		t.Fatalf("expected executeStep to skip when precondition fails")
+	}
+	if called {
+		t.Fatalf("expected step.Run not to be invoked when precondition fails")
+	}
+}
+
+func TestExecuteStepHandlesErrors(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	sink, err := newTestSink(dir)
+	if err != nil {
+		t.Fatalf("newTestSink: %v", err)
+	}
+
+	opts := orchestratorOptions{
+		cfg:  &config.Config{},
+		sink: sink,
+		requested: map[string]bool{
+			"failing": true,
+			"missing": true,
+		},
+	}
+
+	step := toolStep{
+		Name: "failing",
+		Run: func(context.Context, *pipelineState, orchestratorOptions) error {
+			return errors.New("boom")
+		},
+	}
+
+	task, ok := executeStep(ctx, step, &pipelineState{}, opts)
+	if !ok || task == nil {
+		t.Fatalf("expected executeStep to return runnable task")
+	}
+	if err := task(); err != nil {
+		t.Fatalf("expected task to swallow non-missing errors, got %v", err)
+	}
+
+	stepMissing := toolStep{
+		Name: "missing",
+		Run: func(context.Context, *pipelineState, orchestratorOptions) error {
+			return runner.ErrMissingBinary
+		},
+	}
+
+	taskMissing, ok := executeStep(ctx, stepMissing, &pipelineState{}, opts)
+	if !ok || taskMissing == nil {
+		t.Fatalf("expected executeStep to return task for missing binary")
+	}
+	if err := taskMissing(); !errors.Is(err, runner.ErrMissingBinary) {
+		t.Fatalf("expected missing binary error to be propagated, got %v", err)
 	}
 }
 
