@@ -54,7 +54,7 @@ func TestNormalizeRequestedToolsAddsDedupeAndOrders(t *testing.T) {
 		t.Fatalf("expected dedupe to be added when gau/waybackurls are requested")
 	}
 
-	wantOrdered := []string{"subfinder", "dedupe", "waybackurls", "gau", "custom"}
+	wantOrdered := append(selectFromOrder(defaultToolOrder, "subfinder", "dedupe", "waybackurls", "gau"), "custom")
 	if diff := cmp.Diff(wantOrdered, ordered); diff != "" {
 		t.Fatalf("unexpected ordered tools (-want +got):\n%s", diff)
 	}
@@ -74,7 +74,7 @@ func TestNormalizeRequestedToolsTrimsAndDeduplicates(t *testing.T) {
 		t.Fatalf("expected no unknown tools, got %v", unknown)
 	}
 
-	wantOrdered := []string{"amass", "httpx", "subjs"}
+	wantOrdered := selectFromOrder(defaultToolOrder, "amass", "httpx", "subjs")
 	if diff := cmp.Diff(wantOrdered, ordered); diff != "" {
 		t.Fatalf("unexpected ordered tools (-want +got):\n%s", diff)
 	}
@@ -82,6 +82,20 @@ func TestNormalizeRequestedToolsTrimsAndDeduplicates(t *testing.T) {
 	if !requested["amass"] || !requested["httpx"] || !requested["subjs"] {
 		t.Fatalf("expected requested map to include normalized tool names, got %v", requested)
 	}
+}
+
+func selectFromOrder(order []string, names ...string) []string {
+	include := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		include[name] = struct{}{}
+	}
+	var result []string
+	for _, tool := range order {
+		if _, ok := include[tool]; ok {
+			result = append(result, tool)
+		}
+	}
+	return result
 }
 
 func TestRunFlushesBeforeReportForDeferredSources(t *testing.T) {

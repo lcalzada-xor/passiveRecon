@@ -38,6 +38,44 @@ type pipelineState struct {
 	DedupedDomains []string
 }
 
+var defaultPipeline = []toolStep{
+	{Name: "amass", Run: stepAmass},
+	{Name: "subfinder", Group: "subdomain-sources", Run: stepSubfinder},
+	{Name: "assetfinder", Group: "subdomain-sources", Run: stepAssetfinder},
+	{Name: "crtsh", Group: "cert-sources", Run: stepCRTSh},
+	{Name: "censys", Group: "cert-sources", Run: stepCensys},
+	{Name: "dedupe", Run: stepDedupe},
+	{
+		Name:         "waybackurls",
+		Group:        "archive-sources",
+		Run:          stepWayback,
+		Precondition: requireDedupedDomains("meta: waybackurls skipped (no domains after dedupe)"),
+	},
+	{
+		Name:         "gau",
+		Group:        "archive-sources",
+		Run:          stepGAU,
+		Precondition: requireDedupedDomains("meta: gau skipped (no domains after dedupe)"),
+	},
+	{
+		Name:                "httpx",
+		Run:                 stepHTTPX,
+		RequiresActive:      true,
+		SkipInactiveMessage: "meta: httpx skipped (requires --active)",
+	},
+	{
+		Name:                "subjs",
+		Run:                 stepSubJS,
+		RequiresActive:      true,
+		SkipInactiveMessage: "meta: subjs skipped (requires --active)",
+	},
+}
+
+var (
+	defaultToolOrder = buildToolOrder(defaultPipeline)
+	defaultSteps     = buildStepMap(defaultPipeline)
+)
+
 func runPipeline(ctx context.Context, steps []toolStep, opts orchestratorOptions) *pipelineState {
 	state := &pipelineState{DomainListFile: filepath.Join("domains", "domains.passive")}
 
@@ -128,35 +166,20 @@ func skipStep(step toolStep, opts orchestratorOptions, message string) {
 	}
 }
 
-var defaultSteps = map[string]toolStep{
-	"amass":       {Name: "amass", Run: stepAmass},
-	"subfinder":   {Name: "subfinder", Group: "subdomain-sources", Run: stepSubfinder},
-	"assetfinder": {Name: "assetfinder", Group: "subdomain-sources", Run: stepAssetfinder},
-	"crtsh":       {Name: "crtsh", Group: "cert-sources", Run: stepCRTSh},
-	"censys":      {Name: "censys", Group: "cert-sources", Run: stepCensys},
-	"dedupe":      {Name: "dedupe", Run: stepDedupe},
-	"waybackurls": {
-		Name:         "waybackurls",
-		Group:        "archive-sources",
-		Run:          stepWayback,
-		Precondition: requireDedupedDomains("meta: waybackurls skipped (no domains after dedupe)")},
-	"gau": {
-		Name:         "gau",
-		Group:        "archive-sources",
-		Run:          stepGAU,
-		Precondition: requireDedupedDomains("meta: gau skipped (no domains after dedupe)")},
-	"httpx": {
-		Name:                "httpx",
-		Run:                 stepHTTPX,
-		RequiresActive:      true,
-		SkipInactiveMessage: "meta: httpx skipped (requires --active)",
-	},
-	"subjs": {
-		Name:                "subjs",
-		Run:                 stepSubJS,
-		RequiresActive:      true,
-		SkipInactiveMessage: "meta: subjs skipped (requires --active)",
-	},
+func buildToolOrder(steps []toolStep) []string {
+	order := make([]string, 0, len(steps))
+	for _, step := range steps {
+		order = append(order, step.Name)
+	}
+	return order
+}
+
+func buildStepMap(steps []toolStep) map[string]toolStep {
+	m := make(map[string]toolStep, len(steps))
+	for _, step := range steps {
+		m[step.Name] = step
+	}
+	return m
 }
 
 func requireDedupedDomains(message string) preconditionFunc {
