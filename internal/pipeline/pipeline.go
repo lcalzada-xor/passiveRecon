@@ -353,11 +353,14 @@ func handleJS(s *Sink, line string, isActive bool) bool {
 		return true
 	}
 	if isActive {
+		base := extractRouteBase(js)
+		if status, ok := parseActiveRouteStatus(js, base); ok {
+			if status <= 0 || status >= 400 {
+				return true
+			}
+		}
 		if s.RoutesJS.active != nil {
 			_ = s.RoutesJS.active.WriteRaw(js)
-		}
-		if s.RoutesJS.passive != nil {
-			_ = s.RoutesJS.passive.WriteURL(js)
 		}
 		return true
 	}
@@ -415,6 +418,11 @@ func handleRoute(s *Sink, line string, isActive bool) bool {
 	if isActive {
 		seen = s.seenRoutesActive
 		writer = s.Routes.active
+		if status, ok := parseActiveRouteStatus(line, base); ok {
+			if status <= 0 || status >= 400 {
+				return true
+			}
+		}
 	}
 	if writer == nil {
 		return true

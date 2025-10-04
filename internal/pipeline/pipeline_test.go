@@ -274,6 +274,38 @@ func TestActiveRoutesPopulatePassive(t *testing.T) {
 	}
 }
 
+func TestActiveRoutesSkip404(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false)
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "active: https://app.example.com/login [404]"
+	sink.In() <- "active: https://app.example.com/dashboard [200]"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	passive := readLines(t, filepath.Join(dir, "routes", "routes.passive"))
+	wantPassive := []string{
+		"https://app.example.com/login",
+		"https://app.example.com/dashboard",
+	}
+	if diff := cmp.Diff(wantPassive, passive); diff != "" {
+		t.Fatalf("unexpected routes.passive contents (-want +got):\n%s", diff)
+	}
+
+	active := readLines(t, filepath.Join(dir, "routes", "routes.active"))
+	if diff := cmp.Diff([]string{"https://app.example.com/dashboard [200]"}, active); diff != "" {
+		t.Fatalf("unexpected routes.active contents (-want +got):\n%s", diff)
+	}
+}
+
 func TestJSLinesAreWrittenToFile(t *testing.T) {
 	t.Parallel()
 
@@ -300,6 +332,30 @@ func TestJSLinesAreWrittenToFile(t *testing.T) {
 	activePath := filepath.Join(dir, "routes", "js", "js.active")
 	activeLines := readLines(t, activePath)
 	if diff := cmp.Diff([]string{"https://static.example.com/app.js"}, activeLines); diff != "" {
+		t.Fatalf("unexpected js.active contents (-want +got):\n%s", diff)
+	}
+}
+
+func TestActiveJSExcludes404(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false)
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "active: js: https://static.example.com/app.js [200]"
+	sink.In() <- "active: js: https://static.example.com/missing.js [404]"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	activePath := filepath.Join(dir, "routes", "js", "js.active")
+	activeLines := readLines(t, activePath)
+	if diff := cmp.Diff([]string{"https://static.example.com/app.js [200]"}, activeLines); diff != "" {
 		t.Fatalf("unexpected js.active contents (-want +got):\n%s", diff)
 	}
 }
