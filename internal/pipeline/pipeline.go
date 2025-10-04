@@ -343,6 +343,25 @@ func (s *Sink) finishLine() {
 	s.procMu.Unlock()
 }
 
+type lineHandler func(*Sink, string, bool) bool
+
+var prefixHandlers = []struct {
+	prefix  string
+	handler lineHandler
+}{
+	{prefix: "meta:", handler: handleMeta},
+	{prefix: "js:", handler: handleJS},
+	{prefix: "html:", handler: handleHTML},
+	{prefix: "cert:", handler: handleCert},
+}
+
+var fallbackHandlers = []lineHandler{
+	handleMeta,
+	handleRoute,
+	handleCert,
+	handleDomain,
+}
+
 func (s *Sink) processLine(ln string) {
 	l := strings.TrimSpace(ln)
 	if l == "" {
@@ -358,113 +377,159 @@ func (s *Sink) processLine(ln string) {
 		}
 	}
 
-	// meta: prefijo "meta: ..."
-	if strings.HasPrefix(l, "meta: ") {
-		target := s.Meta.passive
-		if isActive {
-			target = s.Meta.active
+	for _, entry := range prefixHandlers {
+		if strings.HasPrefix(l, entry.prefix) {
+			if entry.handler(s, l, isActive) {
+				return
+			}
 		}
-		_ = target.WriteRaw(strings.TrimPrefix(l, "meta: "))
-		return
 	}
 
-	if strings.HasPrefix(l, "js:") {
-		js := strings.TrimSpace(strings.TrimPrefix(l, "js:"))
-		if js == "" {
+	for _, handler := range fallbackHandlers {
+		if handler(s, l, isActive) {
 			return
 		}
-		if isActive {
-			if s.RoutesJS.active != nil {
-				_ = s.RoutesJS.active.WriteRaw(js)
-			}
-			if s.RoutesJS.passive != nil {
-				_ = s.RoutesJS.passive.WriteURL(js)
-			}
-			return
+	}
+}
+
+func handleMeta(s *Sink, line string, isActive bool) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return true
+	}
+
+	target := s.Meta.passive
+	if isActive {
+		target = s.Meta.active
+	}
+	if target == nil {
+		return true
+	}
+
+	if strings.HasPrefix(trimmed, "meta:") {
+		content := strings.TrimSpace(strings.TrimPrefix(trimmed, "meta:"))
+		if content == "" {
+			return true
+		}
+		_ = target.WriteRaw(content)
+		return true
+	}
+
+	if strings.Contains(trimmed, "-->") || strings.Contains(trimmed, " (") {
+		_ = target.WriteRaw(trimmed)
+		return true
+	}
+
+	return false
+}
+
+func handleJS(s *Sink, line string, isActive bool) bool {
+	js := strings.TrimSpace(strings.TrimPrefix(line, "js:"))
+	if js == "" {
+		return true
+	}
+	if isActive {
+		if s.RoutesJS.active != nil {
+			_ = s.RoutesJS.active.WriteRaw(js)
 		}
 		if s.RoutesJS.passive != nil {
 			_ = s.RoutesJS.passive.WriteURL(js)
 		}
-		return
+		return true
+	}
+	if s.RoutesJS.passive != nil {
+		_ = s.RoutesJS.passive.WriteURL(js)
+	}
+	return true
+}
+
+func handleHTML(s *Sink, line string, isActive bool) bool {
+	html := strings.TrimSpace(strings.TrimPrefix(line, "html:"))
+	if html == "" {
+		return true
 	}
 
-	if strings.HasPrefix(l, "html:") {
-		html := strings.TrimSpace(strings.TrimPrefix(l, "html:"))
-		if html == "" {
-			return
-		}
-		seen := s.seenHTMLPassive
-		writer := s.RoutesHTML.passive
-		if isActive {
-			seen = s.seenHTMLActive
-			writer = s.RoutesHTML.active
-		}
-		if writer == nil {
-			return
-		}
-		if seen != nil && s.markSeen(seen, html) {
-			return
-		}
-		if isActive {
-			_ = writer.WriteRaw(html)
-			return
-		}
-		_ = writer.WriteURL(html)
-		return
+	seen := s.seenHTMLPassive
+	writer := s.RoutesHTML.passive
+	if isActive {
+		seen = s.seenHTMLActive
+		writer = s.RoutesHTML.active
+	}
+	if writer == nil {
+		return true
+	}
+	if seen != nil && s.markSeen(seen, html) {
+		return true
+	}
+	if isActive {
+		_ = writer.WriteRaw(html)
+		return true
+	}
+	_ = writer.WriteURL(html)
+	return true
+}
+
+func handleRoute(s *Sink, line string, isActive bool) bool {
+	base := extractRouteBase(line)
+	if base == "" {
+		return false
+	}
+	if !(strings.Contains(base, "://") || strings.HasPrefix(base, "/") || strings.Contains(base, "/")) {
+		return false
 	}
 
-	if strings.Contains(l, "-->") || strings.Contains(l, " (") {
-		target := s.Meta.passive
-		if isActive {
-			target = s.Meta.active
-		}
-		_ = target.WriteRaw(l)
-		return
-	}
-
-	if strings.HasPrefix(l, "cert:") {
-		s.writeCertLine(strings.TrimSpace(l[len("cert:"):]))
-		return
-	}
-
-	// Clasificación simple: URLs/rutas si contiene esquema o '/'
-	base := extractRouteBase(l)
-	if base != "" && (strings.Contains(base, "://") || strings.HasPrefix(base, "/") || strings.Contains(base, "/")) {
-		// When the line includes metadata (e.g. httpx status/title), keep a
-		// clean copy of the URL in routes.passive so users always get a
-		// canonical list of discovered routes.
-		if isActive {
-			if !s.markSeen(s.seenRoutesPassive, base) {
+	if isActive {
+		if !s.markSeen(s.seenRoutesPassive, base) {
+			if s.Routes.passive != nil {
 				_ = s.Routes.passive.WriteURL(base)
 			}
 		}
-
-		seen := s.seenRoutesPassive
-		writer := s.Routes.passive
-		if isActive {
-			seen = s.seenRoutesActive
-			writer = s.Routes.active
-		}
-		if s.markSeen(seen, l) {
-			return
-		}
-		if !isActive || shouldCategorizeActiveRoute(l, base) {
-			s.writeRouteCategories(base, isActive)
-		}
-		_ = writer.WriteURL(l)
-		return
 	}
 
-	// crt.sh name_value puede venir con commas/nuevas líneas ya partidos aguas arriba.
-	if strings.Contains(l, ",") || strings.Contains(l, "\n") {
-		s.writeCertLine(l)
-		return
+	seen := s.seenRoutesPassive
+	writer := s.Routes.passive
+	if isActive {
+		seen = s.seenRoutesActive
+		writer = s.Routes.active
+	}
+	if writer == nil {
+		return true
+	}
+	if s.markSeen(seen, line) {
+		return true
+	}
+	if !isActive || shouldCategorizeActiveRoute(line, base) {
+		s.writeRouteCategories(base, isActive)
+	}
+	_ = writer.WriteURL(line)
+	return true
+}
+
+func handleCert(s *Sink, line string, isActive bool) bool {
+	_ = isActive // currently unused but kept for signature consistency
+
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return true
 	}
 
-	// defecto: dominio
-	key := normalizeDomainKey(l)
+	if strings.HasPrefix(trimmed, "cert:") {
+		s.writeCertLine(strings.TrimSpace(strings.TrimPrefix(trimmed, "cert:")))
+		return true
+	}
+
+	if strings.Contains(trimmed, ",") || strings.Contains(trimmed, "\n") {
+		s.writeCertLine(trimmed)
+		return true
+	}
+
+	return false
+}
+
+func handleDomain(s *Sink, line string, isActive bool) bool {
+	key := normalizeDomainKey(line)
 	if key == "" {
-		return
+		return false
 	}
 
 	seen := s.seenDomainsPassive
@@ -473,10 +538,14 @@ func (s *Sink) processLine(ln string) {
 		seen = s.seenDomainsActive
 		writer = s.Domains.active
 	}
-	if s.markSeen(seen, key) {
-		return
+	if writer == nil {
+		return true
 	}
-	_ = writer.WriteDomain(l)
+	if s.markSeen(seen, key) {
+		return true
+	}
+	_ = writer.WriteDomain(line)
+	return true
 }
 
 func (s *Sink) Flush() {
