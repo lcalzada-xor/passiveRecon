@@ -559,6 +559,20 @@ func (s *Sink) markSeen(seen map[string]struct{}, key string) bool {
 	return false
 }
 
+func (s *Sink) writeLazyCategory(route string, isActive bool, lw *lazyWriter, seen map[string]struct{}) {
+	if lw == nil || seen == nil {
+		return
+	}
+	if s.markSeen(seen, route) {
+		return
+	}
+	if s.activeMode && isActive {
+		lw.WriteRaw(route)
+		return
+	}
+	lw.WriteURL(route)
+}
+
 func (s *Sink) writeCertLine(line string) {
 	line = strings.TrimSpace(line)
 	if line == "" {
@@ -623,64 +637,42 @@ func (s *Sink) writeRouteCategories(route string, isActive bool) {
 	if len(categories) == 0 {
 		return
 	}
+	categoryTargets := map[routeCategory]struct {
+		writer *lazyWriter
+		seen   map[string]struct{}
+	}{
+		routeCategoryMaps: {
+			writer: s.RoutesMaps,
+			seen:   s.seenRoutesMaps,
+		},
+		routeCategoryJSON: {
+			writer: s.RoutesJSON,
+			seen:   s.seenRoutesJSON,
+		},
+		routeCategoryAPI: {
+			writer: s.RoutesAPI,
+			seen:   s.seenRoutesAPI,
+		},
+		routeCategoryWASM: {
+			writer: s.RoutesWASM,
+			seen:   s.seenRoutesWASM,
+		},
+		routeCategorySVG: {
+			writer: s.RoutesSVG,
+			seen:   s.seenRoutesSVG,
+		},
+		routeCategoryCrawl: {
+			writer: s.RoutesCrawl,
+			seen:   s.seenRoutesCrawl,
+		},
+		routeCategoryMeta: {
+			writer: s.RoutesMetaFindings,
+			seen:   s.seenRoutesMeta,
+		},
+	}
 	for _, cat := range categories {
-		switch cat {
-		case routeCategoryMaps:
-			if s.RoutesMaps != nil && !s.markSeen(s.seenRoutesMaps, route) {
-				if s.activeMode && isActive {
-					s.RoutesMaps.WriteRaw(route)
-				} else {
-					s.RoutesMaps.WriteURL(route)
-				}
-			}
-		case routeCategoryJSON:
-			if s.RoutesJSON != nil && !s.markSeen(s.seenRoutesJSON, route) {
-				if s.activeMode && isActive {
-					s.RoutesJSON.WriteRaw(route)
-				} else {
-					s.RoutesJSON.WriteURL(route)
-				}
-			}
-		case routeCategoryAPI:
-			if s.RoutesAPI != nil && !s.markSeen(s.seenRoutesAPI, route) {
-				if s.activeMode && isActive {
-					s.RoutesAPI.WriteRaw(route)
-				} else {
-					s.RoutesAPI.WriteURL(route)
-				}
-			}
-		case routeCategoryWASM:
-			if s.RoutesWASM != nil && !s.markSeen(s.seenRoutesWASM, route) {
-				if s.activeMode && isActive {
-					s.RoutesWASM.WriteRaw(route)
-				} else {
-					s.RoutesWASM.WriteURL(route)
-				}
-			}
-		case routeCategorySVG:
-			if s.RoutesSVG != nil && !s.markSeen(s.seenRoutesSVG, route) {
-				if s.activeMode && isActive {
-					s.RoutesSVG.WriteRaw(route)
-				} else {
-					s.RoutesSVG.WriteURL(route)
-				}
-			}
-		case routeCategoryCrawl:
-			if s.RoutesCrawl != nil && !s.markSeen(s.seenRoutesCrawl, route) {
-				if s.activeMode && isActive {
-					s.RoutesCrawl.WriteRaw(route)
-				} else {
-					s.RoutesCrawl.WriteURL(route)
-				}
-			}
-		case routeCategoryMeta:
-			if s.RoutesMetaFindings != nil && !s.markSeen(s.seenRoutesMeta, route) {
-				if s.activeMode && isActive {
-					s.RoutesMetaFindings.WriteRaw(route)
-				} else {
-					s.RoutesMetaFindings.WriteURL(route)
-				}
-			}
+		if target, ok := categoryTargets[cat]; ok {
+			s.writeLazyCategory(route, isActive, target.writer, target.seen)
 		}
 	}
 }
