@@ -14,9 +14,16 @@ import (
 	"passive-rec/internal/out"
 )
 
+type sinkWriter interface {
+	WriteURL(string) error
+	WriteRaw(string) error
+	WriteDomain(string) error
+	Close() error
+}
+
 type writerPair struct {
-	passive *out.Writer
-	active  *out.Writer
+	passive sinkWriter
+	active  sinkWriter
 }
 
 type lazyWriter struct {
@@ -54,45 +61,60 @@ func (lw *lazyWriter) ensure() (*out.Writer, error) {
 	return lw.writer, nil
 }
 
-func (lw *lazyWriter) WriteURL(u string) {
+func (lw *lazyWriter) WriteURL(u string) error {
 	if lw == nil {
-		return
+		return nil
 	}
 	if u == "" {
-		return
+		return nil
 	}
 	w, err := lw.ensure()
 	if err != nil {
-		return
+		return err
 	}
-	_ = w.WriteURL(u)
+	return w.WriteURL(u)
 }
 
-func (lw *lazyWriter) WriteRaw(line string) {
+func (lw *lazyWriter) WriteRaw(line string) error {
 	if lw == nil {
-		return
+		return nil
 	}
 	if line == "" {
-		return
+		return nil
 	}
 	w, err := lw.ensure()
 	if err != nil {
-		return
+		return err
 	}
-	_ = w.WriteRaw(line)
+	return w.WriteRaw(line)
 }
 
-func (lw *lazyWriter) Close() {
+func (lw *lazyWriter) WriteDomain(domain string) error {
 	if lw == nil {
-		return
+		return nil
+	}
+	if domain == "" {
+		return nil
+	}
+	w, err := lw.ensure()
+	if err != nil {
+		return err
+	}
+	return w.WriteDomain(domain)
+}
+
+func (lw *lazyWriter) Close() error {
+	if lw == nil {
+		return nil
 	}
 	lw.mu.Lock()
 	w := lw.writer
 	lw.writer = nil
 	lw.mu.Unlock()
 	if w != nil {
-		_ = w.Close()
+		return w.Close()
 	}
+	return nil
 }
 
 type Sink struct {
@@ -101,13 +123,13 @@ type Sink struct {
 	RoutesJS              writerPair
 	RoutesHTML            writerPair
 	RoutesImages          writerPair
-	RoutesMaps            *lazyWriter
-	RoutesJSON            *lazyWriter
-	RoutesAPI             *lazyWriter
-	RoutesWASM            *lazyWriter
-	RoutesSVG             *lazyWriter
-	RoutesCrawl           *lazyWriter
-	RoutesMetaFindings    *lazyWriter
+	RoutesMaps            writerPair
+	RoutesJSON            writerPair
+	RoutesAPI             writerPair
+	RoutesWASM            writerPair
+	RoutesSVG             writerPair
+	RoutesCrawl           writerPair
+	RoutesMetaFindings    writerPair
 	Certs                 writerPair
 	Meta                  writerPair
 	wg                    sync.WaitGroup
@@ -136,7 +158,7 @@ type Sink struct {
 }
 
 func NewSink(outdir string, active bool) (*Sink, error) {
-	var opened []*out.Writer
+	var opened []sinkWriter
 	newWriter := func(subdir, name string) (*out.Writer, error) {
 		targetDir := outdir
 		if subdir != "" {
@@ -202,24 +224,19 @@ func NewSink(outdir string, active bool) (*Sink, error) {
 		return nil, err
 	}
 
-	suffix := ".passive"
-	if active {
-		suffix = ".active"
-	}
-
 	s := &Sink{
 		Domains:               writerPair{passive: dPassive, active: dActive},
 		Routes:                writerPair{passive: rPassive, active: rActive},
 		RoutesJS:              writerPair{passive: jsPassive, active: jsActive},
 		RoutesHTML:            writerPair{active: htmlActive},
 		RoutesImages:          writerPair{active: imagesActive},
-		RoutesMaps:            newLazyWriter(outdir, filepath.Join("routes", "maps"), "maps"+suffix),
-		RoutesJSON:            newLazyWriter(outdir, filepath.Join("routes", "json"), "json"+suffix),
-		RoutesAPI:             newLazyWriter(outdir, filepath.Join("routes", "api"), "api"+suffix),
-		RoutesWASM:            newLazyWriter(outdir, filepath.Join("routes", "wasm"), "wasm"+suffix),
-		RoutesSVG:             newLazyWriter(outdir, filepath.Join("routes", "svg"), "svg"+suffix),
-		RoutesCrawl:           newLazyWriter(outdir, filepath.Join("routes", "crawl"), "crawl"+suffix),
-		RoutesMetaFindings:    newLazyWriter(outdir, filepath.Join("routes", "meta"), "meta"+suffix),
+		RoutesMaps:            writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "maps"), "maps.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "maps"), "maps.active")},
+		RoutesJSON:            writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "json"), "json.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "json"), "json.active")},
+		RoutesAPI:             writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "api"), "api.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "api"), "api.active")},
+		RoutesWASM:            writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "wasm"), "wasm.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "wasm"), "wasm.active")},
+		RoutesSVG:             writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "svg"), "svg.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "svg"), "svg.active")},
+		RoutesCrawl:           writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "crawl"), "crawl.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "crawl"), "crawl.active")},
+		RoutesMetaFindings:    writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "meta"), "meta.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "meta"), "meta.active")},
 		Certs:                 writerPair{passive: cPassive},
 		Meta:                  writerPair{passive: mPassive, active: mActive},
 		lines:                 make(chan string, 1024),
@@ -555,26 +572,47 @@ func (s *Sink) Close() error {
 	if s.RoutesImages.active != nil {
 		_ = s.RoutesImages.active.Close()
 	}
-	if s.RoutesMaps != nil {
-		s.RoutesMaps.Close()
+	if s.RoutesMaps.passive != nil {
+		_ = s.RoutesMaps.passive.Close()
 	}
-	if s.RoutesJSON != nil {
-		s.RoutesJSON.Close()
+	if s.RoutesMaps.active != nil {
+		_ = s.RoutesMaps.active.Close()
 	}
-	if s.RoutesAPI != nil {
-		s.RoutesAPI.Close()
+	if s.RoutesJSON.passive != nil {
+		_ = s.RoutesJSON.passive.Close()
 	}
-	if s.RoutesWASM != nil {
-		s.RoutesWASM.Close()
+	if s.RoutesJSON.active != nil {
+		_ = s.RoutesJSON.active.Close()
 	}
-	if s.RoutesSVG != nil {
-		s.RoutesSVG.Close()
+	if s.RoutesAPI.passive != nil {
+		_ = s.RoutesAPI.passive.Close()
 	}
-	if s.RoutesCrawl != nil {
-		s.RoutesCrawl.Close()
+	if s.RoutesAPI.active != nil {
+		_ = s.RoutesAPI.active.Close()
 	}
-	if s.RoutesMetaFindings != nil {
-		s.RoutesMetaFindings.Close()
+	if s.RoutesWASM.passive != nil {
+		_ = s.RoutesWASM.passive.Close()
+	}
+	if s.RoutesWASM.active != nil {
+		_ = s.RoutesWASM.active.Close()
+	}
+	if s.RoutesSVG.passive != nil {
+		_ = s.RoutesSVG.passive.Close()
+	}
+	if s.RoutesSVG.active != nil {
+		_ = s.RoutesSVG.active.Close()
+	}
+	if s.RoutesCrawl.passive != nil {
+		_ = s.RoutesCrawl.passive.Close()
+	}
+	if s.RoutesCrawl.active != nil {
+		_ = s.RoutesCrawl.active.Close()
+	}
+	if s.RoutesMetaFindings.passive != nil {
+		_ = s.RoutesMetaFindings.passive.Close()
+	}
+	if s.RoutesMetaFindings.active != nil {
+		_ = s.RoutesMetaFindings.active.Close()
 	}
 	if s.Certs.passive != nil {
 		_ = s.Certs.passive.Close()
@@ -604,18 +642,29 @@ func (s *Sink) markSeen(seen map[string]struct{}, key string) bool {
 	return false
 }
 
-func (s *Sink) writeLazyCategory(route string, isActive bool, lw *lazyWriter, seen map[string]struct{}) {
-	if lw == nil || seen == nil {
+func (s *Sink) writeLazyCategory(route string, isActive bool, writers writerPair, seen map[string]struct{}) {
+	if seen == nil {
 		return
 	}
-	if s.markSeen(seen, route) {
+	key := route
+	if isActive {
+		key = "active:" + route
+	}
+	if s.markSeen(seen, key) {
 		return
 	}
-	if s.activeMode && isActive {
-		lw.WriteRaw(route)
+	target := writers.passive
+	if isActive {
+		target = writers.active
+	}
+	if target == nil {
 		return
 	}
-	lw.WriteURL(route)
+	if isActive {
+		_ = target.WriteRaw(route)
+		return
+	}
+	_ = target.WriteURL(route)
 }
 
 func (s *Sink) writeCertLine(line string) {
@@ -675,49 +724,46 @@ func (s *Sink) writeRouteCategories(route string, isActive bool) {
 	if route == "" {
 		return
 	}
-	if s.activeMode && !isActive {
-		return
-	}
 	categories := detectRouteCategories(route)
 	if len(categories) == 0 {
 		return
 	}
 	categoryTargets := map[routeCategory]struct {
-		writer *lazyWriter
-		seen   map[string]struct{}
+		writers writerPair
+		seen    map[string]struct{}
 	}{
 		routeCategoryMaps: {
-			writer: s.RoutesMaps,
-			seen:   s.seenRoutesMaps,
+			writers: s.RoutesMaps,
+			seen:    s.seenRoutesMaps,
 		},
 		routeCategoryJSON: {
-			writer: s.RoutesJSON,
-			seen:   s.seenRoutesJSON,
+			writers: s.RoutesJSON,
+			seen:    s.seenRoutesJSON,
 		},
 		routeCategoryAPI: {
-			writer: s.RoutesAPI,
-			seen:   s.seenRoutesAPI,
+			writers: s.RoutesAPI,
+			seen:    s.seenRoutesAPI,
 		},
 		routeCategoryWASM: {
-			writer: s.RoutesWASM,
-			seen:   s.seenRoutesWASM,
+			writers: s.RoutesWASM,
+			seen:    s.seenRoutesWASM,
 		},
 		routeCategorySVG: {
-			writer: s.RoutesSVG,
-			seen:   s.seenRoutesSVG,
+			writers: s.RoutesSVG,
+			seen:    s.seenRoutesSVG,
 		},
 		routeCategoryCrawl: {
-			writer: s.RoutesCrawl,
-			seen:   s.seenRoutesCrawl,
+			writers: s.RoutesCrawl,
+			seen:    s.seenRoutesCrawl,
 		},
 		routeCategoryMeta: {
-			writer: s.RoutesMetaFindings,
-			seen:   s.seenRoutesMeta,
+			writers: s.RoutesMetaFindings,
+			seen:    s.seenRoutesMeta,
 		},
 	}
 	for _, cat := range categories {
 		if target, ok := categoryTargets[cat]; ok {
-			s.writeLazyCategory(route, isActive, target.writer, target.seen)
+			s.writeLazyCategory(route, isActive, target.writers, target.seen)
 		}
 	}
 }
