@@ -133,12 +133,14 @@ func TestGenerateIncludesActiveData(t *testing.T) {
 	activeRoute := "http://vpn-admin.example.com/login [200]"
 	writeFixture(t, filepath.Join(dir, "domains", "domains.active"), activeDomain)
 	writeFixture(t, filepath.Join(dir, "routes", "routes.active"), activeRoute)
+	writeFixture(t, filepath.Join(dir, "dns", "dns.active"), "vpn-admin.example.com [A] 203.0.113.10\n")
 	writeFixture(t, filepath.Join(dir, "meta.active"), "httpx(active): 1/1 ok\n")
 
 	cfg := &config.Config{Target: "example.com", OutDir: dir, Active: true}
 	files := DefaultSinkFiles(dir)
 	files.ActiveDomains = filepath.Join(dir, "domains", "domains.active")
 	files.ActiveRoutes = filepath.Join(dir, "routes", "routes.active")
+	files.ActiveDNS = filepath.Join(dir, "dns", "dns.active")
 	files.ActiveMeta = filepath.Join(dir, "meta.active")
 
 	if err := Generate(context.Background(), cfg, files); err != nil {
@@ -150,6 +152,8 @@ func TestGenerateIncludesActiveData(t *testing.T) {
 		"Resultados de recolección activa",
 		activeDomain,
 		activeRoute,
+		"Registros DNS",
+		"vpn-admin.example.com [A] 203.0.113.10",
 		"httpx(active): 1/1 ok",
 	}
 	for _, want := range checks {
@@ -184,6 +188,26 @@ func TestBuildDomainStatsSkipsEmpty(t *testing.T) {
 	}
 	if stats.Unique != 2 {
 		t.Fatalf("Unique = %d, want 2", stats.Unique)
+	}
+}
+
+func TestBuildDNSStats(t *testing.T) {
+	t.Parallel()
+
+	stats := buildDNSStats([]string{
+		"api.example.com [A] 1.1.1.1",
+		"api.example.com [AAAA] ::1",
+		"cdn.example.com [CNAME] edge.example.net",
+		" ",
+	})
+	if stats.Total != 3 {
+		t.Fatalf("Total = %d, want 3", stats.Total)
+	}
+	if stats.UniqueHosts != 2 {
+		t.Fatalf("UniqueHosts = %d, want 2", stats.UniqueHosts)
+	}
+	if len(stats.RecordTypes) == 0 || stats.RecordTypes[0].Name != "A" {
+		t.Fatalf("expected record types to include A, got %v", stats.RecordTypes)
 	}
 }
 

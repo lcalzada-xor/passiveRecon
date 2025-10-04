@@ -21,7 +21,7 @@ type noopSink struct {
 }
 
 func newNoopSink() *noopSink {
-	return &noopSink{ch: make(chan string, 1)}
+	return &noopSink{ch: make(chan string, 10)}
 }
 
 func (s *noopSink) Start(int)         {}
@@ -219,6 +219,45 @@ func TestRunPipelineConcurrentSourcesDedupesSink(t *testing.T) {
 	checkNoDuplicates(t, routesActive, "routes.active")
 	if len(routesActive) != 1 || routesActive[0] != "https://www.example.com/login" {
 		t.Fatalf("unexpected active routes: %#v", routesActive)
+	}
+}
+
+func TestStepDedupeRunsDNSXWhenActive(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "domains"), 0o755); err != nil {
+		t.Fatalf("mkdir domains: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "domains", "domains.passive"), []byte("one.example.com\n"), 0o644); err != nil {
+		t.Fatalf("write domains.passive: %v", err)
+	}
+
+	originalDNSX := sourceDNSX
+	defer func() { sourceDNSX = originalDNSX }()
+
+	called := 0
+	sourceDNSX = func(ctx context.Context, domains []string, outDir string, out chan<- string) error {
+		called++
+		if outDir != dir {
+			t.Fatalf("expected outDir %s, got %s", dir, outDir)
+		}
+		if len(domains) != 1 || strings.TrimSpace(domains[0]) != "one.example.com" {
+			t.Fatalf("unexpected domains: %v", domains)
+		}
+		return nil
+	}
+
+	sink := newNoopSink()
+	t.Cleanup(func() { _ = sink.Close() })
+
+	cfg := &config.Config{OutDir: dir, Active: true}
+	opts := orchestratorOptions{cfg: cfg, sink: sink, requested: map[string]bool{"dedupe": true}}
+
+	state := &pipelineState{}
+	if err := stepDedupe(context.Background(), state, opts); err != nil {
+		t.Fatalf("stepDedupe returned error: %v", err)
+	}
+	if called != 1 {
+		t.Fatalf("expected dnsx to be invoked once, got %d", called)
 	}
 }
 

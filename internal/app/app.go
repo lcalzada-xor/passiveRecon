@@ -35,6 +35,7 @@ var (
 	sourceCensys      = sources.Censys
 	sourceHTTPX       = sources.HTTPX
 	sourceSubJS       = sources.SubJS
+	sourceDNSX        = sources.DNSX
 )
 
 func Run(cfg *config.Config) error {
