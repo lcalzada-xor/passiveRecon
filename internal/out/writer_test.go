@@ -22,12 +22,19 @@ func TestNormalizeDomain(t *testing.T) {
 		"[2001:db8::1]:8443":                 "2001:db8::1",
 		" 2001:db8::1 ":                      "2001:db8::1",
 		"[2001:db8::1]:8443 status: up":      "2001:db8::1 status: up",
+		"example.com\tstatus:200":            "example.com status:200",
+		"example.com   status ok":            "example.com status ok",
+		"*.example.com":                      "",
 		"":                                   "",
 		"No assets were discovered":          "",
 	}
 	for input, expected := range cases {
 		input, expected := input, expected
-		t.Run(input, func(t *testing.T) {
+		name := strings.ReplaceAll(input, "\t", "\\t")
+		if name == "" {
+			name = "empty"
+		}
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			if got := normalizeDomain(input); got != expected {
 				t.Fatalf("normalizeDomain(%q) = %q, want %q", input, got, expected)

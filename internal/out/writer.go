@@ -1,12 +1,13 @@
 package out
 
 import (
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"passive-rec/internal/netutil"
 )
 
 type Writer struct {
@@ -46,76 +47,15 @@ func normalizeDomain(d string) string {
 		d = strings.TrimSpace(d[:i])
 	}
 
-	host := extractHost(d)
-	if host == "" {
-		return ""
-	}
-
-	lower := strings.ToLower(host)
-	if strings.HasPrefix(lower, "www.") {
-		lower = lower[4:]
-	}
-
-	if net.ParseIP(lower) == nil && !strings.Contains(lower, ".") {
+	base := netutil.NormalizeDomain(d)
+	if base == "" {
 		return ""
 	}
 
 	if meta != "" {
-		return lower + " " + meta
+		return base + " " + meta
 	}
-	return lower
-}
-
-func extractHost(raw string) string {
-	if raw == "" {
-		return ""
-	}
-
-	candidate := raw
-	var parsed *url.URL
-	var err error
-
-	if strings.Contains(candidate, "://") {
-		parsed, err = url.Parse(candidate)
-	} else {
-		parsed, err = url.Parse("http://" + candidate)
-	}
-	if err == nil && parsed != nil {
-		hostPort := parsed.Host
-		hostname := parsed.Hostname()
-		if hostname != "" && !(strings.Count(hostPort, ":") > 1 && !strings.Contains(hostPort, "[")) {
-			return hostname
-		}
-		if hostPort != "" {
-			candidate = hostPort
-		}
-	}
-
-	if candidate == "" {
-		return ""
-	}
-
-	if at := strings.LastIndex(candidate, "@"); at != -1 {
-		candidate = candidate[at+1:]
-	}
-
-	if idx := strings.IndexAny(candidate, "/?#"); idx != -1 {
-		candidate = candidate[:idx]
-	}
-
-	if candidate == "" {
-		return ""
-	}
-
-	if host, _, err := net.SplitHostPort(candidate); err == nil {
-		return host
-	}
-
-	if strings.HasPrefix(candidate, "[") && strings.HasSuffix(candidate, "]") {
-		return strings.Trim(candidate, "[]")
-	}
-
-	return candidate
+	return base
 }
 
 func normalizeURL(u string) string {
