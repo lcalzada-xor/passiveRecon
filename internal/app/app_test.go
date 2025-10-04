@@ -45,6 +45,45 @@ func TestRunWithTimeoutDefault(t *testing.T) {
 	}
 }
 
+func TestNormalizeRequestedToolsAddsDedupeAndOrders(t *testing.T) {
+	cfg := &config.Config{Tools: []string{" Subfinder ", "GAU", "custom", "subfinder", "Waybackurls"}}
+
+	requested, ordered, unknown := normalizeRequestedTools(cfg)
+
+	if !requested["dedupe"] {
+		t.Fatalf("expected dedupe to be added when gau/waybackurls are requested")
+	}
+
+	wantOrdered := []string{"subfinder", "dedupe", "waybackurls", "gau", "custom"}
+	if diff := cmp.Diff(wantOrdered, ordered); diff != "" {
+		t.Fatalf("unexpected ordered tools (-want +got):\n%s", diff)
+	}
+
+	wantUnknown := []string{"custom"}
+	if diff := cmp.Diff(wantUnknown, unknown); diff != "" {
+		t.Fatalf("unexpected unknown tools (-want +got):\n%s", diff)
+	}
+}
+
+func TestNormalizeRequestedToolsTrimsAndDeduplicates(t *testing.T) {
+	cfg := &config.Config{Tools: []string{"  ", "Amass", "amass", "SubJS", "httpx"}}
+
+	requested, ordered, unknown := normalizeRequestedTools(cfg)
+
+	if len(unknown) != 0 {
+		t.Fatalf("expected no unknown tools, got %v", unknown)
+	}
+
+	wantOrdered := []string{"amass", "httpx", "subjs"}
+	if diff := cmp.Diff(wantOrdered, ordered); diff != "" {
+		t.Fatalf("unexpected ordered tools (-want +got):\n%s", diff)
+	}
+
+	if !requested["amass"] || !requested["httpx"] || !requested["subjs"] {
+		t.Fatalf("expected requested map to include normalized tool names, got %v", requested)
+	}
+}
+
 func TestRunFlushesBeforeReportForDeferredSources(t *testing.T) {
 	originalSinkFactory := sinkFactory
 	originalHTTPX := sourceHTTPX

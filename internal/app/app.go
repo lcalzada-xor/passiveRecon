@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -12,7 +11,6 @@ import (
 	"passive-rec/internal/config"
 	"passive-rec/internal/logx"
 	"passive-rec/internal/pipeline"
-	"passive-rec/internal/report"
 	"passive-rec/internal/runner"
 	"passive-rec/internal/sources"
 )
@@ -53,8 +51,39 @@ func Run(cfg *config.Config) error {
 	defer sink.Close()
 	sink.Start(cfg.Workers)
 
-	ctx := context.Background()
+	requested, ordered, unknown := normalizeRequestedTools(cfg)
 
+	bar := newProgressBar(len(ordered), nil)
+	if bar != nil && len(ordered) > 0 {
+		logx.SetOutput(bar.Writer())
+		defer logx.SetOutput(nil)
+	}
+
+	ctx := context.Background()
+	opts := orchestratorOptions{
+		cfg:       cfg,
+		sink:      sink,
+		requested: requested,
+		bar:       bar,
+	}
+
+	var steps []toolStep
+	for _, name := range ordered {
+		if step, ok := defaultSteps[name]; ok {
+			steps = append(steps, step)
+		}
+	}
+
+	runPipeline(ctx, steps, opts)
+
+	sink.Flush()
+	executePostProcessing(ctx, cfg, sink, bar, unknown)
+
+	logx.Infof("modo active=%v; terminado", cfg.Active)
+	return nil
+}
+
+func normalizeRequestedTools(cfg *config.Config) (map[string]bool, []string, []string) {
 	normalizeTool := func(name string) string {
 		return strings.ToLower(strings.TrimSpace(name))
 	}
@@ -69,6 +98,7 @@ func Run(cfg *config.Config) error {
 		normalizedOrder = append(normalizedOrder, tool)
 		requested[tool] = true
 	}
+
 	if (requested["waybackurls"] || requested["gau"]) && !requested["dedupe"] {
 		requested["dedupe"] = true
 	}
@@ -78,6 +108,7 @@ func Run(cfg *config.Config) error {
 		"censys": {}, "dedupe": {}, "waybackurls": {}, "gau": {},
 		"httpx": {}, "subjs": {},
 	}
+
 	pipelineOrder := []string{"amass", "subfinder", "assetfinder", "crtsh", "censys", "dedupe", "waybackurls", "gau", "httpx", "subjs"}
 
 	var ordered []string
