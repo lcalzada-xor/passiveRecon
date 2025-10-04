@@ -262,6 +262,11 @@ func stepDedupe(ctx context.Context, state *pipelineState, opts orchestratorOpti
 	if len(domains) == 0 {
 		opts.sink.In() <- "meta: dedupe produced no domains"
 	}
+	if opts.cfg.Active {
+		if err := sourceDNSX(ctx, domains, opts.cfg.OutDir, opts.sink.In()); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -337,6 +342,7 @@ func executePostProcessing(ctx context.Context, cfg *config.Config, sink sink, b
 			sinkFiles.ActiveDomains = filepath.Join(cfg.OutDir, "domains", "domains.active")
 			sinkFiles.ActiveRoutes = filepath.Join(cfg.OutDir, "routes", "routes.active")
 			sinkFiles.ActiveCerts = filepath.Join(cfg.OutDir, "certs", "certs.active")
+			sinkFiles.ActiveDNS = filepath.Join(cfg.OutDir, "dns", "dns.active")
 			sinkFiles.ActiveMeta = filepath.Join(cfg.OutDir, "meta.active")
 		}
 		if err := report.Generate(ctx, cfg, sinkFiles); err != nil {

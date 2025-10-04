@@ -47,6 +47,11 @@ func HTTPXBin() (string, error) {
 	return findBinaryMatchingVersion("projectdiscovery", "httpx", "httpx-toolkit")
 }
 
+// DNSXBin attempts to locate the ProjectDiscovery dnsx binary.
+func DNSXBin() (string, error) {
+	return findBinaryMatchingVersion("projectdiscovery", "dnsx")
+}
+
 func HasBin(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
