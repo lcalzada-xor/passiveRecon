@@ -143,7 +143,7 @@ func Run(cfg *config.Config) error {
 	}
 
 	runSequential("amass", func(c context.Context) error {
-		return sourceAmass(c, cfg.Target, sink.In())
+		return sourceAmass(c, cfg.Target, sink.In(), cfg.Active)
 	})
 
 	runConcurrent([]string{"subfinder", "assetfinder"}, func(name string) func(context.Context) error {
