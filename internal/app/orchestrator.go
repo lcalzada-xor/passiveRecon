@@ -169,7 +169,7 @@ func requireDedupedDomains(message string) preconditionFunc {
 }
 
 func stepAmass(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	return sourceAmass(ctx, opts.cfg.Target, opts.sink.In())
+	return sourceAmass(ctx, opts.cfg.Target, opts.sink.In(), opts.cfg.Active)
 }
 
 func stepSubfinder(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
