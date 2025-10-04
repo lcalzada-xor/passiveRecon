@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -206,6 +207,23 @@ func TestDedupeDomainListNormalizesAndFilters(t *testing.T) {
 	}
 	if diff := cmp.Diff(want, lines); diff != "" {
 		t.Fatalf("unexpected domains.dedupe contents (-want +got):\n%s", diff)
+	}
+}
+
+func TestDedupeDomainListWriteError(t *testing.T) {
+	dir := t.TempDir()
+	conflictPath := filepath.Join(dir, "domains", "domains.dedupe")
+	if err := os.MkdirAll(conflictPath, 0o755); err != nil {
+		t.Fatalf("mkdir conflicting path: %v", err)
+	}
+
+	if _, err := dedupeDomainList(dir); err == nil {
+		t.Fatalf("expected error when dedupe output path is a directory")
+	} else {
+		var pathErr *os.PathError
+		if !errors.As(err, &pathErr) {
+			t.Fatalf("expected *os.PathError, got %T", err)
+		}
 	}
 }
 
