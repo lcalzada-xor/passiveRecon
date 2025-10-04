@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"passive-rec/internal/netutil"
 )
@@ -52,18 +51,36 @@ func dedupeDomainList(outdir string) ([]string, error) {
 	return domains, nil
 }
 
-func writeDedupeFile(outdir string, domains []string) error {
+func writeDedupeFile(outdir string, domains []string) (err error) {
 	targetDir := filepath.Join(outdir, "domains")
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return err
 	}
 	outputPath := filepath.Join(targetDir, "domains.dedupe")
 
-	var builder strings.Builder
+	file, err := os.Create(outputPath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := file.Close(); err == nil && cerr != nil {
+			err = cerr
+		}
+	}()
+
+	writer := bufio.NewWriter(file)
 	for _, domain := range domains {
-		builder.WriteString(domain)
-		builder.WriteByte('\n')
+		if _, err := writer.WriteString(domain); err != nil {
+			return err
+		}
+		if err := writer.WriteByte('\n'); err != nil {
+			return err
+		}
 	}
 
-	return os.WriteFile(outputPath, []byte(builder.String()), 0o644)
+	if err := writer.Flush(); err != nil {
+		return err
+	}
+
+	return nil
 }
