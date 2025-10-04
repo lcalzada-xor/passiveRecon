@@ -442,10 +442,21 @@ func handleCert(s *Sink, line string, isActive bool) bool {
 		return true
 	}
 
-	// defecto: dominio
-	key := netutil.NormalizeDomain(l)
+	return false
+}
+
+func handleDomain(s *Sink, line string, isActive bool) bool {
+	key := netutil.NormalizeDomain(line)
 	if key == "" {
 		return false
+	}
+
+	if isActive {
+		if !s.markSeen(s.seenDomainsPassive, key) {
+			if s.Domains.passive != nil {
+				_ = s.Domains.passive.WriteDomain(key)
+			}
+		}
 	}
 
 	seen := s.seenDomainsPassive
