@@ -3,8 +3,11 @@ package sources
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -150,5 +153,92 @@ func TestSubJSSuccess(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("expected sink output")
+	}
+}
+
+func TestSubJSAcceptsNonErrorStatuses(t *testing.T) {
+	dir := t.TempDir()
+	routesDir := filepath.Join(dir, "routes")
+	if err := os.MkdirAll(routesDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll routes: %v", err)
+	}
+	routesActive := filepath.Join(routesDir, "routes.active")
+	if err := os.WriteFile(routesActive, []byte("https://app.example.com/login\n"), 0o644); err != nil {
+		t.Fatalf("write routes.active: %v", err)
+	}
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/no-content.js":
+			w.WriteHeader(http.StatusNoContent)
+		case "/redirect.js":
+			w.Header().Set("Location", server.URL+"/final.js")
+			w.WriteHeader(http.StatusFound)
+		case "/final.js":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("console.log('ok');"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	originalFind := subjsFindBin
+	originalRun := subjsRunCmd
+	originalValidator := subjsValidator
+	originalClientLoader := subjsClientLoader
+	originalWorkerCount := subjsWorkerCount
+	subjsFindBin = func(names ...string) (string, bool) { return "/usr/bin/subjs", true }
+	subjsRunCmd = func(ctx context.Context, name string, args []string, out chan<- string) error {
+		out <- server.URL + "/no-content.js"
+		out <- server.URL + "/redirect.js"
+		return nil
+	}
+	subjsValidator = validateJSURLs
+	subjsClientLoader = func() *http.Client {
+		client := server.Client()
+		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+		return client
+	}
+	subjsWorkerCount = 1
+	t.Cleanup(func() {
+		subjsFindBin = originalFind
+		subjsRunCmd = originalRun
+		subjsValidator = originalValidator
+		subjsClientLoader = originalClientLoader
+		subjsWorkerCount = originalWorkerCount
+	})
+
+	out := make(chan string, 2)
+	if err := SubJS(context.Background(), filepath.Join("routes", "routes.active"), dir, out); err != nil {
+		t.Fatalf("SubJS returned error: %v", err)
+	}
+
+	var lines []string
+	for i := 0; i < 2; i++ {
+		select {
+		case line := <-out:
+			lines = append(lines, line)
+		case <-time.After(time.Second):
+			t.Fatalf("expected output line %d", i)
+		}
+	}
+
+	sort.Strings(lines)
+	expected := []string{
+		"active: js: " + server.URL + "/no-content.js",
+		"active: js: " + server.URL + "/redirect.js",
+	}
+	sort.Strings(expected)
+	if len(lines) != len(expected) {
+		t.Fatalf("unexpected number of lines: got %d want %d", len(lines), len(expected))
+	}
+	for i := range expected {
+		if lines[i] != expected[i] {
+			t.Fatalf("unexpected output line %d: got %q want %q", i, lines[i], expected[i])
+		}
 	}
 }
