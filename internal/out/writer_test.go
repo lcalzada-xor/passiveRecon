@@ -23,6 +23,7 @@ func TestNormalizeDomain(t *testing.T) {
 		" 2001:db8::1 ":                      "2001:db8::1",
 		"[2001:db8::1]:8443 status: up":      "2001:db8::1 status: up",
 		"":                                   "",
+		"No assets were discovered":          "",
 	}
 	for input, expected := range cases {
 		input, expected := input, expected
@@ -93,6 +94,7 @@ func TestWriteDomain(t *testing.T) {
 		"[2001:db8::1]:8443 status: up", // IPv6 with metadata
 		"2001:db8::1 status: up",        // duplicate preserving metadata
 		"",                              // ignored
+		"No assets were discovered",     // noise from assetfinder output
 	}
 	for _, in := range inputs {
 		if err := w.WriteDomain(in); err != nil {
