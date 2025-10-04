@@ -96,40 +96,43 @@ func (lw *lazyWriter) Close() {
 }
 
 type Sink struct {
-	Domains            writerPair
-	Routes             writerPair
-	RoutesJS           writerPair
-	RoutesHTML         writerPair
-	RoutesMaps         *lazyWriter
-	RoutesJSON         *lazyWriter
-	RoutesAPI          *lazyWriter
-	RoutesWASM         *lazyWriter
-	RoutesSVG          *lazyWriter
-	RoutesCrawl        *lazyWriter
-	RoutesMetaFindings *lazyWriter
-	Certs              writerPair
-	Meta               writerPair
-	wg                 sync.WaitGroup
-	lines              chan string
-	seenMu             sync.Mutex
-	seenDomainsPassive map[string]struct{}
-	seenDomainsActive  map[string]struct{}
-	seenRoutesPassive  map[string]struct{}
-	seenRoutesActive   map[string]struct{}
-	seenHTMLPassive    map[string]struct{}
-	seenHTMLActive     map[string]struct{}
-	seenRoutesMaps     map[string]struct{}
-	seenRoutesJSON     map[string]struct{}
-	seenRoutesAPI      map[string]struct{}
-	seenRoutesWASM     map[string]struct{}
-	seenRoutesSVG      map[string]struct{}
-	seenRoutesCrawl    map[string]struct{}
-	seenRoutesMeta     map[string]struct{}
-	seenCertsPassive   map[string]struct{}
-	procMu             sync.Mutex
-	processing         int
-	cond               *sync.Cond
-	activeMode         bool
+	Domains               writerPair
+	Routes                writerPair
+	RoutesJS              writerPair
+	RoutesHTML            writerPair
+	RoutesImages          writerPair
+	RoutesMaps            *lazyWriter
+	RoutesJSON            *lazyWriter
+	RoutesAPI             *lazyWriter
+	RoutesWASM            *lazyWriter
+	RoutesSVG             *lazyWriter
+	RoutesCrawl           *lazyWriter
+	RoutesMetaFindings    *lazyWriter
+	Certs                 writerPair
+	Meta                  writerPair
+	wg                    sync.WaitGroup
+	lines                 chan string
+	seenMu                sync.Mutex
+	seenDomainsPassive    map[string]struct{}
+	seenDomainsActive     map[string]struct{}
+	seenRoutesPassive     map[string]struct{}
+	seenRoutesActive      map[string]struct{}
+	seenHTMLPassive       map[string]struct{}
+	seenHTMLActive        map[string]struct{}
+	seenHTMLImagesPassive map[string]struct{}
+	seenHTMLImagesActive  map[string]struct{}
+	seenRoutesMaps        map[string]struct{}
+	seenRoutesJSON        map[string]struct{}
+	seenRoutesAPI         map[string]struct{}
+	seenRoutesWASM        map[string]struct{}
+	seenRoutesSVG         map[string]struct{}
+	seenRoutesCrawl       map[string]struct{}
+	seenRoutesMeta        map[string]struct{}
+	seenCertsPassive      map[string]struct{}
+	procMu                sync.Mutex
+	processing            int
+	cond                  *sync.Cond
+	activeMode            bool
 }
 
 func NewSink(outdir string, active bool) (*Sink, error) {
@@ -182,6 +185,10 @@ func NewSink(outdir string, active bool) (*Sink, error) {
 	if err != nil {
 		return nil, err
 	}
+	imagesActive, err := newWriter(filepath.Join("routes", "images"), "images.active")
+	if err != nil {
+		return nil, err
+	}
 	cPassive, err := newWriter("certs", "certs.passive")
 	if err != nil {
 		return nil, err
@@ -201,35 +208,38 @@ func NewSink(outdir string, active bool) (*Sink, error) {
 	}
 
 	s := &Sink{
-		Domains:            writerPair{passive: dPassive, active: dActive},
-		Routes:             writerPair{passive: rPassive, active: rActive},
-		RoutesJS:           writerPair{passive: jsPassive, active: jsActive},
-		RoutesHTML:         writerPair{active: htmlActive},
-		RoutesMaps:         newLazyWriter(outdir, filepath.Join("routes", "maps"), "maps"+suffix),
-		RoutesJSON:         newLazyWriter(outdir, filepath.Join("routes", "json"), "json"+suffix),
-		RoutesAPI:          newLazyWriter(outdir, filepath.Join("routes", "api"), "api"+suffix),
-		RoutesWASM:         newLazyWriter(outdir, filepath.Join("routes", "wasm"), "wasm"+suffix),
-		RoutesSVG:          newLazyWriter(outdir, filepath.Join("routes", "svg"), "svg"+suffix),
-		RoutesCrawl:        newLazyWriter(outdir, filepath.Join("routes", "crawl"), "crawl"+suffix),
-		RoutesMetaFindings: newLazyWriter(outdir, filepath.Join("routes", "meta"), "meta"+suffix),
-		Certs:              writerPair{passive: cPassive},
-		Meta:               writerPair{passive: mPassive, active: mActive},
-		lines:              make(chan string, 1024),
-		seenDomainsPassive: make(map[string]struct{}),
-		seenDomainsActive:  make(map[string]struct{}),
-		seenRoutesPassive:  make(map[string]struct{}),
-		seenRoutesActive:   make(map[string]struct{}),
-		seenHTMLPassive:    make(map[string]struct{}),
-		seenHTMLActive:     make(map[string]struct{}),
-		seenRoutesMaps:     make(map[string]struct{}),
-		seenRoutesJSON:     make(map[string]struct{}),
-		seenRoutesAPI:      make(map[string]struct{}),
-		seenRoutesWASM:     make(map[string]struct{}),
-		seenRoutesSVG:      make(map[string]struct{}),
-		seenRoutesCrawl:    make(map[string]struct{}),
-		seenRoutesMeta:     make(map[string]struct{}),
-		seenCertsPassive:   make(map[string]struct{}),
-		activeMode:         active,
+		Domains:               writerPair{passive: dPassive, active: dActive},
+		Routes:                writerPair{passive: rPassive, active: rActive},
+		RoutesJS:              writerPair{passive: jsPassive, active: jsActive},
+		RoutesHTML:            writerPair{active: htmlActive},
+		RoutesImages:          writerPair{active: imagesActive},
+		RoutesMaps:            newLazyWriter(outdir, filepath.Join("routes", "maps"), "maps"+suffix),
+		RoutesJSON:            newLazyWriter(outdir, filepath.Join("routes", "json"), "json"+suffix),
+		RoutesAPI:             newLazyWriter(outdir, filepath.Join("routes", "api"), "api"+suffix),
+		RoutesWASM:            newLazyWriter(outdir, filepath.Join("routes", "wasm"), "wasm"+suffix),
+		RoutesSVG:             newLazyWriter(outdir, filepath.Join("routes", "svg"), "svg"+suffix),
+		RoutesCrawl:           newLazyWriter(outdir, filepath.Join("routes", "crawl"), "crawl"+suffix),
+		RoutesMetaFindings:    newLazyWriter(outdir, filepath.Join("routes", "meta"), "meta"+suffix),
+		Certs:                 writerPair{passive: cPassive},
+		Meta:                  writerPair{passive: mPassive, active: mActive},
+		lines:                 make(chan string, 1024),
+		seenDomainsPassive:    make(map[string]struct{}),
+		seenDomainsActive:     make(map[string]struct{}),
+		seenRoutesPassive:     make(map[string]struct{}),
+		seenRoutesActive:      make(map[string]struct{}),
+		seenHTMLPassive:       make(map[string]struct{}),
+		seenHTMLActive:        make(map[string]struct{}),
+		seenHTMLImagesPassive: make(map[string]struct{}),
+		seenHTMLImagesActive:  make(map[string]struct{}),
+		seenRoutesMaps:        make(map[string]struct{}),
+		seenRoutesJSON:        make(map[string]struct{}),
+		seenRoutesAPI:         make(map[string]struct{}),
+		seenRoutesWASM:        make(map[string]struct{}),
+		seenRoutesSVG:         make(map[string]struct{}),
+		seenRoutesCrawl:       make(map[string]struct{}),
+		seenRoutesMeta:        make(map[string]struct{}),
+		seenCertsPassive:      make(map[string]struct{}),
+		activeMode:            active,
 	}
 	s.cond = sync.NewCond(&s.procMu)
 	return s, nil
@@ -376,6 +386,27 @@ func handleHTML(s *Sink, line string, isActive bool) bool {
 		return true
 	}
 
+	if isImageURL(html) {
+		seen := s.seenHTMLImagesPassive
+		writer := s.RoutesImages.passive
+		if isActive {
+			seen = s.seenHTMLImagesActive
+			writer = s.RoutesImages.active
+		}
+		if writer == nil {
+			return true
+		}
+		if seen != nil && s.markSeen(seen, html) {
+			return true
+		}
+		if isActive {
+			_ = writer.WriteRaw(html)
+			return true
+		}
+		_ = writer.WriteURL(html)
+		return true
+	}
+
 	seen := s.seenHTMLPassive
 	writer := s.RoutesHTML.passive
 	if isActive {
@@ -517,6 +548,12 @@ func (s *Sink) Close() error {
 	}
 	if s.RoutesHTML.active != nil {
 		_ = s.RoutesHTML.active.Close()
+	}
+	if s.RoutesImages.passive != nil {
+		_ = s.RoutesImages.passive.Close()
+	}
+	if s.RoutesImages.active != nil {
+		_ = s.RoutesImages.active.Close()
 	}
 	if s.RoutesMaps != nil {
 		s.RoutesMaps.Close()
@@ -819,6 +856,36 @@ func detectRouteCategories(route string) []routeCategory {
 	}
 
 	return categories
+}
+
+func isImageURL(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+
+	target := raw
+	if u, err := url.Parse(raw); err == nil {
+		if u.Path != "" {
+			target = u.Path
+		}
+	}
+
+	if idx := strings.IndexAny(target, "?#"); idx != -1 {
+		target = target[:idx]
+	}
+
+	ext := strings.ToLower(filepath.Ext(target))
+	if ext == "" {
+		return false
+	}
+
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tif", ".tiff", ".jfif", ".avif", ".apng", ".heic", ".heif":
+		return true
+	}
+
+	return false
 }
 
 func isAPIDocument(lowerPath, base, nameNoExt, lowerFull string) bool {

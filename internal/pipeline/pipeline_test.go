@@ -383,6 +383,39 @@ func TestHTMLLinesAreWrittenToActiveFile(t *testing.T) {
 	}
 }
 
+func TestHTMLImageLinesAreRedirectedToImagesFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false)
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "active: html: https://app.example.com/assets/logo.png"
+	sink.In() <- "active: html: https://app.example.com/assets/logo.svg"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	htmlPath := filepath.Join(dir, "routes", "html", "html.active")
+	if lines := readLines(t, htmlPath); len(lines) != 0 {
+		t.Fatalf("expected html.active to be empty, got %v", lines)
+	}
+
+	imagesPath := filepath.Join(dir, "routes", "images", "images.active")
+	imagesLines := readLines(t, imagesPath)
+	wantImages := []string{
+		"https://app.example.com/assets/logo.png",
+		"https://app.example.com/assets/logo.svg",
+	}
+	if diff := cmp.Diff(wantImages, imagesLines); diff != "" {
+		t.Fatalf("unexpected images.active contents (-want +got):\n%s", diff)
+	}
+}
+
 func TestRouteCategorizationPassive(t *testing.T) {
 	t.Parallel()
 
