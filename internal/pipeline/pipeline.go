@@ -375,7 +375,7 @@ func (s *Sink) processLine(ln string) {
 		}
 		if isActive {
 			if s.RoutesJS.active != nil {
-				_ = s.RoutesJS.active.WriteRaw("js: " + js)
+				_ = s.RoutesJS.active.WriteRaw(js)
 			}
 			if s.RoutesJS.passive != nil {
 				_ = s.RoutesJS.passive.WriteURL(js)
@@ -406,7 +406,7 @@ func (s *Sink) processLine(ln string) {
 			return
 		}
 		if isActive {
-			_ = writer.WriteRaw("html: " + html)
+			_ = writer.WriteRaw(html)
 			return
 		}
 		_ = writer.WriteURL(html)
@@ -632,7 +632,7 @@ func (s *Sink) writeRouteCategories(route string, isActive bool) {
 		case routeCategoryMaps:
 			if s.RoutesMaps != nil && !s.markSeen(s.seenRoutesMaps, route) {
 				if s.activeMode && isActive {
-					s.RoutesMaps.WriteRaw("maps: " + route)
+					s.RoutesMaps.WriteRaw(route)
 				} else {
 					s.RoutesMaps.WriteURL(route)
 				}
@@ -640,7 +640,7 @@ func (s *Sink) writeRouteCategories(route string, isActive bool) {
 		case routeCategoryJSON:
 			if s.RoutesJSON != nil && !s.markSeen(s.seenRoutesJSON, route) {
 				if s.activeMode && isActive {
-					s.RoutesJSON.WriteRaw("json: " + route)
+					s.RoutesJSON.WriteRaw(route)
 				} else {
 					s.RoutesJSON.WriteURL(route)
 				}
@@ -648,7 +648,7 @@ func (s *Sink) writeRouteCategories(route string, isActive bool) {
 		case routeCategoryAPI:
 			if s.RoutesAPI != nil && !s.markSeen(s.seenRoutesAPI, route) {
 				if s.activeMode && isActive {
-					s.RoutesAPI.WriteRaw("api: " + route)
+					s.RoutesAPI.WriteRaw(route)
 				} else {
 					s.RoutesAPI.WriteURL(route)
 				}
@@ -656,7 +656,7 @@ func (s *Sink) writeRouteCategories(route string, isActive bool) {
 		case routeCategoryWASM:
 			if s.RoutesWASM != nil && !s.markSeen(s.seenRoutesWASM, route) {
 				if s.activeMode && isActive {
-					s.RoutesWASM.WriteRaw("wasm: " + route)
+					s.RoutesWASM.WriteRaw(route)
 				} else {
 					s.RoutesWASM.WriteURL(route)
 				}
@@ -664,7 +664,7 @@ func (s *Sink) writeRouteCategories(route string, isActive bool) {
 		case routeCategorySVG:
 			if s.RoutesSVG != nil && !s.markSeen(s.seenRoutesSVG, route) {
 				if s.activeMode && isActive {
-					s.RoutesSVG.WriteRaw("svg: " + route)
+					s.RoutesSVG.WriteRaw(route)
 				} else {
 					s.RoutesSVG.WriteURL(route)
 				}
@@ -672,7 +672,7 @@ func (s *Sink) writeRouteCategories(route string, isActive bool) {
 		case routeCategoryCrawl:
 			if s.RoutesCrawl != nil && !s.markSeen(s.seenRoutesCrawl, route) {
 				if s.activeMode && isActive {
-					s.RoutesCrawl.WriteRaw("crawl: " + route)
+					s.RoutesCrawl.WriteRaw(route)
 				} else {
 					s.RoutesCrawl.WriteURL(route)
 				}
@@ -680,7 +680,7 @@ func (s *Sink) writeRouteCategories(route string, isActive bool) {
 		case routeCategoryMeta:
 			if s.RoutesMetaFindings != nil && !s.markSeen(s.seenRoutesMeta, route) {
 				if s.activeMode && isActive {
-					s.RoutesMetaFindings.WriteRaw("meta: " + route)
+					s.RoutesMetaFindings.WriteRaw(route)
 				} else {
 					s.RoutesMetaFindings.WriteURL(route)
 				}
