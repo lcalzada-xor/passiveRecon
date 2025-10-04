@@ -2,6 +2,7 @@ package sources
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -89,6 +90,161 @@ func TestHTTPXCombinesAllLists(t *testing.T) {
 	want := []string{"example.com", "sub.example.com", "https://app.example.com/login"}
 	if diff := cmp.Diff(want, inputs[0]); diff != "" {
 		t.Fatalf("unexpected httpx input (-want +got):\n%s", diff)
+	}
+}
+
+func TestCollectHTTPXInputsDedupesAndReportsMissing(t *testing.T) {
+	tmp := t.TempDir()
+	contents := strings.Join([]string{
+		"example.com",
+		"# comment",
+		"https://assets.example.com/favicon.ico",
+		"example.com",
+		"https://valid.example.com/path",
+		"",
+	}, "\n")
+
+	if err := os.WriteFile(filepath.Join(tmp, "list.passive"), []byte(contents), 0o644); err != nil {
+		t.Fatalf("write list: %v", err)
+	}
+
+	originalMeta := httpxMetaEmit
+	var mu sync.Mutex
+	var meta []string
+	httpxMetaEmit = func(line string) {
+		mu.Lock()
+		defer mu.Unlock()
+		meta = append(meta, line)
+	}
+	t.Cleanup(func() {
+		httpxMetaEmit = originalMeta
+	})
+
+	combined, err := collectHTTPXInputs(tmp, []string{"list.passive", "missing.passive", " "})
+	if err != nil {
+		t.Fatalf("collect inputs: %v", err)
+	}
+
+	wantCombined := []string{"example.com", "https://valid.example.com/path"}
+	if diff := cmp.Diff(wantCombined, combined); diff != "" {
+		t.Fatalf("unexpected combined inputs (-want +got):\n%s", diff)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	wantMeta := []string{"active: meta: httpx skipped missing input missing.passive"}
+	if diff := cmp.Diff(wantMeta, meta); diff != "" {
+		t.Fatalf("unexpected meta lines (-want +got):\n%s", diff)
+	}
+}
+
+func TestForwardHTTPXOutputNormalizes(t *testing.T) {
+	outCh := make(chan string, 10)
+	intermediate, cleanup := forwardHTTPXOutput(outCh)
+
+	intermediate <- "https://app.example.com [200] [Title] [text/html; charset=utf-8]"
+
+	cleanup()
+
+	var forwarded []string
+	for len(outCh) > 0 {
+		forwarded = append(forwarded, <-outCh)
+	}
+
+	want := []string{
+		"active: https://app.example.com [200] [Title] [text/html; charset=utf-8]",
+		"active: app.example.com [200] [Title] [text/html; charset=utf-8]",
+		"active: html: https://app.example.com",
+		"active: meta: [200]",
+		"active: meta: [Title]",
+		"active: meta: [text/html; charset=utf-8]",
+	}
+	if diff := cmp.Diff(want, forwarded); diff != "" {
+		t.Fatalf("unexpected forwarded lines (-want +got):\n%s", diff)
+	}
+}
+
+func TestRunHTTPXWorkersRespectsBatchSize(t *testing.T) {
+	originalBatch := httpxBatchSize
+	originalWorkers := httpxWorkerCount
+	t.Cleanup(func() {
+		httpxBatchSize = originalBatch
+		httpxWorkerCount = originalWorkers
+	})
+
+	httpxBatchSize = 2
+	httpxWorkerCount = 1
+
+	combined := []string{"a", "b", "c", "d", "e"}
+	var mu sync.Mutex
+	var batches [][]string
+
+	inputWriter := func(lines []string) (string, func(), error) {
+		mu.Lock()
+		defer mu.Unlock()
+		cp := append([]string{}, lines...)
+		batches = append(batches, cp)
+		return fmt.Sprintf("/tmp/fake-%d", len(batches)), func() {}, nil
+	}
+
+	runCmd := func(ctx context.Context, name string, args []string, out chan<- string) error {
+		return nil
+	}
+
+	err := runHTTPXWorkers(context.Background(), "httpx", combined, make(chan string), runCmd, inputWriter)
+	if err != nil {
+		t.Fatalf("run workers: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := [][]string{{"a", "b"}, {"c", "d"}, {"e"}}
+	if diff := cmp.Diff(want, batches); diff != "" {
+		t.Fatalf("unexpected batches (-want +got):\n%s", diff)
+	}
+}
+
+func TestRunHTTPXWorkersCancellation(t *testing.T) {
+	originalBatch := httpxBatchSize
+	originalWorkers := httpxWorkerCount
+	t.Cleanup(func() {
+		httpxBatchSize = originalBatch
+		httpxWorkerCount = originalWorkers
+	})
+
+	httpxBatchSize = 1
+	httpxWorkerCount = 1
+
+	combined := []string{"a", "b", "c"}
+
+	var mu sync.Mutex
+	var batches [][]string
+	inputWriter := func(lines []string) (string, func(), error) {
+		mu.Lock()
+		defer mu.Unlock()
+		cp := append([]string{}, lines...)
+		batches = append(batches, cp)
+		return fmt.Sprintf("/tmp/fake-%d", len(batches)), func() {}, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runCmd := func(cmdCtx context.Context, name string, args []string, out chan<- string) error {
+		cancel()
+		<-cmdCtx.Done()
+		return cmdCtx.Err()
+	}
+
+	err := runHTTPXWorkers(ctx, "httpx", combined, make(chan string), runCmd, inputWriter)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(batches) != 1 {
+		t.Fatalf("expected only one batch to be processed, got %d", len(batches))
 	}
 }
 
