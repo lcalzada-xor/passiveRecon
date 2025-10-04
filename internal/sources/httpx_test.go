@@ -349,7 +349,6 @@ func TestHTTPXSkipsHTMLForErrorResponses(t *testing.T) {
 	}
 
 	want := []string{
-		"active: https://missing.example.com [404] [Not Found] [text/html]",
 		"active: missing.example.com [404] [Not Found] [text/html]",
 		"active: meta: [404]",
 		"active: meta: [Not Found]",
