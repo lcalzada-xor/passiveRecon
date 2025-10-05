@@ -7,4 +7,4 @@ gau github.com/lc/gau/v2/cmd/gau@latest
 httpx github.com/projectdiscovery/httpx/cmd/httpx@latest
 subfinder github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 waybackurls github.com/tomnomnom/waybackurls@latest
-GoLinkfinderEVO github.com/example/GoLinkfinderEVO@latest
+GoLinkfinderEVO github.com/lcalzada-xor/GoLinkfinderEVO@latest
