@@ -372,7 +372,7 @@ func TestDedupeDomainListNormalizesAndFilters(t *testing.T) {
 		t.Fatalf("dedupeDomainList returned error: %v", err)
 	}
 
-	want := []string{"2001:db8::1", "api.example.com", "example.com", "login.example.com"}
+	want := []string{"2001:db8::1", "api.example.com", "example.com", "login.example.com", "www.example.com"}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Fatalf("unexpected dedupe output (-want +got):\n%s", diff)
 	}
