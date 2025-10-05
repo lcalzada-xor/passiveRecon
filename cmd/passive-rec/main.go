@@ -14,6 +14,13 @@ func main() {
 	cfg := config.ParseFlags()
 
 	logx.SetVerbosity(cfg.Verbosity)
+	if err := config.ApplyProxy(cfg.Proxy); err != nil {
+		logx.Errorf("%v", err)
+		os.Exit(1)
+	}
+	if cfg.Proxy != "" {
+		logx.Infof("Usando proxy %s", cfg.Proxy)
+	}
 	logx.Infof("Iniciando passive-rec target=%s outdir=%s tools=%v workers=%d active=%v report=%v",
 		cfg.Target, cfg.OutDir, cfg.Tools, cfg.Workers, cfg.Active, cfg.Report)
 

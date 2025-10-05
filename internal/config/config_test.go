@@ -50,6 +50,10 @@ func TestParseFlagsDefaults(t *testing.T) {
 	if cfg.Verbosity != 0 {
 		t.Fatalf("expected default verbosity 0, got %d", cfg.Verbosity)
 	}
+
+	if cfg.Proxy != "" {
+		t.Fatalf("expected default proxy empty, got %q", cfg.Proxy)
+	}
 }
 
 func TestParseFlagsCustom(t *testing.T) {
@@ -63,6 +67,7 @@ func TestParseFlagsCustom(t *testing.T) {
 		"-timeout", "30",
 		"-active=true",
 		"-v", "2",
+		"-proxy", "http://127.0.0.1:8080",
 	}...)
 
 	cfg := ParseFlags()
@@ -91,6 +96,10 @@ func TestParseFlagsCustom(t *testing.T) {
 	if cfg.Verbosity != 2 {
 		t.Fatalf("expected verbosity 2, got %d", cfg.Verbosity)
 	}
+
+	if cfg.Proxy != "http://127.0.0.1:8080" {
+		t.Fatalf("expected proxy http://127.0.0.1:8080, got %q", cfg.Proxy)
+	}
 }
 
 func TestParseFlagsTraceVerbosity(t *testing.T) {
@@ -104,5 +113,32 @@ func TestParseFlagsTraceVerbosity(t *testing.T) {
 
 	if cfg.Verbosity != 3 {
 		t.Fatalf("expected verbosity 3, got %d", cfg.Verbosity)
+	}
+}
+
+func TestApplyProxy(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "")
+	t.Setenv("http_proxy", "")
+	t.Setenv("HTTPS_PROXY", "")
+	t.Setenv("https_proxy", "")
+	t.Setenv("ALL_PROXY", "")
+	t.Setenv("all_proxy", "")
+
+	if err := ApplyProxy("http://127.0.0.1:8080"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := "http://127.0.0.1:8080"
+	keys := []string{"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"}
+	for _, key := range keys {
+		if value := os.Getenv(key); value != expected {
+			t.Fatalf("expected %s to be %q, got %q", key, expected, value)
+		}
+	}
+}
+
+func TestApplyProxyInvalid(t *testing.T) {
+	if err := ApplyProxy("invalid"); err == nil {
+		t.Fatalf("expected error for invalid proxy")
 	}
 }

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +24,7 @@ type Config struct {
 	TimeoutS        int
 	Verbosity       int
 	Report          bool
+	Proxy           string
 	CensysAPIID     string
 	CensysAPISecret string
 }
@@ -35,6 +38,7 @@ type fileConfig struct {
 	TimeoutS        *int        `json:"timeout" yaml:"timeout"`
 	Verbosity       *int        `json:"verbosity" yaml:"verbosity"`
 	Report          *bool       `json:"report" yaml:"report"`
+	Proxy           *string     `json:"proxy" yaml:"proxy"`
 	CensysAPIID     *string     `json:"censys_api_id" yaml:"censys_api_id"`
 	CensysAPISecret *string     `json:"censys_api_secret" yaml:"censys_api_secret"`
 }
@@ -98,6 +102,7 @@ func ParseFlags() *Config {
 	timeout := flag.Int("timeout", 120, "Timeout por herramienta (segundos)")
 	verbosity := flag.Int("v", 0, "Verbosity (0=silent,1=info,2=debug,3=trace)")
 	report := flag.Bool("report", false, "Generar un informe HTML al finalizar")
+	proxy := flag.String("proxy", "", "Proxy HTTP/HTTPS (ej: http://127.0.0.1:8080)")
 	censysID := flag.String("censys-api-id", os.Getenv("CENSYS_API_ID"), "Censys API ID (o exporta CENSYS_API_ID)")
 	censysSecret := flag.String("censys-api-secret", os.Getenv("CENSYS_API_SECRET"), "Censys API secret (o exporta CENSYS_API_SECRET)")
 
@@ -119,6 +124,7 @@ func ParseFlags() *Config {
 		TimeoutS:        *timeout,
 		Verbosity:       *verbosity,
 		Report:          *report,
+		Proxy:           strings.TrimSpace(*proxy),
 		CensysAPIID:     strings.TrimSpace(*censysID),
 		CensysAPISecret: strings.TrimSpace(*censysSecret),
 	}
@@ -165,6 +171,9 @@ func ParseFlags() *Config {
 		}
 		if fileCfg.Report != nil && !setFlags["report"] {
 			cfg.Report = *fileCfg.Report
+		}
+		if fileCfg.Proxy != nil && !setFlags["proxy"] {
+			cfg.Proxy = strings.TrimSpace(*fileCfg.Proxy)
 		}
 		if fileCfg.CensysAPIID != nil && !setFlags["censys-api-id"] {
 			cfg.CensysAPIID = strings.TrimSpace(*fileCfg.CensysAPIID)
@@ -218,4 +227,29 @@ func cleanStringSlice(values []string) []string {
 		}
 	}
 	return list
+}
+
+// ApplyProxy configures the standard HTTP proxy environment variables when a
+// proxy URL is provided. The proxy string must include a scheme and host (for
+// example, http://127.0.0.1:8080). The function updates both uppercase and
+// lowercase variants so that external tools and Go's HTTP clients honor the
+// configuration.
+func ApplyProxy(proxy string) error {
+	proxy = strings.TrimSpace(proxy)
+	if proxy == "" {
+		return nil
+	}
+
+	parsed, err := url.Parse(proxy)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Errorf("proxy inválido: %q", proxy)
+	}
+
+	envVars := []string{"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"}
+	for _, key := range envVars {
+		if err := os.Setenv(key, proxy); err != nil {
+			return fmt.Errorf("no se pudo configurar %s: %w", key, err)
+		}
+	}
+	return nil
 }
