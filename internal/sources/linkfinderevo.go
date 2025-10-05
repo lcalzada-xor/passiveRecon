@@ -131,6 +131,11 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 		return runner.ErrMissingBinary
 	}
 
+	findingsDir := filepath.Join(outdir, "routes", "linkFindings")
+	if err := os.MkdirAll(findingsDir, 0o755); err != nil {
+		return err
+	}
+
 	inputs := []struct {
 		label string
 		path  string
@@ -191,6 +196,12 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 
 		if err := accumulateLinkfinderResults(jsonPath, aggregate); err != nil {
 			recordLinkfinderError(&firstErr, err)
+		}
+
+		if runErr == nil {
+			if err := persistLinkfinderArtifacts(findingsDir, input.label, rawPath, htmlPath, jsonPath); err != nil {
+				recordLinkfinderError(&firstErr, err)
+			}
 		}
 
 		if runErr != nil {
@@ -314,10 +325,66 @@ func accumulateLinkfinderResults(jsonPath string, aggregate *linkfinderAggregate
 }
 
 func cleanupLinkfinderOutputs(findingsDir string) {
-	targets := []string{"findings.json", "findings.raw", "findings.html", "undetected.active", "findings.active"}
+	targets := []string{
+		"findings.json",
+		"findings.raw",
+		"findings.html",
+		"undetected.active",
+		"findings.active",
+		"findings.html.raw",
+		"findings.html.html",
+		"findings.html.json",
+		"findings.js.raw",
+		"findings.js.html",
+		"findings.js.json",
+		"findings.crawl.raw",
+		"findings.crawl.html",
+		"findings.crawl.json",
+	}
 	for _, name := range targets {
 		_ = os.Remove(filepath.Join(findingsDir, name))
 	}
+}
+
+func persistLinkfinderArtifacts(findingsDir, label, rawPath, htmlPath, jsonPath string) error {
+	outputs := []struct {
+		src  string
+		dest string
+	}{
+		{src: rawPath, dest: filepath.Join(findingsDir, fmt.Sprintf("findings.%s.raw", label))},
+		{src: htmlPath, dest: filepath.Join(findingsDir, fmt.Sprintf("findings.%s.html", label))},
+		{src: jsonPath, dest: filepath.Join(findingsDir, fmt.Sprintf("findings.%s.json", label))},
+	}
+
+	for _, output := range outputs {
+		if err := copyLinkfinderArtifact(output.src, output.dest); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func copyLinkfinderArtifact(src, dest string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if err := os.Remove(dest); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			return nil
+		}
+		return err
+	}
+
+	if len(bytes.TrimSpace(data)) == 0 {
+		if err := os.Remove(dest); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+
+	return os.WriteFile(dest, data, 0o644)
 }
 
 func writeLinkfinderJSON(path string, payload linkfinderPayload) error {

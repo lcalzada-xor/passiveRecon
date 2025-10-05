@@ -45,6 +45,7 @@ go run ./cmd/passive-rec -target example.com -proxy http://127.0.0.1:8080 -proxy
 
 When the `--active` flag is enabled the pipeline now includes [GoLinkfinderEVO](https://github.com/lcalzada-xor/GoLinkfinderEVO).
 The tool inspects the active HTML, JavaScript and crawl lists, stores consolidated reports under `routes/linkFindings/` (`findings.json`, `findings.html` and `findings.raw`) and feeds the discovered endpoints back into the categorised `.active` artifacts.
+For reference, the raw GoLinkfinderEVO outputs from each input list are also preserved alongside the consolidated files as `findings.html.*`, `findings.js.*` and `findings.crawl.*`.
 
 ### Configuration file
 
