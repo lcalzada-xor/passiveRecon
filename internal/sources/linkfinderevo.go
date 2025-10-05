@@ -239,7 +239,7 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 }
 
 func buildLinkfinderArgs(inputPath, target, rawPath, htmlPath, jsonPath string) []string {
-	args := []string{"-i", inputPath, "-d", "-max-depth", "5"}
+	args := []string{"-i", inputPath, "-d", "-max-depth", "5", "--insecure"}
 	scope := normalizeScope(target)
 	if scope != "" {
 		args = append(args, "-scope", scope, "--scope-include-subdomains")
