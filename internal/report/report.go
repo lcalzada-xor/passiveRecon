@@ -762,385 +762,643 @@ const reportTemplate = `<!DOCTYPE html>
                 :root {
                         color-scheme: light;
                 }
-                body { font-family: "Inter", "Segoe UI", Arial, sans-serif; margin: 2.5rem; background: #f1f5f9; color: #1f2937; }
-                h1, h2, h3 { color: #111827; margin-top: 0; }
-                header { margin-bottom: 2rem; }
-                section { margin-bottom: 2rem; padding: 1.5rem; background: #ffffff; border-radius: 12px; box-shadow: 0 15px 35px rgba(15, 23, 42, 0.08); }
-                table { border-collapse: collapse; margin-bottom: 1.5rem; width: 100%; background: white; border-radius: 8px; overflow: hidden; }
-                th, td { border: 1px solid #e2e8f0; padding: 0.65rem 0.9rem; text-align: left; }
-                th { background: #0f172a; color: #f8fafc; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.82rem; }
-                ul { padding-left: 1.5rem; }
-                .muted { color: #64748b; }
-                .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-top: 1rem; }
-                .card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 1rem; background: linear-gradient(135deg, rgba(148, 163, 184, 0.12), rgba(148, 163, 184, 0)); }
-                .metric { font-size: 2rem; font-weight: 600; color: #0f172a; margin: 0.25rem 0; }
-                .subtext { font-size: 0.9rem; color: #475569; margin: 0; }
-                .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; }
+                * {
+                        box-sizing: border-box;
+                }
+                body {
+                        font-family: "Inter", "Segoe UI", Arial, sans-serif;
+                        margin: 0;
+                        background: #0f172a;
+                        color: #0f172a;
+                }
+                a {
+                        color: inherit;
+                }
+                .layout {
+                        max-width: 1200px;
+                        margin: 0 auto;
+                        padding: 2.5rem 2rem 3rem;
+                }
+                .masthead {
+                        display: flex;
+                        flex-wrap: wrap;
+                        justify-content: space-between;
+                        align-items: flex-end;
+                        gap: 1.5rem;
+                        padding: 2rem 2.5rem;
+                        background: linear-gradient(135deg, #1e293b 0%, #0f172a 55%, #1e293b 100%);
+                        border-radius: 20px;
+                        box-shadow: 0 25px 45px rgba(15, 23, 42, 0.35);
+                        color: #f8fafc;
+                }
+                .masthead h1 {
+                        margin: 0 0 0.35rem;
+                        font-size: 2rem;
+                        letter-spacing: 0.03em;
+                }
+                .masthead p {
+                        margin: 0.35rem 0;
+                        color: #e2e8f0;
+                }
+                .masthead strong {
+                        color: #facc15;
+                }
+                .meta-line {
+                        font-size: 0.9rem;
+                        color: #cbd5f5;
+                }
+                .badge-set {
+                        display: flex;
+                        flex-wrap: wrap;
+                        gap: 0.5rem;
+                        align-items: center;
+                }
+                .tag {
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 0.4rem;
+                        font-size: 0.85rem;
+                        font-weight: 600;
+                        text-transform: uppercase;
+                        letter-spacing: 0.08em;
+                        border-radius: 999px;
+                        padding: 0.35rem 0.9rem;
+                }
+                .tag-product {
+                        background: rgba(248, 250, 252, 0.2);
+                        color: #f8fafc;
+                        border: 1px solid rgba(248, 250, 252, 0.3);
+                }
+                .tag-passive {
+                        background: rgba(16, 185, 129, 0.18);
+                        color: #bbf7d0;
+                        border: 1px solid rgba(52, 211, 153, 0.45);
+                }
+                .tag-active {
+                        background: rgba(248, 113, 113, 0.18);
+                        color: #fecaca;
+                        border: 1px solid rgba(248, 113, 113, 0.45);
+                }
+                .quick-nav {
+                        display: flex;
+                        flex-wrap: wrap;
+                        gap: 0.75rem;
+                        margin: 1.75rem 0 2.25rem;
+                        padding: 0.85rem 1.25rem;
+                        background: rgba(15, 23, 42, 0.85);
+                        border-radius: 999px;
+                        box-shadow: 0 20px 35px rgba(15, 23, 42, 0.28);
+                }
+                .quick-nav a {
+                        color: #f8fafc;
+                        text-decoration: none;
+                        font-size: 0.9rem;
+                        font-weight: 500;
+                        letter-spacing: 0.02em;
+                        padding: 0.35rem 0.75rem;
+                        border-radius: 999px;
+                        transition: background 0.2s ease;
+                }
+                .quick-nav a:hover {
+                        background: rgba(248, 250, 252, 0.15);
+                }
+                main {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 2rem;
+                }
+                section.panel {
+                        background: #ffffff;
+                        border-radius: 20px;
+                        padding: 1.75rem 2rem;
+                        box-shadow: 0 25px 45px rgba(15, 23, 42, 0.12);
+                }
+                section.panel h2 {
+                        margin-top: 0;
+                        font-size: 1.55rem;
+                        letter-spacing: 0.02em;
+                        color: #0f172a;
+                }
+                section.panel h3 {
+                        color: #1e293b;
+                }
+                section.panel h4 {
+                        color: #334155;
+                }
+                section.panel p {
+                        color: #334155;
+                        line-height: 1.6;
+                }
+                ul {
+                        padding-left: 1.5rem;
+                }
+                .muted {
+                        color: #94a3b8;
+                }
+                .cards {
+                        display: grid;
+                        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+                        gap: 1.15rem;
+                        margin-top: 1.35rem;
+                }
+                .card {
+                        position: relative;
+                        border-radius: 16px;
+                        padding: 1.5rem;
+                        background: linear-gradient(165deg, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.85) 100%);
+                        color: #f8fafc;
+                        box-shadow: 0 20px 35px rgba(15, 23, 42, 0.18);
+                        border: 1px solid rgba(148, 163, 184, 0.2);
+                }
+                .card h3 {
+                        margin: 0;
+                        font-size: 0.95rem;
+                        text-transform: uppercase;
+                        letter-spacing: 0.08em;
+                        color: #cbd5f5;
+                }
+                .metric {
+                        font-size: 2.6rem;
+                        font-weight: 600;
+                        margin: 0.5rem 0 0.35rem;
+                        color: #f8fafc;
+                }
+                .subtext {
+                        font-size: 0.95rem;
+                        color: #475569;
+                        margin-top: 0.35rem;
+                }
+                .card .subtext {
+                        color: #cbd5f5;
+                }
+                .grid {
+                        display: grid;
+                        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                        gap: 1.5rem;
+                }
+                table {
+                        border-collapse: collapse;
+                        width: 100%;
+                        margin-top: 1.25rem;
+                        background: #ffffff;
+                        border-radius: 14px;
+                        overflow: hidden;
+                        box-shadow: 0 12px 25px rgba(15, 23, 42, 0.08);
+                }
+                th,
+                td {
+                        padding: 0.85rem 1rem;
+                        text-align: left;
+                        color: #1f2937;
+                }
+                th {
+                        background: #0f172a;
+                        color: #f8fafc;
+                        text-transform: uppercase;
+                        font-size: 0.78rem;
+                        letter-spacing: 0.08em;
+                }
+                tr:nth-child(even) td {
+                        background: #f8fafc;
+                }
+                .insights {
+                        list-style: none;
+                        padding: 0;
+                        margin: 1.25rem 0 0;
+                        display: grid;
+                        gap: 0.85rem;
+                }
+                .insights li {
+                        display: flex;
+                        gap: 0.75rem;
+                        align-items: flex-start;
+                        padding: 0.95rem 1.1rem;
+                        border: 1px solid #e2e8f0;
+                        border-radius: 14px;
+                        background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+                        box-shadow: 0 18px 35px rgba(15, 23, 42, 0.08);
+                }
+                .insight-tag {
+                        display: inline-flex;
+                        align-items: center;
+                        padding: 0.35rem 0.75rem;
+                        font-size: 0.7rem;
+                        font-weight: 700;
+                        text-transform: uppercase;
+                        letter-spacing: 0.08em;
+                        border-radius: 999px;
+                        background: #dbeafe;
+                        color: #1d4ed8;
+                        flex-shrink: 0;
+                }
+                .insight-text {
+                        color: #1f2937;
+                }
+                footer {
+                        margin-top: 3rem;
+                        text-align: center;
+                        color: #cbd5f5;
+                        font-size: 0.85rem;
+                        line-height: 1.6;
+                }
+                @media (max-width: 768px) {
+                        .layout {
+                                padding: 1.75rem 1.25rem 2.5rem;
+                        }
+                        .masthead {
+                                padding: 1.5rem;
+                                border-radius: 18px;
+                        }
+                        .quick-nav {
+                                border-radius: 1.25rem;
+                        }
+                        section.panel {
+                                padding: 1.5rem;
+                        }
+                        .cards {
+                                grid-template-columns: 1fr;
+                        }
+                }
         </style>
 </head>
 <body>
-        <header>
-                <h1>Informe de passive-rec</h1>
-                <p><strong>Objetivo:</strong> {{.Target}}</p>
-                <p><strong>Directorio de salida:</strong> {{.OutDir}}</p>
-                <p class="muted">Generado: {{.GeneratedAt}}</p>
-        </header>
-
-        <section>
-                <h2>Resumen ejecutivo</h2>
-                <p class="subtext">Vista rápida de los hallazgos más relevantes para priorizar acciones.</p>
-                <div class="cards">
-                        <div class="card">
-                                <h3>Total de artefactos procesados</h3>
-                                <p class="metric">{{.Overview.TotalArtifacts}}</p>
-                                <p class="subtext">Entradas combinadas de dominios, rutas y certificados.</p>
-                        </div>
-                        <div class="card">
-                                <h3>Dominios únicos</h3>
-                                <p class="metric">{{.Overview.UniqueDomains}}</p>
-                                <p class="subtext">Incluye {{.Domains.UniqueRegistrable}} dominios registrables distintos.</p>
-                        </div>
-                        <div class="card">
-                                <h3>Hosts únicos en rutas</h3>
-                                <p class="metric">{{.Overview.UniqueHosts}}</p>
-                                <p class="subtext">Cobertura sobre {{.Routes.UniqueSchemes}} esquemas de servicio; {{printf "%.1f" .Overview.InsecureRoutesPercent}}% sin HTTPS.</p>
-                        </div>
-                        <div class="card">
-                                <h3>Certificados únicos</h3>
-                                <p class="metric">{{.Overview.UniqueCertificates}}</p>
-                                <p class="subtext">{{.Certificates.ExpiringSoon}} por expirar en {{.Certificates.SoonThresholdDays}} días.</p>
-                        </div>
-                </div>
-        </section>
-
-        <section>
-                <h2>Hallazgos clave</h2>
-                {{if hasStrings .Highlights}}
-                <ul>
-                        {{range .Highlights}}
-                        <li>{{.}}</li>
-                        {{end}}
-                </ul>
-                {{else}}
-                <p class="muted">Sin hallazgos destacados generados automáticamente.</p>
-                {{end}}
-        </section>
-
-        <section>
-                <h2>Dominios</h2>
-                <div class="grid">
+        <div class="layout">
+                <header class="masthead">
                         <div>
-                                <p><strong>Total de dominios recolectados:</strong> {{.Domains.Total}}</p>
-                                <p><strong>Dominios únicos:</strong> {{.Domains.Unique}} (registrables: {{.Domains.UniqueRegistrable}})</p>
-                                <p><strong>Niveles promedio por dominio:</strong> {{printf "%.2f" .Domains.AverageLabels}}</p>
-                                <p><strong>Dominios comodín detectados:</strong> {{.Domains.WildcardCount}}</p>
+                                <h1>Informe de passive-rec</h1>
+                                <p>Evaluación de superficie para <strong>{{.Target}}</strong></p>
+                                <p class="meta-line">Generado: {{.GeneratedAt}} · Directorio de salida: {{.OutDir}}</p>
                         </div>
-                        <div>
-                                <p class="subtext">Los dominios con mayor frecuencia ayudan a identificar activos críticos y oportunidades para consolidar cobertura.</p>
-                        </div>
-                </div>
-                {{if hasData .Domains.TopRegistrable}}
-                <h3>Top dominios registrables</h3>
-                <table>
-                        <tr><th>Dominio</th><th>Conteo</th></tr>
-                        {{range .Domains.TopRegistrable}}
-                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
-                        {{end}}
-                </table>
-                {{end}}
-                {{if hasData .Domains.LabelHistogram}}
-                <h3>Distribución por niveles</h3>
-                <table>
-                        <tr><th>Niveles</th><th>Conteo</th></tr>
-                        {{range .Domains.LabelHistogram}}
-                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
-                        {{end}}
-                </table>
-                {{end}}
-                {{if hasData .Domains.TopTLDs}}
-                <h3>Top TLDs observados</h3>
-                <table>
-                        <tr><th>TLD</th><th>Conteo</th></tr>
-                        {{range .Domains.TopTLDs}}
-                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
-                        {{end}}
-                </table>
-                {{end}}
-                {{if hasStrings .Domains.Interesting}}
-                <h3>Dominios potencialmente sensibles</h3>
-                <ul>
-                        {{range .Domains.Interesting}}
-                        <li>{{.}}</li>
-                        {{end}}
-                </ul>
-                {{end}}
-        </section>
-
-        <section>
-                <h2>Rutas</h2>
-                <div class="grid">
-                        <div>
-                                <p><strong>Total de rutas:</strong> {{.Routes.Total}}</p>
-                                <p><strong>Hosts únicos observados:</strong> {{.Routes.UniqueHosts}}</p>
-                                <p><strong>Profundidad promedio de ruta:</strong> {{printf "%.2f" .Routes.AveragePathDepth}}</p>
-                        </div>
-                        <div>
-                                <p><strong>Uso de HTTPS:</strong> {{printf "%.1f" .Routes.SecurePercentage}}% de las rutas.</p>
-                                <p><strong>Esquemas únicos:</strong> {{.Routes.UniqueSchemes}}</p>
-                                <p><strong>Hosts con protocolos inseguros:</strong> {{.Routes.InsecureHostTotal}}</p>
-                        </div>
-                </div>
-                {{if hasData .Routes.TopHosts}}
-                <h3>Top hosts</h3>
-                <table>
-                        <tr><th>Host</th><th>Conteo</th></tr>
-                        {{range .Routes.TopHosts}}
-                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
-                        {{end}}
-                </table>
-                {{end}}
-                {{if hasData .Routes.SchemeHistogram}}
-                <h3>Esquemas por volumen</h3>
-                <table>
-                        <tr><th>Esquema</th><th>Conteo</th></tr>
-                        {{range .Routes.SchemeHistogram}}
-                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
-                        {{end}}
-                </table>
-                {{end}}
-                {{if hasData .Routes.DepthHistogram}}
-                <h3>Profundidad de rutas</h3>
-                <table>
-                        <tr><th>Segmentos</th><th>Conteo</th></tr>
-                        {{range .Routes.DepthHistogram}}
-                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
-                        {{end}}
-                </table>
-                {{end}}
-                {{if hasData .Routes.InsecureHosts}}
-                <h3>Hosts con tráfico no cifrado</h3>
-                <table>
-                        <tr><th>Host</th><th>Observaciones</th></tr>
-                        {{range .Routes.InsecureHosts}}
-                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
-                        {{end}}
-                </table>
-                {{end}}
-                {{if hasData .Routes.TopPorts}}
-                <h3>Puertos observados</h3>
-                <table>
-                        <tr><th>Puerto</th><th>Conteo</th></tr>
-                        {{range .Routes.TopPorts}}
-                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
-                        {{end}}
-                </table>
-                {{end}}
-                {{if hasStrings .Routes.NonStandardPorts}}
-                <h3>Servicios en puertos no estándar</h3>
-                <ul>
-                        {{range .Routes.NonStandardPorts}}
-                        <li>{{.}}</li>
-                        {{end}}
-                </ul>
-                {{end}}
-                {{if hasStrings .Routes.InterestingPaths}}
-                <h3>Endpoints con palabras clave sensibles</h3>
-                <ul>
-                        {{range .Routes.InterestingPaths}}
-                        <li>{{.}}</li>
-                        {{end}}
-                </ul>
-                {{end}}
-        </section>
-
-        <section>
-                <h2>Certificados</h2>
-                <div class="grid">
-                        <div>
-                                <p><strong>Total de certificados recolectados:</strong> {{.Certificates.Total}}</p>
-                                <p><strong>Certificados únicos:</strong> {{.Certificates.Unique}}</p>
-                                <p><strong>Emisores únicos:</strong> {{.Certificates.UniqueIssuers}}</p>
-                                <p><strong>Certificados vencidos:</strong> {{.Certificates.Expired}}</p>
-                        </div>
-                        <div>
-                                <p><strong>Dominios registrables únicos:</strong> {{.Certificates.UniqueRegistrable}}</p>
-                                <p><strong>Certificados por expirar ({{.Certificates.SoonThresholdDays}} días):</strong> {{.Certificates.ExpiringSoon}}</p>
-                                {{if .Certificates.NextExpiration}}
-                                <p><strong>Próximo vencimiento:</strong> {{.Certificates.NextExpiration}}</p>
+                        <div class="badge-set">
+                                <span class="tag tag-product">passive-rec</span>
+                                {{if .ActiveMode}}
+                                <span class="tag tag-active">Modo mixto (pasivo + activo)</span>
+                                {{else}}
+                                <span class="tag tag-passive">Modo pasivo</span>
                                 {{end}}
-                                {{if .Certificates.LatestExpiration}}
-                                <p><strong>Último vencimiento observado:</strong> {{.Certificates.LatestExpiration}}</p>
-                                {{end}}
-                                <p class="subtext">Útiles para validar el alcance de la emisión y reutilización de certificados.</p>
                         </div>
-                </div>
-                {{if hasData .Certificates.TopRegistrable}}
-                <h3>Top dominios registrables</h3>
-                <table>
-                        <tr><th>Dominio</th><th>Conteo</th></tr>
-                        {{range .Certificates.TopRegistrable}}
-                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
-                        {{end}}
-                </table>
-                {{end}}
-                {{if hasData .Certificates.TopIssuers}}
-                <h3>Top emisores</h3>
-                <table>
-                        <tr><th>Emisor</th><th>Conteo</th></tr>
-                        {{range .Certificates.TopIssuers}}
-                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
-                        {{end}}
-                </table>
-                {{end}}
-                {{if hasStrings .Certificates.ExpiredList}}
-                <h3>Certificados vencidos destacados</h3>
-                <ul>
-                        {{range .Certificates.ExpiredList}}
-                        <li>{{.}}</li>
-                        {{end}}
-                </ul>
-                {{end}}
-                {{if hasStrings .Certificates.ExpiringSoonList}}
-                <h3>Certificados próximos a expirar</h3>
-                <ul>
-                        {{range .Certificates.ExpiringSoonList}}
-                        <li>{{.}}</li>
-                        {{end}}
-                </ul>
-                {{end}}
-        </section>
+                </header>
+                <nav class="quick-nav">
+                        <a href="#resumen">Resumen ejecutivo</a>
+                        <a href="#hallazgos">Hallazgos clave</a>
+                        <a href="#dominios">Dominios</a>
+                        <a href="#rutas">Rutas</a>
+                        <a href="#certificados">Certificados</a>
+                        <a href="#meta">Meta</a>
+                        {{if .ActiveMode}}<a href="#activo">Recolección activa</a>{{end}}
+                </nav>
+                <main>
+                        <section id="resumen" class="panel">
+                                <h2>Resumen ejecutivo</h2>
+                                <p class="subtext">Vista rápida de los hallazgos más relevantes para priorizar acciones.</p>
+                                <div class="cards">
+                                        <div class="card">
+                                                <h3>Total de artefactos procesados</h3>
+                                                <p class="metric">{{.Overview.TotalArtifacts}}</p>
+                                                <p class="subtext">Entradas combinadas de dominios, rutas y certificados.</p>
+                                        </div>
+                                        <div class="card">
+                                                <h3>Dominios únicos</h3>
+                                                <p class="metric">{{.Overview.UniqueDomains}}</p>
+                                                <p class="subtext">Incluye {{.Domains.UniqueRegistrable}} dominios registrables distintos.</p>
+                                        </div>
+                                        <div class="card">
+                                                <h3>Hosts únicos en rutas</h3>
+                                                <p class="metric">{{.Overview.UniqueHosts}}</p>
+                                                <p class="subtext">Cobertura sobre {{.Routes.UniqueSchemes}} esquemas de servicio; {{printf "%.1f" .Overview.InsecureRoutesPercent}}% sin HTTPS.</p>
+                                        </div>
+                                        <div class="card">
+                                                <h3>Certificados únicos</h3>
+                                                <p class="metric">{{.Overview.UniqueCertificates}}</p>
+                                                <p class="subtext">{{.Certificates.ExpiringSoon}} por expirar en {{.Certificates.SoonThresholdDays}} días.</p>
+                                        </div>
+                                </div>
+                        </section>
 
-        <section>
-                <h2>Meta</h2>
-                {{if .Meta}}
-                <ul>
-                        {{range .Meta}}
-                        <li>{{.}}</li>
+                        <section id="hallazgos" class="panel">
+                                <h2>Hallazgos clave</h2>
+                                {{if hasStrings .Highlights}}
+                                <ul class="insights">
+                                        {{range .Highlights}}
+                                        <li><span class="insight-tag">Hallazgo</span><span class="insight-text">{{.}}</span></li>
+                                        {{end}}
+                                </ul>
+                                {{else}}
+                                <p class="muted">Sin hallazgos destacados generados automáticamente.</p>
+                                {{end}}
+                        </section>
+
+                        <section id="dominios" class="panel">
+                                <h2>Dominios</h2>
+                                <div class="grid">
+                                        <div>
+                                                <p><strong>Total de dominios recolectados:</strong> {{.Domains.Total}}</p>
+                                                <p><strong>Dominios únicos:</strong> {{.Domains.Unique}} (registrables: {{.Domains.UniqueRegistrable}})</p>
+                                                <p><strong>Niveles promedio por dominio:</strong> {{printf "%.2f" .Domains.AverageLabels}}</p>
+                                                <p><strong>Dominios comodín detectados:</strong> {{.Domains.WildcardCount}}</p>
+                                        </div>
+                                        <div>
+                                                <p class="subtext">Los dominios con mayor frecuencia ayudan a identificar activos críticos y oportunidades para consolidar cobertura.</p>
+                                        </div>
+                                </div>
+                                {{if hasData .Domains.TopRegistrable}}
+                                <h3>Top dominios registrables</h3>
+                                <table>
+                                        <tr><th>Dominio</th><th>Conteo</th></tr>
+                                        {{range .Domains.TopRegistrable}}
+                                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
+                                        {{end}}
+                                </table>
+                                {{end}}
+                                {{if hasData .Domains.LabelHistogram}}
+                                <h3>Distribución por niveles</h3>
+                                <table>
+                                        <tr><th>Niveles</th><th>Conteo</th></tr>
+                                        {{range .Domains.LabelHistogram}}
+                                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
+                                        {{end}}
+                                </table>
+                                {{end}}
+                                {{if hasData .Domains.TopTLDs}}
+                                <h3>Top TLDs observados</h3>
+                                <table>
+                                        <tr><th>TLD</th><th>Conteo</th></tr>
+                                        {{range .Domains.TopTLDs}}
+                                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
+                                        {{end}}
+                                </table>
+                                {{end}}
+                                {{if hasStrings .Domains.Interesting}}
+                                <h3>Dominios potencialmente sensibles</h3>
+                                <ul>
+                                        {{range .Domains.Interesting}}
+                                        <li>{{.}}</li>
+                                        {{end}}
+                                </ul>
+                                {{end}}
+                        </section>
+
+                        <section id="rutas" class="panel">
+                                <h2>Rutas</h2>
+                                <div class="grid">
+                                        <div>
+                                                <p><strong>Total de rutas:</strong> {{.Routes.Total}}</p>
+                                                <p><strong>Hosts únicos observados:</strong> {{.Routes.UniqueHosts}}</p>
+                                                <p><strong>Profundidad promedio de ruta:</strong> {{printf "%.2f" .Routes.AveragePathDepth}}</p>
+                                                <p><strong>Uso de HTTPS:</strong> {{printf "%.1f" .Routes.SecurePercentage}}% de las rutas.</p>
+                                        </div>
+                                        <div>
+                                                <p class="subtext">Las rutas identificadas permiten priorizar revisiones de servicios y detectar activos expuestos.</p>
+                                                <p><strong>Hosts con protocolos inseguros:</strong> {{.Routes.InsecureHostTotal}}</p>
+                                        </div>
+                                </div>
+                                {{if hasData .Routes.SchemeHistogram}}
+                                <h3>Esquemas por volumen</h3>
+                                <table>
+                                        <tr><th>Esquema</th><th>Conteo</th></tr>
+                                        {{range .Routes.SchemeHistogram}}
+                                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
+                                        {{end}}
+                                </table>
+                                {{end}}
+                                {{if hasData .Routes.DepthHistogram}}
+                                <h3>Profundidad de rutas</h3>
+                                <table>
+                                        <tr><th>Segmentos</th><th>Conteo</th></tr>
+                                        {{range .Routes.DepthHistogram}}
+                                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
+                                        {{end}}
+                                </table>
+                                {{end}}
+                                {{if hasData .Routes.InsecureHosts}}
+                                <h3>Hosts con tráfico no cifrado</h3>
+                                <table>
+                                        <tr><th>Host</th><th>Rutas</th></tr>
+                                        {{range .Routes.InsecureHosts}}
+                                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
+                                        {{end}}
+                                </table>
+                                {{end}}
+                                {{if hasData .Routes.TopPorts}}
+                                <h3>Puertos observados</h3>
+                                <table>
+                                        <tr><th>Puerto</th><th>Conteo</th></tr>
+                                        {{range .Routes.TopPorts}}
+                                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
+                                        {{end}}
+                                </table>
+                                {{end}}
+                                {{if hasStrings .Routes.NonStandardPorts}}
+                                <h3>Servicios en puertos no estándar</h3>
+                                <ul>
+                                        {{range .Routes.NonStandardPorts}}
+                                        <li>{{.}}</li>
+                                        {{end}}
+                                </ul>
+                                {{end}}
+                                {{if hasStrings .Routes.InterestingPaths}}
+                                <h3>Endpoints con palabras clave sensibles</h3>
+                                <ul>
+                                        {{range .Routes.InterestingPaths}}
+                                        <li>{{.}}</li>
+                                        {{end}}
+                                </ul>
+                                {{end}}
+                        </section>
+
+                        <section id="certificados" class="panel">
+                                <h2>Certificados</h2>
+                                <div class="grid">
+                                        <div>
+                                                <p><strong>Certificados únicos:</strong> {{.Certificates.Unique}}</p>
+                                                <p><strong>Emisores únicos:</strong> {{.Certificates.UniqueIssuers}}</p>
+                                                <p><strong>Certificados vencidos:</strong> {{.Certificates.Expired}}</p>
+                                                <p><strong>Dominios registrables únicos:</strong> {{.Certificates.UniqueRegistrable}}</p>
+                                        </div>
+                                        <div>
+                                                <p class="subtext">Los certificados permiten medir la higiene criptográfica y planificar renovaciones.</p>
+                                                <p><strong>Certificados por expirar ({{.Certificates.SoonThresholdDays}} días):</strong> {{.Certificates.ExpiringSoon}}</p>
+                                                {{if .Certificates.NextExpiration}}
+                                                <p><strong>Próximo vencimiento:</strong> {{.Certificates.NextExpiration}}</p>
+                                                {{end}}
+                                                {{if .Certificates.LatestExpiration}}
+                                                <p><strong>Último vencimiento observado:</strong> {{.Certificates.LatestExpiration}}</p>
+                                                {{end}}
+                                        </div>
+                                </div>
+                                {{if hasData .Certificates.TopRegistrable}}
+                                <h3>Top dominios registrables asociados</h3>
+                                <table>
+                                        <tr><th>Dominio</th><th>Conteo</th></tr>
+                                        {{range .Certificates.TopRegistrable}}
+                                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
+                                        {{end}}
+                                </table>
+                                {{end}}
+                                {{if hasData .Certificates.TopIssuers}}
+                                <h3>Top emisores</h3>
+                                <table>
+                                        <tr><th>Emisor</th><th>Conteo</th></tr>
+                                        {{range .Certificates.TopIssuers}}
+                                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
+                                        {{end}}
+                                </table>
+                                {{end}}
+                                {{if hasStrings .Certificates.ExpiredList}}
+                                <h3>Certificados vencidos destacados</h3>
+                                <ul>
+                                        {{range .Certificates.ExpiredList}}
+                                        <li>{{.}}</li>
+                                        {{end}}
+                                </ul>
+                                {{end}}
+                                {{if hasStrings .Certificates.ExpiringSoonList}}
+                                <h3>Certificados próximos a expirar</h3>
+                                <ul>
+                                        {{range .Certificates.ExpiringSoonList}}
+                                        <li>{{.}}</li>
+                                        {{end}}
+                                </ul>
+                                {{end}}
+                        </section>
+
+                        <section id="meta" class="panel">
+                                <h2>Meta</h2>
+                                {{if .Meta}}
+                                <ul>
+                                        {{range .Meta}}
+                                        <li>{{.}}</li>
+                                        {{end}}
+                                </ul>
+                                {{else}}
+                                <p class="muted">Sin entradas meta.</p>
+                                {{end}}
+                        </section>
+                        {{if .ActiveMode}}
+                        <section id="activo" class="panel">
+                                <h2>Resultados de recolección activa</h2>
+                                <p class="subtext">Hallazgos derivados de validaciones activas contra los activos descubiertos.</p>
+                                {{if or (gt .Active.Domains.Total 0) (gt .Active.Routes.Total 0) (gt .Active.DNS.Total 0) (gt (len .Active.Meta) 0) (gt .Active.Certificates.Total 0)}}
+                                <div class="cards">
+                                        <div class="card">
+                                                <h3>Dominios activos detectados</h3>
+                                                <p class="metric">{{.Active.Domains.Total}}</p>
+                                                <p class="subtext">{{.Active.Domains.Unique}} dominios únicos observados.</p>
+                                        </div>
+                                        <div class="card">
+                                                <h3>Rutas activas evaluadas</h3>
+                                                <p class="metric">{{.Active.Routes.Total}}</p>
+                                                <p class="subtext">{{.Active.Routes.UniqueHosts}} hosts; {{printf "%.1f" .Active.Routes.SecurePercentage}}% con HTTPS.</p>
+                                        </div>
+                                        <div class="card">
+                                                <h3>Registros DNS activos</h3>
+                                                <p class="metric">{{.Active.DNS.Total}}</p>
+                                                <p class="subtext">{{.Active.DNS.UniqueHosts}} dominios con registros.</p>
+                                        </div>
+                                        <div class="card">
+                                                <h3>Certificados activos observados</h3>
+                                                <p class="metric">{{.Active.Certificates.Total}}</p>
+                                                <p class="subtext">{{.Active.Certificates.Unique}} certificados únicos.</p>
+                                        </div>
+                                </div>
+                                {{if hasStrings .Active.Highlights}}
+                                <h3>Hallazgos activos clave</h3>
+                                <ul class="insights">
+                                        {{range .Active.Highlights}}
+                                        <li><span class="insight-tag">Hallazgo</span><span class="insight-text">{{.}}</span></li>
+                                        {{end}}
+                                </ul>
+                                {{else}}
+                                <p class="muted">Sin hallazgos activos destacados.</p>
+                                {{end}}
+                                <h3>Dominios detectados</h3>
+                                {{if hasStrings .Active.RawDomains}}
+                                <ul>
+                                        {{range (limit .Active.RawDomains 25)}}
+                                        <li>{{.}}</li>
+                                        {{end}}
+                                </ul>
+                                {{if gt (len .Active.RawDomains) 25}}
+                                <p class="muted">Mostrando 25 de {{len .Active.RawDomains}} dominios activos.</p>
+                                {{end}}
+                                {{else}}
+                                <p class="muted">No se recolectaron dominios activos.</p>
+                                {{end}}
+                                <h3>Registros DNS</h3>
+                                {{if hasStrings .Active.RawDNS}}
+                                <ul>
+                                        {{range (limit .Active.RawDNS 25)}}
+                                        <li>{{.}}</li>
+                                        {{end}}
+                                </ul>
+                                {{if gt (len .Active.RawDNS) 25}}
+                                <p class="muted">Mostrando 25 de {{len .Active.RawDNS}} registros DNS.</p>
+                                {{end}}
+                                {{else}}
+                                <p class="muted">No se registraron resultados DNS activos.</p>
+                                {{end}}
+                                {{if hasData .Active.DNS.RecordTypes}}
+                                <h4>Tipos de registros observados</h4>
+                                <table class="metrics">
+                                        <tr><th>Tipo</th><th>Conteo</th></tr>
+                                        {{range .Active.DNS.RecordTypes}}
+                                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
+                                        {{end}}
+                                </table>
+                                {{end}}
+                                <h3>Rutas activas</h3>
+                                {{if hasStrings .Active.RawRoutes}}
+                                <ul>
+                                        {{range (limit .Active.RawRoutes 25)}}
+                                        <li>{{.}}</li>
+                                        {{end}}
+                                </ul>
+                                {{if gt (len .Active.RawRoutes) 25}}
+                                <p class="muted">Mostrando 25 de {{len .Active.RawRoutes}} rutas activas.</p>
+                                {{end}}
+                                {{else}}
+                                <p class="muted">No se registraron rutas activas.</p>
+                                {{end}}
+                                <h3>Meta activa</h3>
+                                {{if hasStrings .Active.Meta}}
+                                <ul>
+                                        {{range .Active.Meta}}
+                                        <li>{{.}}</li>
+                                        {{end}}
+                                </ul>
+                                {{else}}
+                                <p class="muted">Sin entradas meta activas.</p>
+                                {{end}}
+                                {{if gt .Active.Certificates.Total 0}}
+                                <h3>Certificados (activos)</h3>
+                                <p><strong>Total recolectado:</strong> {{.Active.Certificates.Total}} (únicos: {{.Active.Certificates.Unique}})</p>
+                                {{if hasStrings .Active.Certificates.ExpiredList}}
+                                <h4>Certificados vencidos detectados</h4>
+                                <ul>
+                                        {{range .Active.Certificates.ExpiredList}}
+                                        <li>{{.}}</li>
+                                        {{end}}
+                                </ul>
+                                {{end}}
+                                {{if hasStrings .Active.Certificates.ExpiringSoonList}}
+                                <h4>Certificados por expirar pronto</h4>
+                                <ul>
+                                        {{range .Active.Certificates.ExpiringSoonList}}
+                                        <li>{{.}}</li>
+                                        {{end}}
+                                </ul>
+                                {{end}}
+                                {{end}}
+                                {{else}}
+                                <p class="muted">No se recolectaron hallazgos activos.</p>
+                                {{end}}
+                        </section>
                         {{end}}
-                </ul>
-                {{else}}
-                <p class="muted">Sin entradas meta.</p>
-                {{end}}
-        </section>
-        {{if .ActiveMode}}
-        <section>
-                <h2>Resultados de recolección activa</h2>
-                <p class="subtext">Hallazgos derivados de validaciones activas contra los activos descubiertos.</p>
-                {{if or (gt .Active.Domains.Total 0) (gt .Active.Routes.Total 0) (gt .Active.DNS.Total 0) (gt (len .Active.Meta) 0) (gt .Active.Certificates.Total 0)}}
-                <div class="cards">
-                        <div class="card">
-                                <h3>Dominios activos detectados</h3>
-                                <p class="metric">{{.Active.Domains.Total}}</p>
-                                <p class="subtext">{{.Active.Domains.Unique}} dominios únicos observados.</p>
-                        </div>
-                        <div class="card">
-                                <h3>Rutas activas evaluadas</h3>
-                                <p class="metric">{{.Active.Routes.Total}}</p>
-                                <p class="subtext">{{.Active.Routes.UniqueHosts}} hosts; {{printf "%.1f" .Active.Routes.SecurePercentage}}% con HTTPS.</p>
-                        </div>
-                        <div class="card">
-                                <h3>Registros DNS activos</h3>
-                                <p class="metric">{{.Active.DNS.Total}}</p>
-                                <p class="subtext">{{.Active.DNS.UniqueHosts}} dominios con registros.</p>
-                        </div>
-                        <div class="card">
-                                <h3>Certificados activos observados</h3>
-                                <p class="metric">{{.Active.Certificates.Total}}</p>
-                                <p class="subtext">{{.Active.Certificates.Unique}} certificados únicos.</p>
-                        </div>
-                </div>
-                {{if hasStrings .Active.Highlights}}
-                <h3>Hallazgos activos clave</h3>
-                <ul>
-                        {{range .Active.Highlights}}
-                        <li>{{.}}</li>
-                        {{end}}
-                </ul>
-                {{else}}
-                <p class="muted">Sin hallazgos activos destacados.</p>
-                {{end}}
-                <h3>Dominios detectados</h3>
-                {{if hasStrings .Active.RawDomains}}
-                <ul>
-                        {{range (limit .Active.RawDomains 25)}}
-                        <li>{{.}}</li>
-                        {{end}}
-                </ul>
-                {{if gt (len .Active.RawDomains) 25}}
-                <p class="muted">Mostrando 25 de {{len .Active.RawDomains}} dominios activos.</p>
-                {{end}}
-                {{else}}
-                <p class="muted">No se recolectaron dominios activos.</p>
-                {{end}}
-                <h3>Registros DNS</h3>
-                {{if hasStrings .Active.RawDNS}}
-                <ul>
-                        {{range (limit .Active.RawDNS 25)}}
-                        <li>{{.}}</li>
-                        {{end}}
-                </ul>
-                {{if gt (len .Active.RawDNS) 25}}
-                <p class="muted">Mostrando 25 de {{len .Active.RawDNS}} registros DNS.</p>
-                {{end}}
-                {{else}}
-                <p class="muted">No se registraron resultados DNS activos.</p>
-                {{end}}
-                {{if hasData .Active.DNS.RecordTypes}}
-                <h4>Tipos de registros observados</h4>
-                <table class="metrics">
-                        <tr><th>Tipo</th><th>Conteo</th></tr>
-                        {{range .Active.DNS.RecordTypes}}
-                        <tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>
-                        {{end}}
-                </table>
-                {{end}}
-                <h3>Rutas activas</h3>
-                {{if hasStrings .Active.RawRoutes}}
-                <ul>
-                        {{range (limit .Active.RawRoutes 25)}}
-                        <li>{{.}}</li>
-                        {{end}}
-                </ul>
-                {{if gt (len .Active.RawRoutes) 25}}
-                <p class="muted">Mostrando 25 de {{len .Active.RawRoutes}} rutas activas.</p>
-                {{end}}
-                {{else}}
-                <p class="muted">No se registraron rutas activas.</p>
-                {{end}}
-                {{if gt .Active.Certificates.Total 0}}
-                <h3>Certificados (activos)</h3>
-                <p><strong>Total recolectado:</strong> {{.Active.Certificates.Total}} (únicos: {{.Active.Certificates.Unique}})</p>
-                {{if hasStrings .Active.Certificates.ExpiredList}}
-                <h4>Certificados vencidos detectados</h4>
-                <ul>
-                        {{range .Active.Certificates.ExpiredList}}
-                        <li>{{.}}</li>
-                        {{end}}
-                </ul>
-                {{end}}
-                {{if hasStrings .Active.Certificates.ExpiringSoonList}}
-                <h4>Certificados por expirar pronto</h4>
-                <ul>
-                        {{range .Active.Certificates.ExpiringSoonList}}
-                        <li>{{.}}</li>
-                        {{end}}
-                </ul>
-                {{end}}
-                {{end}}
-                <h3>Meta activa</h3>
-                {{if hasStrings .Active.Meta}}
-                <ul>
-                        {{range .Active.Meta}}
-                        <li>{{.}}</li>
-                        {{end}}
-                </ul>
-                {{else}}
-                <p class="muted">Sin entradas meta activas.</p>
-                {{end}}
-                {{else}}
-                <p class="muted">Modo activo habilitado pero no se generaron artefactos para mostrar.</p>
-                {{end}}
-        </section>
-        {{end}}
+                </main>
+                <footer>
+                        <p>Este informe resume artefactos recolectados de manera pasiva{{if .ActiveMode}} y activa{{end}}. Revise los hallazgos y priorice acciones según el apetito de riesgo de la organización.</p>
+                </footer>
+        </div>
 </body>
 </html>`
+
