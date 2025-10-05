@@ -4,8 +4,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
+
+	"passive-rec/internal/routes"
 )
 
 func TestClassifyLinkfinderEndpoint(t *testing.T) {
@@ -15,10 +20,13 @@ func TestClassifyLinkfinderEndpoint(t *testing.T) {
 		wantJS     bool
 		wantHTML   bool
 		undetected bool
+		wantCats   []routes.Category
 	}{
 		{name: "javascript absolute", input: "https://example.com/app/main.js", wantJS: true},
 		{name: "html absolute", input: "https://example.com/index.html", wantHTML: true},
 		{name: "relative path", input: "api/v1/users", undetected: true},
+		{name: "svg relative", input: "logo.svg", undetected: true, wantCats: []routes.Category{routes.CategorySVG}},
+		{name: "wasm", input: "https://example.com/app.wasm", wantCats: []routes.Category{routes.CategoryWASM}},
 	}
 
 	for _, tt := range tests {
@@ -33,7 +41,63 @@ func TestClassifyLinkfinderEndpoint(t *testing.T) {
 			if got.undetected != tt.undetected {
 				t.Fatalf("undetected mismatch: got %v want %v", got.undetected, tt.undetected)
 			}
+			if diff := cmp.Diff(tt.wantCats, got.categories); diff != "" {
+				t.Fatalf("categories mismatch (-want +got):\n%s", diff)
+			}
 		})
+	}
+}
+
+func TestEmitLinkfinderFindingsFeedsCategories(t *testing.T) {
+	reports := []linkfinderReport{{
+		Resource: "https://example.com/page.html",
+		Endpoints: []linkfinderEndpoint{
+			{Link: "logo.svg"},
+			{Link: "https://example.com/sitemap.xml"},
+			{Link: "https://example.com/config.json"},
+			{Link: "https://example.com/openapi.json"},
+			{Link: "https://example.com/app.wasm"},
+			{Link: "https://example.com/static/app.js"},
+		},
+	}}
+
+	out := make(chan string, 20)
+	undetected, err := emitLinkfinderFindings(reports, out)
+	if err != nil {
+		t.Fatalf("emitLinkfinderFindings returned error: %v", err)
+	}
+	close(out)
+
+	var lines []string
+	for line := range out {
+		lines = append(lines, line)
+	}
+	sort.Strings(lines)
+
+	wantLines := []string{
+		"active: https://example.com/app.wasm",
+		"active: https://example.com/config.json",
+		"active: https://example.com/openapi.json",
+		"active: https://example.com/sitemap.xml",
+		"active: https://example.com/static/app.js",
+		"active: api: https://example.com/openapi.json",
+		"active: crawl: https://example.com/sitemap.xml",
+		"active: js: https://example.com/static/app.js",
+		"active: json: https://example.com/config.json",
+		"active: meta-route: https://example.com/config.json",
+		"active: logo.svg",
+		"active: svg: logo.svg",
+		"active: wasm: https://example.com/app.wasm",
+	}
+
+	sort.Strings(wantLines)
+	if diff := cmp.Diff(wantLines, lines); diff != "" {
+		t.Fatalf("unexpected lines (-want +got):\n%s", diff)
+	}
+
+	sort.Strings(undetected)
+	if diff := cmp.Diff([]string{"logo.svg"}, undetected); diff != "" {
+		t.Fatalf("unexpected undetected entries (-want +got):\n%s", diff)
 	}
 }
 
