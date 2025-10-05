@@ -12,6 +12,7 @@ import (
 	"passive-rec/internal/certs"
 	"passive-rec/internal/netutil"
 	"passive-rec/internal/out"
+	"passive-rec/internal/routes"
 )
 
 type sinkWriter interface {
@@ -313,6 +314,13 @@ var prefixHandlers = []struct {
 	{prefix: "meta:", handler: handleMeta},
 	{prefix: "js:", handler: handleJS},
 	{prefix: "html:", handler: handleHTML},
+	{prefix: "maps:", handler: handleMaps},
+	{prefix: "json:", handler: handleJSONCategory},
+	{prefix: "api:", handler: handleAPICategory},
+	{prefix: "wasm:", handler: handleWASMCategory},
+	{prefix: "svg:", handler: handleSVGCategory},
+	{prefix: "crawl:", handler: handleCrawlCategory},
+	{prefix: "meta-route:", handler: handleMetaCategory},
 	{prefix: "cert:", handler: handleCert},
 }
 
@@ -471,6 +479,67 @@ func handleHTML(s *Sink, line string, isActive bool) bool {
 		return true
 	}
 	_ = writer.WriteURL(html)
+	return true
+}
+
+func handleMaps(s *Sink, line string, isActive bool) bool {
+	return handleCategorizedRoute(s, line, isActive, "maps:", s.RoutesMaps, s.seenRoutesMaps, true)
+}
+
+func handleJSONCategory(s *Sink, line string, isActive bool) bool {
+	return handleCategorizedRoute(s, line, isActive, "json:", s.RoutesJSON, s.seenRoutesJSON, true)
+}
+
+func handleAPICategory(s *Sink, line string, isActive bool) bool {
+	return handleCategorizedRoute(s, line, isActive, "api:", s.RoutesAPI, s.seenRoutesAPI, true)
+}
+
+func handleWASMCategory(s *Sink, line string, isActive bool) bool {
+	return handleCategorizedRoute(s, line, isActive, "wasm:", s.RoutesWASM, s.seenRoutesWASM, true)
+}
+
+func handleSVGCategory(s *Sink, line string, isActive bool) bool {
+	return handleCategorizedRoute(s, line, isActive, "svg:", s.RoutesSVG, s.seenRoutesSVG, true)
+}
+
+func handleCrawlCategory(s *Sink, line string, isActive bool) bool {
+	return handleCategorizedRoute(s, line, isActive, "crawl:", s.RoutesCrawl, s.seenRoutesCrawl, true)
+}
+
+func handleMetaCategory(s *Sink, line string, isActive bool) bool {
+	return handleCategorizedRoute(s, line, isActive, "meta-route:", s.RoutesMetaFindings, s.seenRoutesMeta, false)
+}
+
+func handleCategorizedRoute(s *Sink, line string, isActive bool, prefix string, writers writerPair, seen map[string]struct{}, normalizePassive bool) bool {
+	value := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	if value == "" {
+		return true
+	}
+
+	if seen != nil {
+		key := value
+		if isActive {
+			key = "active:" + key
+		}
+		if s.markSeen(seen, key) {
+			return true
+		}
+	}
+
+	target := writers.passive
+	if isActive {
+		target = writers.active
+	}
+	if target == nil {
+		return true
+	}
+
+	if isActive || !normalizePassive {
+		_ = target.WriteRaw(value)
+		return true
+	}
+
+	_ = target.WriteURL(value)
 	return true
 }
 
@@ -800,56 +869,43 @@ func extractRouteBase(line string) string {
 	return strings.TrimSpace(trimmed)
 }
 
-type routeCategory int
-
-const (
-	routeCategoryNone routeCategory = iota
-	routeCategoryMaps
-	routeCategoryJSON
-	routeCategoryAPI
-	routeCategoryWASM
-	routeCategorySVG
-	routeCategoryCrawl
-	routeCategoryMeta
-)
-
 func (s *Sink) writeRouteCategories(route string, isActive bool) {
 	if route == "" {
 		return
 	}
-	categories := detectRouteCategories(route)
+	categories := routes.DetectCategories(route)
 	if len(categories) == 0 {
 		return
 	}
-	categoryTargets := map[routeCategory]struct {
+	categoryTargets := map[routes.Category]struct {
 		writers writerPair
 		seen    map[string]struct{}
 	}{
-		routeCategoryMaps: {
+		routes.CategoryMaps: {
 			writers: s.RoutesMaps,
 			seen:    s.seenRoutesMaps,
 		},
-		routeCategoryJSON: {
+		routes.CategoryJSON: {
 			writers: s.RoutesJSON,
 			seen:    s.seenRoutesJSON,
 		},
-		routeCategoryAPI: {
+		routes.CategoryAPI: {
 			writers: s.RoutesAPI,
 			seen:    s.seenRoutesAPI,
 		},
-		routeCategoryWASM: {
+		routes.CategoryWASM: {
 			writers: s.RoutesWASM,
 			seen:    s.seenRoutesWASM,
 		},
-		routeCategorySVG: {
+		routes.CategorySVG: {
 			writers: s.RoutesSVG,
 			seen:    s.seenRoutesSVG,
 		},
-		routeCategoryCrawl: {
+		routes.CategoryCrawl: {
 			writers: s.RoutesCrawl,
 			seen:    s.seenRoutesCrawl,
 		},
-		routeCategoryMeta: {
+		routes.CategoryMeta: {
 			writers: s.RoutesMetaFindings,
 			seen:    s.seenRoutesMeta,
 		},
@@ -908,95 +964,6 @@ func parseActiveRouteStatus(fullLine, base string) (int, bool) {
 	return code, true
 }
 
-func detectRouteCategories(route string) []routeCategory {
-	trimmed := strings.TrimSpace(route)
-	if trimmed == "" {
-		return nil
-	}
-
-	lowerFull := strings.ToLower(trimmed)
-	pathComponent := trimmed
-	if u, err := url.Parse(trimmed); err == nil {
-		if u.Path != "" {
-			pathComponent = u.Path
-		}
-		lowerFull = strings.ToLower(u.Path)
-		if u.RawQuery != "" {
-			lowerFull += "?" + strings.ToLower(u.RawQuery)
-		}
-	}
-
-	if idx := strings.IndexAny(pathComponent, "?#"); idx != -1 {
-		pathComponent = pathComponent[:idx]
-	}
-	pathComponent = strings.TrimSpace(pathComponent)
-	lowerPath := strings.ToLower(pathComponent)
-
-	base := strings.ToLower(filepath.Base(pathComponent))
-	if base == "." || base == "/" {
-		base = ""
-	}
-	ext := strings.ToLower(filepath.Ext(base))
-	nameNoExt := strings.TrimSuffix(base, ext)
-
-	appendCat := func(categories []routeCategory, cat routeCategory) []routeCategory {
-		for _, existing := range categories {
-			if existing == cat {
-				return categories
-			}
-		}
-		return append(categories, cat)
-	}
-
-	var categories []routeCategory
-
-	switch ext {
-	case ".map":
-		categories = appendCat(categories, routeCategoryMaps)
-	case ".wasm":
-		categories = appendCat(categories, routeCategoryWASM)
-	case ".svg":
-		categories = appendCat(categories, routeCategorySVG)
-	case ".jsonld":
-		categories = appendCat(categories, routeCategoryJSON)
-	case ".json":
-		if isAPIDocument(lowerPath, base, nameNoExt, lowerFull) {
-			categories = appendCat(categories, routeCategoryAPI)
-		} else {
-			categories = appendCat(categories, routeCategoryJSON)
-		}
-	case ".yaml", ".yml":
-		if isAPIDocument(lowerPath, base, nameNoExt, lowerFull) {
-			categories = appendCat(categories, routeCategoryAPI)
-		}
-	case ".xml":
-		if isCrawlFile(base, nameNoExt) {
-			categories = appendCat(categories, routeCategoryCrawl)
-		}
-	case ".txt":
-		if base == "robots.txt" {
-			categories = appendCat(categories, routeCategoryCrawl)
-		}
-	case ".gz":
-		if strings.HasSuffix(base, "sitemap.xml.gz") || strings.HasSuffix(nameNoExt, "sitemap.xml") {
-			categories = appendCat(categories, routeCategoryCrawl)
-		}
-	}
-
-	if base == "robots.txt" {
-		categories = appendCat(categories, routeCategoryCrawl)
-	}
-	if ext == "" && isCrawlPathWithoutExt(lowerPath) {
-		categories = appendCat(categories, routeCategoryCrawl)
-	}
-
-	if shouldCategorizeMeta(base, nameNoExt, ext, lowerFull) {
-		categories = appendCat(categories, routeCategoryMeta)
-	}
-
-	return categories
-}
-
 func isImageURL(raw string) bool {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -1022,89 +989,6 @@ func isImageURL(raw string) bool {
 	switch ext {
 	case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tif", ".tiff", ".jfif", ".avif", ".apng", ".heic", ".heif":
 		return true
-	}
-
-	return false
-}
-
-func isAPIDocument(lowerPath, base, nameNoExt, lowerFull string) bool {
-	keywords := []string{"swagger", "openapi", "api-doc", "api_docs", "apispec", "api-spec", "api_spec", "api-definition", "api_definition"}
-	for _, kw := range keywords {
-		if strings.Contains(lowerPath, kw) {
-			return true
-		}
-	}
-	for _, kw := range keywords {
-		if strings.Contains(base, kw) {
-			return true
-		}
-	}
-	if nameNoExt == "api" && (strings.Contains(lowerFull, "openapi") || strings.Contains(lowerFull, "swagger")) {
-		return true
-	}
-	return false
-}
-
-func isCrawlFile(base, nameNoExt string) bool {
-	if strings.Contains(nameNoExt, "sitemap") {
-		return true
-	}
-	return false
-}
-
-func isCrawlPathWithoutExt(lowerPath string) bool {
-	if strings.HasSuffix(lowerPath, "/robots") || strings.HasSuffix(lowerPath, "/robots/") {
-		return true
-	}
-	return false
-}
-
-func shouldCategorizeMeta(base, nameNoExt, ext, lowerFull string) bool {
-	if base == "" {
-		return false
-	}
-
-	sensitiveExts := map[string]struct{}{
-		".bak":    {},
-		".old":    {},
-		".swp":    {},
-		".sql":    {},
-		".db":     {},
-		".sqlite": {},
-		".env":    {},
-		".ini":    {},
-		".cfg":    {},
-		".config": {},
-		".conf":   {},
-		".log":    {},
-	}
-
-	if _, ok := sensitiveExts[ext]; ok {
-		return true
-	}
-
-	archiveExts := []string{".zip", ".rar", ".7z", ".tar", ".tgz", ".gz"}
-	for _, archiveExt := range archiveExts {
-		if strings.HasSuffix(base, archiveExt) {
-			if strings.Contains(nameNoExt, "backup") || strings.Contains(nameNoExt, "config") || strings.Contains(nameNoExt, "secret") || strings.Contains(nameNoExt, "database") || strings.Contains(nameNoExt, "db") {
-				return true
-			}
-		}
-	}
-
-	lowerBase := base
-	keywords := []string{"backup", "secret", "token", "password", "passwd", "credential", "creds", "config", "database", "db", "id_rsa", ".env", ".git", ".svn", "ssh", "private"}
-	for _, kw := range keywords {
-		if strings.Contains(lowerBase, kw) {
-			return true
-		}
-	}
-
-	queryKeywords := []string{"token=", "secret=", "password=", "passwd=", "key=", "apikey=", "api_key=", "access_token=", "auth=", "credential"}
-	for _, kw := range queryKeywords {
-		if strings.Contains(lowerFull, kw) {
-			return true
-		}
 	}
 
 	return false

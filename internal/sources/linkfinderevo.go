@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"passive-rec/internal/routes"
 	"passive-rec/internal/runner"
 )
 
@@ -498,6 +499,7 @@ func emitLinkfinderFindings(reports []linkfinderReport, out chan<- string) ([]st
 	seenRoutes := make(map[string]struct{})
 	seenJS := make(map[string]struct{})
 	seenHTML := make(map[string]struct{})
+	seenCategories := make(map[routes.Category]map[string]struct{})
 	undetectedSet := make(map[string]struct{})
 
 	for _, report := range reports {
@@ -524,6 +526,24 @@ func emitLinkfinderFindings(reports []linkfinderReport, out chan<- string) ([]st
 					seenHTML[link] = struct{}{}
 				}
 			}
+			if len(classification.categories) > 0 {
+				for _, cat := range classification.categories {
+					prefix, ok := linkfinderCategoryPrefixes[cat]
+					if !ok {
+						continue
+					}
+					set := seenCategories[cat]
+					if set == nil {
+						set = make(map[string]struct{})
+						seenCategories[cat] = set
+					}
+					if _, ok := set[link]; ok {
+						continue
+					}
+					set[link] = struct{}{}
+					out <- "active: " + prefix + ": " + link
+				}
+			}
 			if classification.undetected {
 				undetectedSet[link] = struct{}{}
 			}
@@ -546,6 +566,7 @@ type linkfinderClassification struct {
 	isJS       bool
 	isHTML     bool
 	undetected bool
+	categories []routes.Category
 }
 
 func classifyLinkfinderEndpoint(link string) linkfinderClassification {
@@ -565,11 +586,23 @@ func classifyLinkfinderEndpoint(link string) linkfinderClassification {
 		cls.isHTML = true
 	}
 
+	cls.categories = routes.DetectCategories(link)
+
 	if !hasCompleteURLPrefix(lower) {
 		cls.undetected = true
 	}
 
 	return cls
+}
+
+var linkfinderCategoryPrefixes = map[routes.Category]string{
+	routes.CategoryMaps:  "maps",
+	routes.CategoryJSON:  "json",
+	routes.CategoryAPI:   "api",
+	routes.CategoryWASM:  "wasm",
+	routes.CategorySVG:   "svg",
+	routes.CategoryCrawl: "crawl",
+	routes.CategoryMeta:  "meta-route",
 }
 
 func hasCompleteURLPrefix(link string) bool {
