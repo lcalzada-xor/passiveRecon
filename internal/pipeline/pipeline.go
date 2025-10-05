@@ -206,6 +206,10 @@ func NewSink(outdir string, active bool, target string) (*Sink, error) {
 	if err != nil {
 		return nil, err
 	}
+	htmlPassive, err := newWriter(filepath.Join("routes", "html"), "html.passive")
+	if err != nil {
+		return nil, err
+	}
 	htmlActive, err := newWriter(filepath.Join("routes", "html"), "html.active")
 	if err != nil {
 		return nil, err
@@ -235,7 +239,7 @@ func NewSink(outdir string, active bool, target string) (*Sink, error) {
 		Domains:               writerPair{passive: dPassive, active: dActive},
 		Routes:                writerPair{passive: rPassive, active: rActive},
 		RoutesJS:              writerPair{passive: jsPassive, active: jsActive},
-		RoutesHTML:            writerPair{active: htmlActive},
+		RoutesHTML:            writerPair{passive: htmlPassive, active: htmlActive},
 		RoutesImages:          writerPair{active: imagesActive},
 		RoutesMaps:            writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "maps"), "maps.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "maps"), "maps.active")},
 		RoutesJSON:            writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "json"), "json.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "json"), "json.active")},
