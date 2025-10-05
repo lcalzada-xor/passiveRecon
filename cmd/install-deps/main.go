@@ -10,9 +10,19 @@ import (
 	"strings"
 )
 
+type installMethod int
+
+const (
+	methodGoModule installMethod = iota
+	methodGit
+)
+
 type requirement struct {
 	binary string
-	module string
+	spec   string
+	method installMethod
+	repo   string
+	ref    string
 }
 
 func main() {
@@ -48,8 +58,8 @@ func run() error {
 			continue
 		}
 
-		fmt.Printf("Installing %s from %s...\n", req.binary, req.module)
-		if err := installModule(req.module); err != nil {
+		fmt.Printf("Installing %s from %s...\n", req.binary, req.spec)
+		if err := installRequirement(req); err != nil {
 			return fmt.Errorf("failed to install %s: %w", req.binary, err)
 		}
 	}
@@ -103,10 +113,26 @@ func parseRequirements(path string) ([]requirement, error) {
 			return nil, fmt.Errorf("invalid format in %s at line %d: expected '<binary> <module[@version]>'", path, lineNumber)
 		}
 
-		reqs = append(reqs, requirement{
+		req := requirement{
 			binary: fields[0],
-			module: fields[1],
-		})
+			spec:   fields[1],
+			method: methodGoModule,
+		}
+
+		if strings.HasPrefix(fields[1], "git+") {
+			repo := strings.TrimPrefix(fields[1], "git+")
+			ref := ""
+			if at := strings.LastIndex(repo, "@"); at != -1 {
+				ref = repo[at+1:]
+				repo = repo[:at]
+			}
+
+			req.method = methodGit
+			req.repo = repo
+			req.ref = ref
+		}
+
+		reqs = append(reqs, req)
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -116,10 +142,101 @@ func parseRequirements(path string) ([]requirement, error) {
 	return reqs, nil
 }
 
-func installModule(module string) error {
+func installRequirement(req requirement) error {
+	switch req.method {
+	case methodGit:
+		return installFromGit(req)
+	default:
+		return installGoModule(req.spec)
+	}
+}
+
+func installGoModule(module string) error {
 	cmd := exec.Command("go", "install", module)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = os.Environ()
 	return cmd.Run()
+}
+
+func installFromGit(req requirement) error {
+	if req.repo == "" {
+		return errors.New("git repository URL not provided")
+	}
+
+	if _, err := exec.LookPath("git"); err != nil {
+		return errors.New("git binary not found in PATH; install Git to proceed")
+	}
+
+	tempDir, err := os.MkdirTemp("", "passive-recon-install-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir)
+
+	clone := exec.Command("git", "clone", req.repo, tempDir)
+	clone.Stdout = os.Stdout
+	clone.Stderr = os.Stderr
+	if err := clone.Run(); err != nil {
+		return err
+	}
+
+	if req.ref != "" {
+		checkout := exec.Command("git", "-C", tempDir, "checkout", req.ref)
+		checkout.Stdout = os.Stdout
+		checkout.Stderr = os.Stderr
+		if err := checkout.Run(); err != nil {
+			return err
+		}
+	}
+
+	binDir, err := determineGoBin()
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return err
+	}
+
+	dest := filepath.Join(binDir, req.binary)
+	build := exec.Command("go", "build", "-o", dest)
+	build.Dir = tempDir
+	build.Stdout = os.Stdout
+	build.Stderr = os.Stderr
+	build.Env = os.Environ()
+	return build.Run()
+}
+
+func determineGoBin() (string, error) {
+	if bin := os.Getenv("GOBIN"); bin != "" {
+		return bin, nil
+	}
+
+	gobinCmd := exec.Command("go", "env", "GOBIN")
+	out, err := gobinCmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	if bin := strings.TrimSpace(string(out)); bin != "" {
+		return bin, nil
+	}
+
+	gopathCmd := exec.Command("go", "env", "GOPATH")
+	gopathOut, err := gopathCmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	gopath := strings.TrimSpace(string(gopathOut))
+	if gopath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		gopath = filepath.Join(home, "go")
+	}
+
+	return filepath.Join(gopath, "bin"), nil
 }
