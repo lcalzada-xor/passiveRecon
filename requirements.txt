@@ -1,10 +1,10 @@
 # External CLI tools required by passiveRecon
 # Run `go run ./cmd/install-deps` to ensure they are installed.
-# Format: <binary> <module[@version]>
+# Format: <binary> <module[@version]> or <binary> git+<repository[@ref]>
 amass github.com/owasp-amass/amass/v4/cmd/amass@latest
 assetfinder github.com/tomnomnom/assetfinder@latest
 gau github.com/lc/gau/v2/cmd/gau@latest
 httpx github.com/projectdiscovery/httpx/cmd/httpx@latest
 subfinder github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 waybackurls github.com/tomnomnom/waybackurls@latest
-GoLinkfinderEVO github.com/lcalzada-xor/GoLinkfinderEVO@latest
+GoLinkfinderEVO git+https://github.com/lcalzada-xor/GoLinkfinderEVO.git
