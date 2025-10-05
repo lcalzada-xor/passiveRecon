@@ -373,7 +373,7 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 	}
 
 	outputDir := t.TempDir()
-	sink, err := pipeline.NewSink(outputDir, false)
+	sink, err := pipeline.NewSink(outputDir, false, "example.com")
 	if err != nil {
 		t.Fatalf("new sink: %v", err)
 	}

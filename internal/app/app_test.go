@@ -115,7 +115,7 @@ func TestRunFlushesBeforeReportForDeferredSources(t *testing.T) {
 		flushes int
 	)
 
-	sinkFactory = func(outdir string, active bool) (sink, error) {
+	sinkFactory = func(outdir string, active bool, target string) (sink, error) {
 		ts, err := newTestSink(outdir)
 		if err != nil {
 			return nil, err

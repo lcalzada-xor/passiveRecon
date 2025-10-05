@@ -115,7 +115,7 @@ func TestRunPipelineConcurrentGroupProgress(t *testing.T) {
 func TestRunPipelineConcurrentSourcesDedupesSink(t *testing.T) {
 	dir := t.TempDir()
 
-	sink, err := pipeline.NewSink(dir, true)
+	sink, err := pipeline.NewSink(dir, true, "example.com")
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}

@@ -17,7 +17,7 @@ import (
 func newTestSink(t *testing.T, active bool) (*Sink, string) {
 	t.Helper()
 	dir := t.TempDir()
-	sink, err := NewSink(dir, active)
+	sink, err := NewSink(dir, active, "example.com")
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestSinkClassification(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false)
+	sink, err := NewSink(dir, false, "example.com")
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -86,7 +86,6 @@ func TestSinkClassification(t *testing.T) {
 	domains := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
 	wantDomains := []string{
 		"example.com",
-		"2001:db8::1",
 		"alt1.example.com",
 		"alt2.example.com",
 		"direct-cert.example.com",
@@ -166,6 +165,88 @@ func TestSinkClassification(t *testing.T) {
 	}
 }
 
+func TestSinkFiltersOutOfScope(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com")
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+	sink.Start(2)
+
+	allowedCert, err := (certs.Record{CommonName: "app.example.com", DNSNames: []string{"app.example.com", "evil.com"}}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal allowed cert: %v", err)
+	}
+	deniedCert, err := (certs.Record{CommonName: "evil.com", DNSNames: []string{"evil.com"}}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal denied cert: %v", err)
+	}
+
+	inputs := []string{
+		"example.com",
+		"evil.com",
+		"https://app.example.com/login",
+		"https://evil.com/hack",
+		"js: https://app.example.com/app.js",
+		"js: https://evil.com/app.js",
+		"html: https://app.example.com/index.html",
+		"html: //cdn.evil.com/lib.js",
+		"cert: " + allowedCert,
+		"cert: " + deniedCert,
+	}
+
+	for _, line := range inputs {
+		sink.In() <- line
+	}
+
+	sink.Flush()
+	if err := sink.Close(); err != nil {
+		t.Fatalf("sink close: %v", err)
+	}
+
+	read := func(path string) []string {
+		data, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		trimmed := strings.TrimSpace(string(data))
+		if trimmed == "" {
+			return nil
+		}
+		return strings.Split(trimmed, "\n")
+	}
+
+	domains := read(filepath.Join(dir, "domains", "domains.passive"))
+	sort.Strings(domains)
+	wantDomains := []string{"app.example.com", "example.com"}
+	if diff := cmp.Diff(wantDomains, domains); diff != "" {
+		t.Fatalf("unexpected domains.passive contents (-want +got):\n%s", diff)
+	}
+
+	routes := read(filepath.Join(dir, "routes", "routes.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/login"}, routes); diff != "" {
+		t.Fatalf("unexpected routes.passive contents (-want +got):\n%s", diff)
+	}
+
+	jsRoutes := read(filepath.Join(dir, "routes", "js", "js.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/app.js"}, jsRoutes); diff != "" {
+		t.Fatalf("unexpected js.passive contents (-want +got):\n%s", diff)
+	}
+
+	certsPassive := read(filepath.Join(dir, "certs", "certs.passive"))
+	if len(certsPassive) != 1 {
+		t.Fatalf("expected 1 certificate, got %v", certsPassive)
+	}
+	if !strings.Contains(certsPassive[0], "app.example.com") || strings.Contains(certsPassive[0], "evil.com") {
+		t.Fatalf("unexpected cert contents: %s", certsPassive[0])
+	}
+}
+
 func TestActiveCertLines(t *testing.T) {
 	t.Parallel()
 
@@ -240,7 +321,7 @@ func TestSinkFlush(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false)
+	sink, err := NewSink(dir, false, "example.com")
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -308,7 +389,7 @@ func TestNewSinkClosesWritersOnError(t *testing.T) {
 		t.Fatalf("unexpected open descriptors before NewSink: %d", got)
 	}
 
-	sink, err := NewSink(dir, false)
+	sink, err := NewSink(dir, false, "example.com")
 	if err == nil {
 		// Close to ensure no resources leak in this unexpected success case.
 		_ = sink.Close()
@@ -392,7 +473,7 @@ func TestActiveRoutesPopulatePassive(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false)
+	sink, err := NewSink(dir, false, "example.com")
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -419,7 +500,7 @@ func TestActiveRoutesSkip404(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false)
+	sink, err := NewSink(dir, false, "example.com")
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -451,7 +532,7 @@ func TestJSLinesAreWrittenToFile(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false)
+	sink, err := NewSink(dir, false, "example.com")
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -481,7 +562,7 @@ func TestActiveJSExcludes404(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false)
+	sink, err := NewSink(dir, false, "example.com")
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -505,7 +586,7 @@ func TestHTMLLinesAreWrittenToActiveFile(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false)
+	sink, err := NewSink(dir, false, "example.com")
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -528,7 +609,7 @@ func TestHTMLActiveSkipsErrorResponses(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false)
+	sink, err := NewSink(dir, false, "example.com")
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -550,7 +631,7 @@ func TestHTMLImageLinesAreRedirectedToImagesFile(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false)
+	sink, err := NewSink(dir, false, "example.com")
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -583,7 +664,7 @@ func TestRouteCategorizationPassive(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false)
+	sink, err := NewSink(dir, false, "example.com")
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -666,7 +747,7 @@ func TestRouteCategorizationActiveMode(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, true)
+	sink, err := NewSink(dir, true, "example.com")
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -720,7 +801,7 @@ func TestRouteCategorizationActiveModeSkipsErrorStatus(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, true)
+	sink, err := NewSink(dir, true, "example.com")
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -742,7 +823,7 @@ func TestRouteCategorizationPassiveModeEmitsActiveFiles(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false)
+	sink, err := NewSink(dir, false, "example.com")
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -768,7 +849,7 @@ func TestRouteCategorizationDeduplicatesCategoryOutputs(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false)
+	sink, err := NewSink(dir, false, "example.com")
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
