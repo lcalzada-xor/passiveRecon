@@ -26,16 +26,17 @@ var (
 	sinkFactory = func(outdir string, active bool) (sink, error) {
 		return pipeline.NewSink(outdir, active)
 	}
-	sourceSubfinder   = sources.Subfinder
-	sourceAssetfinder = sources.Assetfinder
-	sourceAmass       = sources.Amass
-	sourceWayback     = sources.Wayback
-	sourceGAU         = sources.GAU
-	sourceCRTSh       = sources.CRTSH
-	sourceCensys      = sources.Censys
-	sourceHTTPX       = sources.HTTPX
-	sourceSubJS       = sources.SubJS
-	sourceDNSX        = sources.DNSX
+	sourceSubfinder     = sources.Subfinder
+	sourceAssetfinder   = sources.Assetfinder
+	sourceAmass         = sources.Amass
+	sourceWayback       = sources.Wayback
+	sourceGAU           = sources.GAU
+	sourceCRTSh         = sources.CRTSH
+	sourceCensys        = sources.Censys
+	sourceHTTPX         = sources.HTTPX
+	sourceSubJS         = sources.SubJS
+	sourceLinkFinderEVO = sources.LinkFinderEVO
+	sourceDNSX          = sources.DNSX
 )
 
 func Run(cfg *config.Config) error {

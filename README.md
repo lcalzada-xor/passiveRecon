@@ -29,6 +29,9 @@ go run ./cmd/passive-rec -target example.com -outdir out -report
 
 The report is saved as `report.html` inside the selected output directory.
 
+When the `--active` flag is enabled the pipeline now includes [GoLinkfinderEVO](https://github.com/lcalzada-xor/GoLinkfinderEVO).
+The tool inspects the active HTML, JavaScript and crawl lists, stores consolidated reports under `routes/findings/` (raw, HTML and JSON formats) and feeds the discovered endpoints back into the categorised `.active` artifacts.
+
 ### Configuration file
 
 You can pre-populate the CLI flags with a YAML or JSON configuration file by passing its path through `--config`:
