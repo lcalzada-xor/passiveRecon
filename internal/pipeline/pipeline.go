@@ -156,9 +156,10 @@ type Sink struct {
 	processing            int
 	cond                  *sync.Cond
 	activeMode            bool
+	scope                 *netutil.Scope
 }
 
-func NewSink(outdir string, active bool) (*Sink, error) {
+func NewSink(outdir string, active bool, target string) (*Sink, error) {
 	var opened []sinkWriter
 	newWriter := func(subdir, name string) (*out.Writer, error) {
 		targetDir := outdir
@@ -263,6 +264,7 @@ func NewSink(outdir string, active bool) (*Sink, error) {
 		seenCertsPassive:      make(map[string]struct{}),
 		seenCertsActive:       make(map[string]struct{}),
 		activeMode:            active,
+		scope:                 netutil.NewScope(target),
 	}
 	s.cond = sync.NewCond(&s.procMu)
 	return s, nil
@@ -385,8 +387,11 @@ func handleJS(s *Sink, line string, isActive bool) bool {
 	if js == "" {
 		return true
 	}
+	base := extractRouteBase(js)
+	if base != "" && s.scope != nil && !s.scope.AllowsRoute(base) {
+		return true
+	}
 	if isActive {
-		base := extractRouteBase(js)
 		if status, ok := parseActiveRouteStatus(js, base); ok {
 			if status <= 0 || status >= 400 {
 				return true
@@ -417,6 +422,10 @@ func handleHTML(s *Sink, line string, isActive bool) bool {
 				return true
 			}
 		}
+	}
+
+	if base != "" && s.scope != nil && !s.scope.AllowsRoute(base) {
+		return true
 	}
 
 	imageTarget := html
@@ -474,6 +483,10 @@ func handleRoute(s *Sink, line string, isActive bool) bool {
 		return false
 	}
 
+	if s.scope != nil && !s.scope.AllowsRoute(base) {
+		return true
+	}
+
 	if isActive {
 		if !s.markSeen(s.seenRoutesPassive, base) {
 			if s.Routes.passive != nil {
@@ -524,6 +537,10 @@ func handleDomain(s *Sink, line string, isActive bool) bool {
 	key := netutil.NormalizeDomain(line)
 	if key == "" {
 		return false
+	}
+
+	if s.scope != nil && !s.scope.AllowsDomain(key) {
+		return true
 	}
 
 	if isActive {
@@ -665,6 +682,9 @@ func (s *Sink) writeLazyCategory(route string, isActive bool, writers writerPair
 	if seen == nil {
 		return
 	}
+	if s.scope != nil && !s.scope.AllowsRoute(route) {
+		return
+	}
 	key := route
 	if isActive {
 		key = "active:" + route
@@ -697,12 +717,35 @@ func (s *Sink) writeCertLine(line string, isActive bool) {
 		return
 	}
 
-	serialized, err := record.Marshal()
-	if err != nil {
+	filtered := record
+	if filtered.CommonName != "" {
+		domain := netutil.NormalizeDomain(filtered.CommonName)
+		if domain == "" || (s.scope != nil && !s.scope.AllowsDomain(domain)) {
+			filtered.CommonName = ""
+		}
+	}
+
+	if len(filtered.DNSNames) > 0 {
+		names := make([]string, 0, len(filtered.DNSNames))
+		for _, name := range filtered.DNSNames {
+			domain := netutil.NormalizeDomain(name)
+			if domain == "" {
+				continue
+			}
+			if s.scope != nil && !s.scope.AllowsDomain(domain) {
+				continue
+			}
+			names = append(names, name)
+		}
+		filtered.DNSNames = names
+	}
+
+	names := filtered.AllNames()
+	if len(names) == 0 {
 		return
 	}
 
-	for _, name := range record.AllNames() {
+	for _, name := range names {
 		domain := netutil.NormalizeDomain(name)
 		if domain == "" {
 			continue
@@ -721,7 +764,12 @@ func (s *Sink) writeCertLine(line string, isActive bool) {
 		}
 	}
 
-	key := record.Key()
+	serialized, err := filtered.Marshal()
+	if err != nil {
+		return
+	}
+
+	key := filtered.Key()
 	if key == "" {
 		key = strings.ToLower(serialized)
 	}
