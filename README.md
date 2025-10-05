@@ -35,7 +35,13 @@ If you need to route all outbound HTTP/S requests (including third-party tools) 
 go run ./cmd/passive-rec -target example.com -proxy http://127.0.0.1:8080
 ```
 
-The value is used to populate the standard `HTTP(S)_PROXY` environment variables before invoking the pipeline.
+The value is used to populate the standard `HTTP(S)_PROXY` environment variables before invoking the pipeline. When your proxy
+performs TLS interception with its own certificate authority (for example Burp Suite or OWASP ZAP), point `-proxy-ca` to the
+PEM file containing that certificate so passive-rec trusts the man-in-the-middle tunnel:
+
+```
+go run ./cmd/passive-rec -target example.com -proxy http://127.0.0.1:8080 -proxy-ca ~/.config/burp/ca-cert.pem
+```
 
 When the `--active` flag is enabled the pipeline now includes [GoLinkfinderEVO](https://github.com/lcalzada-xor/GoLinkfinderEVO).
 The tool inspects the active HTML, JavaScript and crawl lists, stores consolidated reports under `routes/linkFindings/` (`findings.json`, `findings.html` and `findings.raw`) and feeds the discovered endpoints back into the categorised `.active` artifacts.
@@ -61,6 +67,7 @@ If a value is present both in the config file and as a CLI flag, the CLI flag wi
 | `verbosity`        | int                 | Nivel de verbosidad (0-3)                        |
 | `report`           | bool                | Genera informe HTML                              |
 | `proxy`            | string              | URL del proxy HTTP/HTTPS                         |
+| `proxy_ca`         | string              | Ruta a un certificado CA adicional para el proxy |
 | `censys_api_id`    | string              | Credencial Censys API ID                         |
 | `censys_api_secret`| string              | Credencial Censys API Secret                     |
 
@@ -78,6 +85,7 @@ timeout: 180
 verbosity: 1
 report: true
 proxy: http://127.0.0.1:8080
+proxy_ca: ~/.config/burp/ca-cert.pem
 censys_api_id: "${CENSYS_API_ID}"
 censys_api_secret: "${CENSYS_API_SECRET}"
 ```
@@ -95,6 +103,7 @@ The same configuration in JSON:
   "verbosity": 1,
   "report": true,
   "proxy": "http://127.0.0.1:8080",
+  "proxy_ca": "~/.config/burp/ca-cert.pem",
   "censys_api_id": "${CENSYS_API_ID}",
   "censys_api_secret": "${CENSYS_API_SECRET}"
 }

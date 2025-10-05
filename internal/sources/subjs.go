@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"passive-rec/internal/config"
 	"passive-rec/internal/runner"
 )
 
@@ -27,6 +29,9 @@ var (
 		transport := &http.Transport{
 			Proxy:                 http.ProxyFromEnvironment,
 			ResponseHeaderTimeout: 10 * time.Second,
+		}
+		if pool := config.CustomRootCAs(); pool != nil {
+			transport.TLSClientConfig = &tls.Config{RootCAs: pool}
 		}
 		return &http.Client{Transport: transport, Timeout: subjsHTTPTimeout}
 	}

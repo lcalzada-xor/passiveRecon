@@ -1,10 +1,20 @@
 package config
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"flag"
+	"math/big"
+	"net/http"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func prepareFlags(t *testing.T) {
@@ -54,6 +64,10 @@ func TestParseFlagsDefaults(t *testing.T) {
 	if cfg.Proxy != "" {
 		t.Fatalf("expected default proxy empty, got %q", cfg.Proxy)
 	}
+
+	if cfg.ProxyCACert != "" {
+		t.Fatalf("expected default proxy CA empty, got %q", cfg.ProxyCACert)
+	}
 }
 
 func TestParseFlagsCustom(t *testing.T) {
@@ -68,6 +82,7 @@ func TestParseFlagsCustom(t *testing.T) {
 		"-active=true",
 		"-v", "2",
 		"-proxy", "http://127.0.0.1:8080",
+		"-proxy-ca", "/tmp/custom-ca.pem",
 	}...)
 
 	cfg := ParseFlags()
@@ -99,6 +114,10 @@ func TestParseFlagsCustom(t *testing.T) {
 
 	if cfg.Proxy != "http://127.0.0.1:8080" {
 		t.Fatalf("expected proxy http://127.0.0.1:8080, got %q", cfg.Proxy)
+	}
+
+	if cfg.ProxyCACert != "/tmp/custom-ca.pem" {
+		t.Fatalf("expected proxy CA /tmp/custom-ca.pem, got %q", cfg.ProxyCACert)
 	}
 }
 
@@ -141,4 +160,64 @@ func TestApplyProxyInvalid(t *testing.T) {
 	if err := ApplyProxy("invalid"); err == nil {
 		t.Fatalf("expected error for invalid proxy")
 	}
+}
+
+func TestConfigureRootCAs(t *testing.T) {
+	tmpDir := t.TempDir()
+	certPath := filepath.Join(tmpDir, "ca.pem")
+	if err := os.WriteFile(certPath, generateTestCAPEM(t), 0o600); err != nil {
+		t.Fatalf("write ca.pem: %v", err)
+	}
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+		ConfigureRootCAs("")
+	})
+
+	if err := ConfigureRootCAs(certPath); err != nil {
+		t.Fatalf("ConfigureRootCAs: %v", err)
+	}
+
+	transport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		t.Fatalf("expected *http.Transport, got %T", http.DefaultTransport)
+	}
+	if transport.TLSClientConfig == nil || transport.TLSClientConfig.RootCAs == nil {
+		t.Fatalf("expected RootCAs to be set")
+	}
+	if CustomRootCAs() == nil {
+		t.Fatalf("expected CustomRootCAs to return pool")
+	}
+}
+
+func TestConfigureRootCAsInvalid(t *testing.T) {
+	if err := ConfigureRootCAs("/nonexistent/path.pem"); err == nil {
+		t.Fatalf("expected error for missing CA file")
+	}
+}
+
+func generateTestCAPEM(t *testing.T) []byte {
+	t.Helper()
+
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+
+	tmpl := x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "passive-rec test ca"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &priv.PublicKey, priv)
+	if err != nil {
+		t.Fatalf("CreateCertificate: %v", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
