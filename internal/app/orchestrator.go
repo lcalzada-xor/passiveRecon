@@ -79,6 +79,12 @@ var defaultPipeline = []toolStep{
 		RequiresActive:      true,
 		SkipInactiveMessage: "meta: subjs skipped (requires --active)",
 	},
+	{
+		Name:                "linkfinderevo",
+		Run:                 stepLinkFinderEVO,
+		RequiresActive:      true,
+		SkipInactiveMessage: "meta: linkfinderevo skipped (requires --active)",
+	},
 }
 
 var (
@@ -331,6 +337,10 @@ func timeoutHTTPX(state *pipelineState, opts orchestratorOptions) int {
 
 func stepSubJS(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
 	return sourceSubJS(ctx, filepath.Join("routes", "routes.active"), opts.cfg.OutDir, opts.sink.In())
+}
+
+func stepLinkFinderEVO(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
+	return sourceLinkFinderEVO(ctx, opts.cfg.Target, opts.cfg.OutDir, opts.sink.In())
 }
 
 func executePostProcessing(ctx context.Context, cfg *config.Config, sink sink, bar *progressBar, unknown []string) {

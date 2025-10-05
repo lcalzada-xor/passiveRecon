@@ -1,0 +1,570 @@
+package sources
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"html/template"
+	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"passive-rec/internal/runner"
+)
+
+var (
+	linkfinderFindBin = runner.FindBin
+	linkfinderRunCmd  = runner.RunCommand
+)
+
+type linkfinderEndpoint struct {
+	Link    string `json:"Link"`
+	Context string `json:"Context"`
+	Line    int    `json:"Line"`
+}
+
+type linkfinderReport struct {
+	Resource  string               `json:"Resource"`
+	Endpoints []linkfinderEndpoint `json:"Endpoints"`
+}
+
+type linkfinderMetadata struct {
+	GeneratedAt    time.Time `json:"GeneratedAt"`
+	TotalResources int       `json:"TotalResources"`
+	TotalEndpoints int       `json:"TotalEndpoints"`
+}
+
+type linkfinderPayload struct {
+	Meta      linkfinderMetadata `json:"meta"`
+	Resources []linkfinderReport `json:"resources"`
+}
+
+type linkfinderAggregate struct {
+	mu        sync.Mutex
+	order     []string
+	resources map[string]*linkfinderAggregateResource
+}
+
+type linkfinderAggregateResource struct {
+	name      string
+	order     []string
+	endpoints map[string]linkfinderEndpoint
+}
+
+func newLinkfinderAggregate() *linkfinderAggregate {
+	return &linkfinderAggregate{resources: make(map[string]*linkfinderAggregateResource)}
+}
+
+func (agg *linkfinderAggregate) add(resource string, endpoint linkfinderEndpoint) {
+	resource = strings.TrimSpace(resource)
+	if resource == "" {
+		return
+	}
+	endpoint.Link = strings.TrimSpace(endpoint.Link)
+	if endpoint.Link == "" {
+		return
+	}
+
+	agg.mu.Lock()
+	defer agg.mu.Unlock()
+
+	res, ok := agg.resources[resource]
+	if !ok {
+		res = &linkfinderAggregateResource{name: resource, endpoints: make(map[string]linkfinderEndpoint)}
+		agg.resources[resource] = res
+		agg.order = append(agg.order, resource)
+	}
+
+	if _, exists := res.endpoints[endpoint.Link]; exists {
+		return
+	}
+
+	res.endpoints[endpoint.Link] = endpoint
+	res.order = append(res.order, endpoint.Link)
+}
+
+func (agg *linkfinderAggregate) reports() []linkfinderReport {
+	agg.mu.Lock()
+	defer agg.mu.Unlock()
+
+	reports := make([]linkfinderReport, 0, len(agg.order))
+	for _, name := range agg.order {
+		res := agg.resources[name]
+		if res == nil || len(res.order) == 0 {
+			continue
+		}
+		report := linkfinderReport{Resource: name, Endpoints: make([]linkfinderEndpoint, 0, len(res.order))}
+		for _, key := range res.order {
+			if ep, ok := res.endpoints[key]; ok {
+				report.Endpoints = append(report.Endpoints, ep)
+			}
+		}
+		reports = append(reports, report)
+	}
+	return reports
+}
+
+func (agg *linkfinderAggregate) endpointCount() int {
+	agg.mu.Lock()
+	defer agg.mu.Unlock()
+
+	total := 0
+	for _, res := range agg.resources {
+		total += len(res.endpoints)
+	}
+	return total
+}
+
+// LinkFinderEVO executes the GoLinkfinderEVO binary across the active HTML, JS and crawl lists.
+// It consolidates the resulting findings into the routes/findings directory and streams normalized
+// endpoints to the sink for further categorisation.
+func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<- string) error {
+	bin, ok := linkfinderFindBin("linkfinderevo", "GoLinkfinderEVO", "golinkfinder")
+	if !ok {
+		out <- "active: meta: linkfinderevo not found in PATH"
+		return runner.ErrMissingBinary
+	}
+
+	inputs := []struct {
+		label string
+		path  string
+	}{
+		{label: "html", path: filepath.Join("routes", "html", "html.active")},
+		{label: "js", path: filepath.Join("routes", "js", "js.active")},
+		{label: "crawl", path: filepath.Join("routes", "crawl", "crawl.active")},
+	}
+
+	aggregate := newLinkfinderAggregate()
+
+	for _, input := range inputs {
+		absPath := filepath.Join(outdir, input.path)
+		absPath, err := filepath.Abs(absPath)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(absPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				out <- fmt.Sprintf("active: meta: linkfinderevo skipped missing input %s", input.path)
+				continue
+			}
+			return err
+		}
+		if len(bytes.TrimSpace(data)) == 0 {
+			continue
+		}
+
+		tmpDir, err := os.MkdirTemp("", "passive-rec-linkfinderevo-*")
+		if err != nil {
+			return err
+		}
+
+		rawPath := filepath.Join(tmpDir, "findings.active")
+		htmlPath := filepath.Join(tmpDir, "findings.html")
+		jsonPath := filepath.Join(tmpDir, "findings.json")
+
+		args := buildLinkfinderArgs(absPath, target, rawPath, htmlPath, jsonPath)
+
+		intermediate := make(chan string)
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range intermediate {
+				// Drain CLI output to avoid blocking. Parsed results come from JSON output.
+			}
+		}()
+
+		runErr := linkfinderRunCmd(ctx, bin, args, intermediate)
+		close(intermediate)
+		wg.Wait()
+		if runErr != nil {
+			os.RemoveAll(tmpDir)
+			return runErr
+		}
+
+		if err := accumulateLinkfinderResults(jsonPath, aggregate); err != nil {
+			os.RemoveAll(tmpDir)
+			return err
+		}
+
+		os.RemoveAll(tmpDir)
+	}
+
+	findingsDir := filepath.Join(outdir, "routes", "findings")
+	if err := os.MkdirAll(findingsDir, 0o755); err != nil {
+		return err
+	}
+
+	reports := aggregate.reports()
+	if len(reports) == 0 {
+		cleanupLinkfinderOutputs(findingsDir)
+		return nil
+	}
+
+	meta := linkfinderMetadata{
+		GeneratedAt:    time.Now().UTC(),
+		TotalResources: len(reports),
+		TotalEndpoints: aggregate.endpointCount(),
+	}
+
+	payload := linkfinderPayload{Meta: meta, Resources: reports}
+
+	if err := writeLinkfinderJSON(filepath.Join(findingsDir, "findings.json"), payload); err != nil {
+		return err
+	}
+	if err := writeLinkfinderRaw(filepath.Join(findingsDir, "findings.active"), payload); err != nil {
+		return err
+	}
+	if err := writeLinkfinderHTML(filepath.Join(findingsDir, "findings.html"), payload); err != nil {
+		return err
+	}
+
+	undetected, err := emitLinkfinderFindings(reports, out)
+	if err != nil {
+		return err
+	}
+
+	if err := writeLinkfinderUndetected(filepath.Join(findingsDir, "undetected.active"), undetected); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func buildLinkfinderArgs(inputPath, target, rawPath, htmlPath, jsonPath string) []string {
+	args := []string{"-i", inputPath, "-d", "-max-depth", "5"}
+	scope := normalizeScope(target)
+	if scope != "" {
+		args = append(args, "-scope", scope, "--scope-include-subdomains")
+	}
+	output := fmt.Sprintf("cli,raw=%s,html=%s,json=%s", rawPath, htmlPath, jsonPath)
+	args = append(args, "--output", output)
+	return args
+}
+
+func normalizeScope(target string) string {
+	trimmed := strings.TrimSpace(target)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.Contains(trimmed, "://") {
+		if u, err := url.Parse(trimmed); err == nil {
+			host := u.Hostname()
+			if host != "" {
+				return host
+			}
+		}
+	}
+	return trimmed
+}
+
+func accumulateLinkfinderResults(jsonPath string, aggregate *linkfinderAggregate) error {
+	data, err := os.ReadFile(jsonPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil
+	}
+
+	var payload linkfinderPayload
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+
+	for _, report := range payload.Resources {
+		for _, ep := range report.Endpoints {
+			aggregate.add(report.Resource, ep)
+		}
+	}
+
+	return nil
+}
+
+func cleanupLinkfinderOutputs(findingsDir string) {
+	targets := []string{"findings.json", "findings.active", "findings.html", "undetected.active"}
+	for _, name := range targets {
+		_ = os.Remove(filepath.Join(findingsDir, name))
+	}
+}
+
+func writeLinkfinderJSON(path string, payload linkfinderPayload) error {
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+func writeLinkfinderRaw(path string, payload linkfinderPayload) error {
+	var buf bytes.Buffer
+
+	buf.WriteString("# GoLinkfinderEVO raw results\n")
+	buf.WriteString(fmt.Sprintf("# Generated at: %s\n", payload.Meta.GeneratedAt.Format(time.RFC3339)))
+	buf.WriteString(fmt.Sprintf("# Resources scanned: %d\n", payload.Meta.TotalResources))
+	buf.WriteString(fmt.Sprintf("# Total endpoints: %d\n\n", payload.Meta.TotalEndpoints))
+
+	for _, report := range payload.Resources {
+		buf.WriteString("[Resource] ")
+		buf.WriteString(report.Resource)
+		buf.WriteByte('\n')
+
+		if len(report.Endpoints) == 0 {
+			buf.WriteString("#   No endpoints were found.\n\n")
+			continue
+		}
+
+		for _, ep := range report.Endpoints {
+			buf.WriteString(ep.Link)
+			buf.WriteByte('\n')
+
+			trimmed := strings.TrimSpace(ep.Context)
+			if trimmed != "" {
+				for _, line := range strings.Split(trimmed, "\n") {
+					buf.WriteString("#   ")
+					buf.WriteString(line)
+					buf.WriteByte('\n')
+				}
+			}
+
+			buf.WriteByte('\n')
+		}
+	}
+
+	return os.WriteFile(path, buf.Bytes(), 0o644)
+}
+
+func writeLinkfinderHTML(path string, payload linkfinderPayload) error {
+	type endpointView struct {
+		Link    string
+		Context template.HTML
+		Line    int
+		Index   int
+	}
+
+	type resourceView struct {
+		Name      string
+		Count     int
+		Endpoints []endpointView
+	}
+
+	type pageData struct {
+		GeneratedAt    string
+		TotalResources int
+		TotalEndpoints int
+		Resources      []resourceView
+	}
+
+	highlight := func(ctx string) template.HTML {
+		escaped := template.HTMLEscapeString(ctx)
+		if escaped == "" {
+			return ""
+		}
+		return template.HTML(escaped)
+	}
+
+	tpl := template.Must(template.New("linkfinderevo").Parse(linkfinderTemplate))
+
+	var resources []resourceView
+	for _, report := range payload.Resources {
+		view := resourceView{Name: report.Resource}
+		for idx, ep := range report.Endpoints {
+			view.Endpoints = append(view.Endpoints, endpointView{
+				Link:    ep.Link,
+				Context: highlight(ep.Context),
+				Line:    ep.Line,
+				Index:   idx + 1,
+			})
+		}
+		view.Count = len(view.Endpoints)
+		resources = append(resources, view)
+	}
+
+	data := pageData{
+		GeneratedAt:    payload.Meta.GeneratedAt.Format(time.RFC1123),
+		TotalResources: payload.Meta.TotalResources,
+		TotalEndpoints: payload.Meta.TotalEndpoints,
+		Resources:      resources,
+	}
+
+	var buf bytes.Buffer
+	if err := tpl.Execute(&buf, data); err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, buf.Bytes(), 0o644)
+}
+
+func emitLinkfinderFindings(reports []linkfinderReport, out chan<- string) ([]string, error) {
+	seenRoutes := make(map[string]struct{})
+	seenJS := make(map[string]struct{})
+	seenHTML := make(map[string]struct{})
+	undetectedSet := make(map[string]struct{})
+
+	for _, report := range reports {
+		for _, ep := range report.Endpoints {
+			link := strings.TrimSpace(ep.Link)
+			if link == "" {
+				continue
+			}
+			if _, ok := seenRoutes[link]; !ok {
+				out <- "active: " + link
+				seenRoutes[link] = struct{}{}
+			}
+
+			classification := classifyLinkfinderEndpoint(link)
+			if classification.isJS {
+				if _, ok := seenJS[link]; !ok {
+					out <- "active: js: " + link
+					seenJS[link] = struct{}{}
+				}
+			}
+			if classification.isHTML {
+				if _, ok := seenHTML[link]; !ok {
+					out <- "active: html: " + link
+					seenHTML[link] = struct{}{}
+				}
+			}
+			if classification.undetected {
+				undetectedSet[link] = struct{}{}
+			}
+		}
+	}
+
+	if len(undetectedSet) == 0 {
+		return nil, nil
+	}
+
+	undetected := make([]string, 0, len(undetectedSet))
+	for value := range undetectedSet {
+		undetected = append(undetected, value)
+	}
+	sort.Strings(undetected)
+	return undetected, nil
+}
+
+type linkfinderClassification struct {
+	isJS       bool
+	isHTML     bool
+	undetected bool
+}
+
+func classifyLinkfinderEndpoint(link string) linkfinderClassification {
+	lower := strings.ToLower(link)
+	clean := lower
+	if idx := strings.IndexAny(clean, "?#"); idx != -1 {
+		clean = clean[:idx]
+	}
+	ext := strings.ToLower(filepath.Ext(clean))
+
+	cls := linkfinderClassification{}
+
+	switch ext {
+	case ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx":
+		cls.isJS = true
+	case ".html", ".htm", ".php", ".asp", ".aspx", ".jsp", ".jspx", ".cfm", ".shtml":
+		cls.isHTML = true
+	}
+
+	if !hasCompleteURLPrefix(lower) {
+		cls.undetected = true
+	}
+
+	return cls
+}
+
+func hasCompleteURLPrefix(link string) bool {
+	prefixes := []string{"http://", "https://", "file://", "ftp://", "ftps://", "//", "/", "./", "../"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(link, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func writeLinkfinderUndetected(path string, entries []string) error {
+	if len(entries) == 0 {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+
+	var buf bytes.Buffer
+	for _, entry := range entries {
+		buf.WriteString(entry)
+		buf.WriteByte('\n')
+	}
+
+	return os.WriteFile(path, buf.Bytes(), 0o644)
+}
+
+const linkfinderTemplate = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>GoLinkfinderEVO findings</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2rem; background: #0b0c10; color: #f0f3f6; }
+        h1 { margin-bottom: 0.5rem; }
+        .summary { margin-bottom: 2rem; }
+        .resource { margin-bottom: 2rem; padding: 1.25rem; background: #1f2833; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+        .resource-title { display: flex; justify-content: space-between; align-items: baseline; }
+        .resource-title a { color: #66fcf1; text-decoration: none; word-break: break-all; }
+        .badge { background: #45a29e; padding: 0.25rem 0.75rem; border-radius: 999px; color: #0b0c10; font-weight: bold; }
+        ul { list-style: none; padding-left: 0; margin: 1rem 0 0 0; }
+        li { margin-bottom: 1rem; padding: 0.75rem; background: #0b0c10; border-radius: 6px; }
+        .endpoint-header { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: baseline; }
+        .endpoint-header a { color: #c5c6c7; text-decoration: none; word-break: break-all; }
+        .endpoint-index { background: #45a29e; color: #0b0c10; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.85rem; font-weight: bold; }
+        .endpoint-line { font-size: 0.85rem; color: #66fcf1; }
+        pre { background: #0b0c10; color: #f0f3f6; padding: 0.75rem; border-radius: 4px; overflow-x: auto; margin: 0.5rem 0 0; }
+    </style>
+</head>
+<body>
+    <h1>GoLinkfinderEVO findings</h1>
+    <div class="summary">
+        <p>Generated at: {{.GeneratedAt}}</p>
+        <p>Total resources: {{.TotalResources}}</p>
+        <p>Total endpoints: {{.TotalEndpoints}}</p>
+    </div>
+    {{range .Resources}}
+    <section class="resource">
+        <div class="resource-title">
+            <a href="{{.Name}}" target="_blank" rel="nofollow noopener noreferrer">{{.Name}}</a>
+            <span class="badge">{{.Count}} endpoint{{if ne .Count 1}}s{{end}}</span>
+        </div>
+        {{if .Endpoints}}
+        <ul>
+            {{range .Endpoints}}
+            <li>
+                <div class="endpoint-header">
+                    <span class="endpoint-index">#{{.Index}}</span>
+                    <a href="{{.Link}}" target="_blank" rel="nofollow noopener noreferrer">{{.Link}}</a>
+                    {{if gt .Line 0}}<span class="endpoint-line">Line {{.Line}}</span>{{end}}
+                </div>
+                {{if .Context}}
+                <pre><code>{{.Context}}</code></pre>
+                {{end}}
+            </li>
+            {{end}}
+        </ul>
+        {{else}}
+        <p>No endpoints were found.</p>
+        {{end}}
+    </section>
+    {{end}}
+</body>
+</html>
+`
