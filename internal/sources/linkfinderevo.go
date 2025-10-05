@@ -122,7 +122,7 @@ func (agg *linkfinderAggregate) endpointCount() int {
 }
 
 // LinkFinderEVO executes the GoLinkfinderEVO binary across the active HTML, JS and crawl lists.
-// It consolidates the resulting findings into the routes/findings directory and streams normalized
+// It consolidates the resulting findings into the routes/linkFindings directory and streams normalized
 // endpoints to the sink for further categorisation.
 func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<- string) error {
 	bin, ok := linkfinderFindBin("linkfinderevo", "GoLinkfinderEVO", "golinkfinder")
@@ -141,12 +141,14 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 	}
 
 	aggregate := newLinkfinderAggregate()
+	var firstErr error
 
 	for _, input := range inputs {
 		absPath := filepath.Join(outdir, input.path)
 		absPath, err := filepath.Abs(absPath)
 		if err != nil {
-			return err
+			recordLinkfinderError(&firstErr, err)
+			continue
 		}
 		data, err := os.ReadFile(absPath)
 		if err != nil {
@@ -154,7 +156,8 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 				out <- fmt.Sprintf("active: meta: linkfinderevo skipped missing input %s", input.path)
 				continue
 			}
-			return err
+			recordLinkfinderError(&firstErr, err)
+			continue
 		}
 		if len(bytes.TrimSpace(data)) == 0 {
 			continue
@@ -162,10 +165,11 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 
 		tmpDir, err := os.MkdirTemp("", "passive-rec-linkfinderevo-*")
 		if err != nil {
-			return err
+			recordLinkfinderError(&firstErr, err)
+			break
 		}
 
-		rawPath := filepath.Join(tmpDir, "findings.active")
+		rawPath := filepath.Join(tmpDir, "findings.raw")
 		htmlPath := filepath.Join(tmpDir, "findings.html")
 		jsonPath := filepath.Join(tmpDir, "findings.json")
 
@@ -184,20 +188,38 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 		runErr := linkfinderRunCmd(ctx, bin, args, intermediate)
 		close(intermediate)
 		wg.Wait()
-		if runErr != nil {
-			os.RemoveAll(tmpDir)
-			return runErr
-		}
 
 		if err := accumulateLinkfinderResults(jsonPath, aggregate); err != nil {
+			recordLinkfinderError(&firstErr, err)
+		}
+
+		if runErr != nil {
+			recordLinkfinderError(&firstErr, runErr)
 			os.RemoveAll(tmpDir)
-			return err
+			break
 		}
 
 		os.RemoveAll(tmpDir)
 	}
 
-	findingsDir := filepath.Join(outdir, "routes", "findings")
+	if err := writeLinkfinderOutputs(outdir, aggregate, out); err != nil {
+		recordLinkfinderError(&firstErr, err)
+	}
+
+	return firstErr
+}
+
+func recordLinkfinderError(first *error, candidate error) {
+	if candidate == nil {
+		return
+	}
+	if *first == nil {
+		*first = candidate
+	}
+}
+
+func writeLinkfinderOutputs(outdir string, aggregate *linkfinderAggregate, out chan<- string) error {
+	findingsDir := filepath.Join(outdir, "routes", "linkFindings")
 	if err := os.MkdirAll(findingsDir, 0o755); err != nil {
 		return err
 	}
@@ -219,7 +241,7 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 	if err := writeLinkfinderJSON(filepath.Join(findingsDir, "findings.json"), payload); err != nil {
 		return err
 	}
-	if err := writeLinkfinderRaw(filepath.Join(findingsDir, "findings.active"), payload); err != nil {
+	if err := writeLinkfinderRaw(filepath.Join(findingsDir, "findings.raw"), payload); err != nil {
 		return err
 	}
 	if err := writeLinkfinderHTML(filepath.Join(findingsDir, "findings.html"), payload); err != nil {
@@ -292,7 +314,7 @@ func accumulateLinkfinderResults(jsonPath string, aggregate *linkfinderAggregate
 }
 
 func cleanupLinkfinderOutputs(findingsDir string) {
-	targets := []string{"findings.json", "findings.active", "findings.html", "undetected.active"}
+	targets := []string{"findings.json", "findings.raw", "findings.html", "undetected.active", "findings.active"}
 	for _, name := range targets {
 		_ = os.Remove(filepath.Join(findingsDir, name))
 	}
