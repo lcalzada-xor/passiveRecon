@@ -8,7 +8,8 @@ import (
 
 // NormalizeDomain extracts a canonical domain name from the provided line.
 // It handles optional URL schemes, credentials, ports, IPv6 literals and
-// strips common prefixes such as "www". Wildcard entries are ignored.
+// strips wildcard entries. Subdomains are preserved, including common prefixes
+// such as "www".
 func NormalizeDomain(line string) string {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
@@ -67,9 +68,6 @@ func NormalizeDomain(line string) string {
 	}
 
 	lowered := strings.ToLower(candidate)
-	if strings.HasPrefix(lowered, "www.") {
-		lowered = lowered[4:]
-	}
 
 	if strings.Contains(lowered, "*") {
 		return ""

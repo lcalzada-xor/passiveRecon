@@ -86,6 +86,7 @@ func TestSinkClassification(t *testing.T) {
 	domains := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
 	wantDomains := []string{
 		"example.com",
+		"www.example.com",
 		"alt1.example.com",
 		"alt2.example.com",
 		"direct-cert.example.com",
