@@ -238,6 +238,11 @@ func TestSinkFiltersOutOfScope(t *testing.T) {
 		t.Fatalf("unexpected js.passive contents (-want +got):\n%s", diff)
 	}
 
+	htmlRoutes := read(filepath.Join(dir, "routes", "html", "html.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/index.html"}, htmlRoutes); diff != "" {
+		t.Fatalf("unexpected html.passive contents (-want +got):\n%s", diff)
+	}
+
 	certsPassive := read(filepath.Join(dir, "certs", "certs.passive"))
 	if len(certsPassive) != 1 {
 		t.Fatalf("expected 1 certificate, got %v", certsPassive)
