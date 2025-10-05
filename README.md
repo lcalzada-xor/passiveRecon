@@ -29,6 +29,14 @@ go run ./cmd/passive-rec -target example.com -outdir out -report
 
 The report is saved as `report.html` inside the selected output directory.
 
+If you need to route all outbound HTTP/S requests (including third-party tools) through a proxy, provide its URL via `-proxy`:
+
+```
+go run ./cmd/passive-rec -target example.com -proxy http://127.0.0.1:8080
+```
+
+The value is used to populate the standard `HTTP(S)_PROXY` environment variables before invoking the pipeline.
+
 When the `--active` flag is enabled the pipeline now includes [GoLinkfinderEVO](https://github.com/lcalzada-xor/GoLinkfinderEVO).
 The tool inspects the active HTML, JavaScript and crawl lists, stores consolidated reports under `routes/findings/` (raw, HTML and JSON formats) and feeds the discovered endpoints back into the categorised `.active` artifacts.
 
@@ -52,6 +60,7 @@ If a value is present both in the config file and as a CLI flag, the CLI flag wi
 | `timeout`          | int                 | Timeout por herramienta en segundos              |
 | `verbosity`        | int                 | Nivel de verbosidad (0-3)                        |
 | `report`           | bool                | Genera informe HTML                              |
+| `proxy`            | string              | URL del proxy HTTP/HTTPS                         |
 | `censys_api_id`    | string              | Credencial Censys API ID                         |
 | `censys_api_secret`| string              | Credencial Censys API Secret                     |
 
@@ -68,6 +77,7 @@ tools:
 timeout: 180
 verbosity: 1
 report: true
+proxy: http://127.0.0.1:8080
 censys_api_id: "${CENSYS_API_ID}"
 censys_api_secret: "${CENSYS_API_SECRET}"
 ```
@@ -84,6 +94,7 @@ The same configuration in JSON:
   "timeout": 180,
   "verbosity": 1,
   "report": true,
+  "proxy": "http://127.0.0.1:8080",
   "censys_api_id": "${CENSYS_API_ID}",
   "censys_api_secret": "${CENSYS_API_SECRET}"
 }
