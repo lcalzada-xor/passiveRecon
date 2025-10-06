@@ -633,6 +633,35 @@ func TestHTMLActiveSkipsErrorResponses(t *testing.T) {
 	}
 }
 
+func TestNewSinkDoesNotTruncateExistingFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	htmlDir := filepath.Join(dir, "routes", "html")
+	if err := os.MkdirAll(htmlDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	htmlPath := filepath.Join(htmlDir, "html.active")
+	if err := os.WriteFile(htmlPath, []byte("https://app.example.com\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+	sink.Start(1)
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	lines := readLines(t, htmlPath)
+	if diff := cmp.Diff([]string{"https://app.example.com"}, lines); diff != "" {
+		t.Fatalf("unexpected html.active contents (-want +got):\n%s", diff)
+	}
+}
+
 func TestHTMLImageLinesAreRedirectedToImagesFile(t *testing.T) {
 	t.Parallel()
 
