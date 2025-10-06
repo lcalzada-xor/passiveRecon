@@ -65,7 +65,7 @@ var (
 // RDAP queries the public RDAP service for the supplied target and emits summary
 // information and raw metadata lines into the sink.
 func RDAP(ctx context.Context, target string, out chan<- string) error {
-	domain := netutil.NormalizeDomain(target)
+	domain := normalizeRDAPDomain(target)
 	if domain == "" {
 		out <- "meta: rdap skipped (invalid domain)"
 		return nil
@@ -116,6 +116,41 @@ func RDAP(ctx context.Context, target string, out chan<- string) error {
 	emitRDAPSummary(out, summary)
 
 	return nil
+}
+
+func normalizeRDAPDomain(target string) string {
+	domain := netutil.NormalizeDomain(target)
+	if domain != "" {
+		return domain
+	}
+
+	trimmed := strings.TrimSpace(target)
+	if trimmed == "" {
+		return ""
+	}
+
+	host := trimmed
+	if strings.Contains(host, "://") {
+		if u, err := url.Parse(host); err == nil {
+			if h := u.Hostname(); h != "" {
+				host = h
+			} else if u.Host != "" {
+				host = u.Host
+			}
+		}
+	}
+
+	sanitized := strings.ReplaceAll(host, "*", "")
+	sanitized = strings.Trim(sanitized, ".")
+	for strings.Contains(sanitized, "..") {
+		sanitized = strings.ReplaceAll(sanitized, "..", ".")
+	}
+
+	if sanitized == "" {
+		return ""
+	}
+
+	return netutil.NormalizeDomain(sanitized)
 }
 
 func buildRDAPURL(domain string) (string, error) {
