@@ -38,6 +38,7 @@ type orchestratorOptions struct {
 	sink      sink
 	requested map[string]bool
 	bar       *progressBar
+	metrics   *pipelineMetrics
 }
 
 type pipelineState struct {
@@ -118,6 +119,9 @@ func runPipeline(ctx context.Context, steps []toolStep, opts orchestratorOptions
 
 func executeStep(ctx context.Context, step toolStep, state *pipelineState, opts orchestratorOptions) (func() error, bool) {
 	if !opts.requested[step.Name] {
+		if opts.metrics != nil {
+			opts.metrics.RecordSkip(step.Name, "no solicitado")
+		}
 		return nil, false
 	}
 	if !shouldRunStep(step, state, opts) {
@@ -130,6 +134,9 @@ func executeStep(ctx context.Context, step toolStep, state *pipelineState, opts 
 	})
 	if opts.bar != nil {
 		task = opts.bar.Wrap(step.Name, task)
+	}
+	if opts.metrics != nil {
+		task = opts.metrics.Wrap(step.Name, timeout, task)
 	}
 
 	wrapped := func() error {
@@ -209,6 +216,9 @@ func skipStep(step toolStep, opts orchestratorOptions, message string) {
 	}
 	if opts.bar != nil {
 		opts.bar.StepDone(step.Name, "omitido")
+	}
+	if opts.metrics != nil {
+		opts.metrics.RecordSkip(step.Name, message)
 	}
 }
 
