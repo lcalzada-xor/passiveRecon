@@ -28,6 +28,7 @@ var (
 	}
 	sourceSubfinder     = sources.Subfinder
 	sourceAssetfinder   = sources.Assetfinder
+	sourceRDAP          = sources.RDAP
 	sourceAmass         = sources.Amass
 	sourceWayback       = sources.Wayback
 	sourceGAU           = sources.GAU

@@ -44,7 +44,7 @@ func TestParseFlagsDefaults(t *testing.T) {
 		t.Fatalf("expected default outdir '.', got %q", cfg.OutDir)
 	}
 
-	expectedTools := []string{"amass", "subfinder", "assetfinder", "crtsh", "dedupe", "waybackurls", "gau", "httpx", "subjs", "linkfinderevo"}
+	expectedTools := []string{"amass", "subfinder", "assetfinder", "rdap", "crtsh", "dedupe", "waybackurls", "gau", "httpx", "subjs", "linkfinderevo"}
 	if !reflect.DeepEqual(cfg.Tools, expectedTools) {
 		t.Fatalf("expected default tools %v, got %v", expectedTools, cfg.Tools)
 	}

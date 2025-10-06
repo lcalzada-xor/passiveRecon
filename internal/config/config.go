@@ -104,7 +104,7 @@ func ParseFlags() *Config {
 	outdir := flag.String("outdir", ".", "Directorio de salida (default: .)")
 	workers := flag.Int("workers", 6, "Número de workers")
 	active := flag.Bool("active", false, "Comprobaciones activas adicionales (amass/httpx)")
-	tools := flag.String("tools", "amass,subfinder,assetfinder,crtsh,dedupe,waybackurls,gau,httpx,subjs,linkfinderevo", "Herramientas, CSV")
+	tools := flag.String("tools", "amass,subfinder,assetfinder,rdap,crtsh,dedupe,waybackurls,gau,httpx,subjs,linkfinderevo", "Herramientas, CSV")
 	timeout := flag.Int("timeout", 120, "Timeout por herramienta (segundos)")
 	verbosity := flag.Int("v", 0, "Verbosity (0=silent,1=info,2=debug,3=trace)")
 	report := flag.Bool("report", false, "Generar un informe HTML al finalizar")

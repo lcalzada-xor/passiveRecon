@@ -124,6 +124,7 @@ type Sink struct {
 	RoutesJS              writerPair
 	RoutesHTML            writerPair
 	RoutesImages          writerPair
+	RDAP                  writerPair
 	RoutesMaps            writerPair
 	RoutesJSON            writerPair
 	RoutesAPI             writerPair
@@ -198,6 +199,10 @@ func NewSink(outdir string, active bool, target string) (*Sink, error) {
 	if err != nil {
 		return nil, err
 	}
+	rdapPassive, err := newWriter("rdap", "rdap.passive")
+	if err != nil {
+		return nil, err
+	}
 	jsPassive, err := newWriter(filepath.Join("routes", "js"), "js.passive")
 	if err != nil {
 		return nil, err
@@ -241,6 +246,7 @@ func NewSink(outdir string, active bool, target string) (*Sink, error) {
 		RoutesJS:              writerPair{passive: jsPassive, active: jsActive},
 		RoutesHTML:            writerPair{passive: htmlPassive, active: htmlActive},
 		RoutesImages:          writerPair{active: imagesActive},
+		RDAP:                  writerPair{passive: rdapPassive},
 		RoutesMaps:            writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "maps"), "maps.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "maps"), "maps.active")},
 		RoutesJSON:            writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "json"), "json.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "json"), "json.active")},
 		RoutesAPI:             writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "api"), "api.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "api"), "api.active")},
@@ -316,6 +322,7 @@ var prefixHandlers = []struct {
 	handler lineHandler
 }{
 	{prefix: "meta:", handler: handleMeta},
+	{prefix: "rdap:", handler: handleRDAP},
 	{prefix: "js:", handler: handleJS},
 	{prefix: "html:", handler: handleHTML},
 	{prefix: "maps:", handler: handleMaps},
@@ -392,6 +399,21 @@ func handleMeta(s *Sink, line string, isActive bool) bool {
 	}
 
 	return false
+}
+
+func handleRDAP(s *Sink, line string, isActive bool) bool {
+	if isActive {
+		return true
+	}
+	content := strings.TrimSpace(strings.TrimPrefix(line, "rdap:"))
+	if content == "" {
+		return true
+	}
+	if s.RDAP.passive == nil {
+		return true
+	}
+	_ = s.RDAP.passive.WriteRaw(content)
+	return true
 }
 
 func handleJS(s *Sink, line string, isActive bool) bool {
@@ -674,6 +696,9 @@ func (s *Sink) Close() error {
 	}
 	if s.RoutesHTML.active != nil {
 		_ = s.RoutesHTML.active.Close()
+	}
+	if s.RDAP.passive != nil {
+		_ = s.RDAP.passive.Close()
 	}
 	if s.RoutesImages.passive != nil {
 		_ = s.RoutesImages.passive.Close()
