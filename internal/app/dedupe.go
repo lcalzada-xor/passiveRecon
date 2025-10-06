@@ -84,3 +84,29 @@ func writeDedupeFile(outdir string, domains []string) (err error) {
 
 	return nil
 }
+
+func readDedupeFile(outdir string) ([]string, error) {
+	path := filepath.Join(outdir, "domains", "domains.dedupe")
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
+
+	var domains []string
+	for scanner.Scan() {
+		domain := netutil.NormalizeDomain(scanner.Text())
+		if domain == "" {
+			continue
+		}
+		domains = append(domains, domain)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return domains, nil
+}

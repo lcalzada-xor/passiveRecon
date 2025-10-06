@@ -57,6 +57,17 @@ func Run(cfg *config.Config) error {
 
 	requested, ordered, unknown := normalizeRequestedTools(cfg)
 
+	cachePath := cachePathFor(cfg.OutDir)
+	execCache, err := loadExecutionCache(cachePath)
+	if err != nil {
+		logx.Warnf("no se pudo cargar cache de ejecución: %v", err)
+	}
+	if execCache != nil {
+		if err := execCache.Prune(cacheMaxAge); err != nil {
+			logx.Warnf("no se pudo depurar cache de ejecución: %v", err)
+		}
+	}
+
 	bar := newProgressBar(len(ordered), nil)
 	if bar != nil && len(ordered) > 0 {
 		logx.SetOutput(bar.Writer())
@@ -64,11 +75,14 @@ func Run(cfg *config.Config) error {
 	}
 
 	ctx := context.Background()
+	runHash := computeRunHash(cfg, ordered)
 	opts := orchestratorOptions{
 		cfg:       cfg,
 		sink:      sink,
 		requested: requested,
 		bar:       bar,
+		cache:     execCache,
+		runHash:   runHash,
 	}
 
 	buildStepsStart := time.Now()
