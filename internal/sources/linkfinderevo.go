@@ -27,7 +27,8 @@ var (
 )
 
 const (
-	linkfinderMaxInputEntries = 500
+	linkfinderMaxInputEntries  = 500
+	linkfinderEntriesPerSecond = 15
 )
 
 type linkfinderEndpoint struct {
@@ -154,6 +155,11 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 
 	aggregate := newLinkfinderAggregate()
 	var firstErr error
+	totalBudget := linkfinderEntryBudget(ctx, len(inputs)*linkfinderMaxInputEntries)
+	if totalBudget <= 0 {
+		out <- "active: meta: linkfinderevo skipped (insufficient time budget)"
+		return nil
+	}
 
 	for _, input := range inputs {
 		absPath := filepath.Join(outdir, input.path)
@@ -175,13 +181,23 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 			continue
 		}
 
+		if totalBudget <= 0 {
+			out <- fmt.Sprintf("active: meta: linkfinderevo skipped %s (time budget exhausted)", input.path)
+			break
+		}
+
 		tmpDir, err := os.MkdirTemp("", "passive-rec-linkfinderevo-*")
 		if err != nil {
 			recordLinkfinderError(&firstErr, err)
 			break
 		}
 
-		samplePath, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmpDir, input.label, data)
+		limit := linkfinderMaxInputEntries
+		if totalBudget < limit {
+			limit = totalBudget
+		}
+
+		samplePath, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmpDir, input.label, data, limit)
 		if err != nil {
 			recordLinkfinderError(&firstErr, err)
 			os.RemoveAll(tmpDir)
@@ -190,6 +206,16 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 		if samplePath != "" {
 			absPath = samplePath
 			out <- fmt.Sprintf("active: meta: linkfinderevo sampling %d of %d entries from %s", sampledEntries, totalEntries, input.path)
+		}
+		if sampledEntries == 0 {
+			out <- fmt.Sprintf("active: meta: linkfinderevo skipped %s (no entries within time budget)", input.path)
+			os.RemoveAll(tmpDir)
+			continue
+		}
+
+		totalBudget -= sampledEntries
+		if totalBudget < 0 {
+			totalBudget = 0
 		}
 
 		rawPath := filepath.Join(tmpDir, "findings.raw")
@@ -233,6 +259,11 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 		os.RemoveAll(tmpDir)
 
 		if runErr != nil {
+			break
+		}
+
+		if totalBudget == 0 {
+			out <- "active: meta: linkfinderevo stopped (time budget consumed)"
 			break
 		}
 	}
@@ -310,14 +341,40 @@ func buildLinkfinderArgs(inputPath, target, rawPath, htmlPath, jsonPath string) 
 	return args
 }
 
-func maybeSampleLinkfinderInput(tmpDir, label string, data []byte) (string, int, int, error) {
+func linkfinderEntryBudget(ctx context.Context, maxTotal int) int {
+	if maxTotal <= 0 {
+		return 0
+	}
+	deadline, hasDeadline := ctx.Deadline()
+	if !hasDeadline {
+		return maxTotal
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return 0
+	}
+
+	budget := int(remaining.Seconds() * linkfinderEntriesPerSecond)
+	if budget > maxTotal {
+		budget = maxTotal
+	}
+	if budget < 0 {
+		return 0
+	}
+	return budget
+}
+
+func maybeSampleLinkfinderInput(tmpDir, label string, data []byte, limit int) (string, int, int, error) {
 	entries := parseLinkfinderEntries(data)
 	total := len(entries)
-	if total <= linkfinderMaxInputEntries {
+	if limit <= 0 {
+		return "", total, 0, nil
+	}
+	if total <= limit {
 		return "", total, total, nil
 	}
 
-	sampled := sampleLinkfinderEntries(entries, linkfinderMaxInputEntries)
+	sampled := sampleLinkfinderEntries(entries, limit)
 	if len(sampled) == 0 {
 		return "", total, 0, nil
 	}

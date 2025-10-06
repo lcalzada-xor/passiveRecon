@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -356,7 +357,7 @@ func TestMaybeSampleLinkfinderInputLimitsEntries(t *testing.T) {
 		builder.WriteString(fmt.Sprintf("file://example.com/%d\n", i))
 	}
 
-	path, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmp, "html", []byte(builder.String()))
+	path, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmp, "html", []byte(builder.String()), linkfinderMaxInputEntries)
 	if err != nil {
 		t.Fatalf("maybeSampleLinkfinderInput returned error: %v", err)
 	}
@@ -385,11 +386,44 @@ func TestMaybeSampleLinkfinderInputLimitsEntries(t *testing.T) {
 	}
 }
 
+func TestMaybeSampleLinkfinderInputRespectsCustomLimit(t *testing.T) {
+	tmp := t.TempDir()
+
+	var builder strings.Builder
+	for i := 0; i < 100; i++ {
+		builder.WriteString(fmt.Sprintf("file://example.com/%d\n", i))
+	}
+
+	limit := 25
+	path, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmp, "html", []byte(builder.String()), limit)
+	if err != nil {
+		t.Fatalf("maybeSampleLinkfinderInput returned error: %v", err)
+	}
+	if totalEntries != 100 {
+		t.Fatalf("unexpected total entries: got %d want 100", totalEntries)
+	}
+	if sampledEntries != limit {
+		t.Fatalf("unexpected sampled entries: got %d want %d", sampledEntries, limit)
+	}
+	if path == "" {
+		t.Fatalf("expected sampling path when limit=%d", limit)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read sample file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != limit {
+		t.Fatalf("sample file has unexpected number of entries: got %d want %d", len(lines), limit)
+	}
+}
+
 func TestMaybeSampleLinkfinderInputNoopWhenBelowLimit(t *testing.T) {
 	tmp := t.TempDir()
 
 	data := []byte("file://example.com/1\nfile://example.com/2\n")
-	path, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmp, "html", data)
+	path, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmp, "html", data, linkfinderMaxInputEntries)
 	if err != nil {
 		t.Fatalf("maybeSampleLinkfinderInput returned error: %v", err)
 	}
@@ -401,6 +435,29 @@ func TestMaybeSampleLinkfinderInputNoopWhenBelowLimit(t *testing.T) {
 	}
 	if sampledEntries != 2 {
 		t.Fatalf("unexpected sampled entries: got %d want 2", sampledEntries)
+	}
+}
+
+func TestLinkfinderEntryBudget(t *testing.T) {
+	ctxNoDeadline := context.Background()
+	maxTotal := 3 * linkfinderMaxInputEntries
+	if got := linkfinderEntryBudget(ctxNoDeadline, maxTotal); got != maxTotal {
+		t.Fatalf("expected full budget without deadline, got %d want %d", got, maxTotal)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	ctxWithDeadline, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	budget := linkfinderEntryBudget(ctxWithDeadline, maxTotal)
+	if budget <= 0 || budget > maxTotal {
+		t.Fatalf("unexpected budget with deadline: got %d", budget)
+	}
+
+	farFuture := time.Now().Add(10 * time.Minute)
+	ctxFuture, cancelFuture := context.WithDeadline(context.Background(), farFuture)
+	defer cancelFuture()
+	if got := linkfinderEntryBudget(ctxFuture, maxTotal); got != maxTotal {
+		t.Fatalf("expected budget to clamp to max for far deadline, got %d want %d", got, maxTotal)
 	}
 }
 
@@ -477,5 +534,87 @@ func TestLinkFinderEVOIntegrationGeneratesReports(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(tmp, "linkfindings")); err == nil || !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("unexpected legacy linkfindings directory state: err=%v", err)
+	}
+}
+
+func TestLinkFinderEVOLimitsWorkloadByDeadline(t *testing.T) {
+	prevFindBin := linkfinderFindBin
+	prevRunCmd := linkfinderRunCmd
+	t.Cleanup(func() {
+		linkfinderFindBin = prevFindBin
+		linkfinderRunCmd = prevRunCmd
+	})
+
+	linkfinderFindBin = func(names ...string) (string, bool) {
+		return "golinkfinder", true
+	}
+
+	var mu sync.Mutex
+	var processed []int
+	linkfinderRunCmd = func(ctx context.Context, dir string, name string, args []string, out chan<- string) error {
+		for i := 0; i < len(args); i++ {
+			if args[i] == "-i" && i+1 < len(args) {
+				data, err := os.ReadFile(args[i+1])
+				if err != nil {
+					return err
+				}
+				lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+				count := 0
+				for _, line := range lines {
+					if strings.TrimSpace(line) != "" {
+						count++
+					}
+				}
+				mu.Lock()
+				processed = append(processed, count)
+				mu.Unlock()
+				break
+			}
+		}
+		return nil
+	}
+
+	tmp := t.TempDir()
+	routesDir := filepath.Join(tmp, "routes")
+	for _, sub := range []string{"html", "js", "crawl"} {
+		if err := os.MkdirAll(filepath.Join(routesDir, sub), 0o755); err != nil {
+			t.Fatalf("failed to create %s dir: %v", sub, err)
+		}
+		var builder strings.Builder
+		for i := 0; i < 100; i++ {
+			builder.WriteString(fmt.Sprintf("file://example.com/%s/%d\n", sub, i))
+		}
+		if err := os.WriteFile(filepath.Join(routesDir, sub, fmt.Sprintf("%s.active", sub)), []byte(builder.String()), 0o644); err != nil {
+			t.Fatalf("failed to write %s list: %v", sub, err)
+		}
+	}
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(2*time.Second))
+	defer cancel()
+	expectedBudget := linkfinderEntryBudget(ctx, 3*linkfinderMaxInputEntries)
+	if expectedBudget >= 100 {
+		t.Fatalf("expected budget to be lower than input size, got %d", expectedBudget)
+	}
+
+	out := make(chan string, 20)
+	if err := LinkFinderEVO(ctx, "https://example.com", tmp, out); err != nil {
+		t.Fatalf("LinkFinderEVO returned error: %v", err)
+	}
+
+	mu.Lock()
+	calls := append([]int(nil), processed...)
+	mu.Unlock()
+
+	if len(calls) == 0 {
+		t.Fatalf("expected at least one command invocation")
+	}
+	if len(calls) > 1 {
+		t.Fatalf("expected single invocation due to budget exhaustion, got %d", len(calls))
+	}
+	if calls[0] <= 0 {
+		t.Fatalf("expected positive number of processed entries, got %d", calls[0])
+	}
+	if calls[0] > expectedBudget {
+		t.Fatalf("processed entries exceed budget: got %d want <= %d", calls[0], expectedBudget)
 	}
 }
