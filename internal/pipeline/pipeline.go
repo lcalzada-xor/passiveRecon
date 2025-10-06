@@ -5,9 +5,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"passive-rec/internal/certs"
 	"passive-rec/internal/netutil"
@@ -27,11 +29,16 @@ type writerPair struct {
 	active  sinkWriter
 }
 
+const (
+	defaultLineBuffer   = 1024
+	lineBufferPerWorker = 256
+)
+
 type lazyWriter struct {
 	outdir  string
 	subdir  string
 	name    string
-	mu      sync.Mutex
+	mu      sync.RWMutex
 	writer  *out.Writer
 	initErr error
 }
@@ -41,6 +48,19 @@ func newLazyWriter(outdir, subdir, name string) *lazyWriter {
 }
 
 func (lw *lazyWriter) ensure() (*out.Writer, error) {
+	lw.mu.RLock()
+	if lw.initErr != nil {
+		err := lw.initErr
+		lw.mu.RUnlock()
+		return nil, err
+	}
+	if lw.writer != nil {
+		writer := lw.writer
+		lw.mu.RUnlock()
+		return writer, nil
+	}
+	lw.mu.RUnlock()
+
 	lw.mu.Lock()
 	defer lw.mu.Unlock()
 	if lw.initErr != nil {
@@ -118,6 +138,32 @@ func (lw *lazyWriter) Close() error {
 	return nil
 }
 
+type handlerStats struct {
+	total time.Duration
+	count uint64
+}
+
+// HandlerMetric resume el desempeño de un handler del pipeline.
+type HandlerMetric struct {
+	Name    string
+	Count   uint64
+	Total   time.Duration
+	Average time.Duration
+}
+
+// LineBufferSize calcula un tamaño de búfer recomendado para el canal de líneas
+// en función del número de workers configurado.
+func LineBufferSize(workers int) int {
+	if workers < 1 {
+		workers = 1
+	}
+	size := workers * lineBufferPerWorker
+	if size < defaultLineBuffer {
+		size = defaultLineBuffer
+	}
+	return size
+}
+
 type Sink struct {
 	Domains               writerPair
 	Routes                writerPair
@@ -136,6 +182,8 @@ type Sink struct {
 	Meta                  writerPair
 	wg                    sync.WaitGroup
 	lines                 chan string
+	handlerMetrics        map[string]*handlerStats
+	metricsMu             sync.Mutex
 	seenMu                sync.Mutex
 	seenDomainsPassive    map[string]struct{}
 	seenDomainsActive     map[string]struct{}
@@ -161,7 +209,10 @@ type Sink struct {
 	scope                 *netutil.Scope
 }
 
-func NewSink(outdir string, active bool, target string) (*Sink, error) {
+func NewSink(outdir string, active bool, target string, lineBuffer int) (*Sink, error) {
+	if lineBuffer <= 0 {
+		lineBuffer = defaultLineBuffer
+	}
 	var opened []sinkWriter
 	newWriter := func(subdir, name string) (*out.Writer, error) {
 		targetDir := outdir
@@ -256,7 +307,8 @@ func NewSink(outdir string, active bool, target string) (*Sink, error) {
 		RoutesMetaFindings:    writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "meta"), "meta.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "meta"), "meta.active")},
 		Certs:                 writerPair{passive: cPassive, active: cActive},
 		Meta:                  writerPair{passive: mPassive, active: mActive},
-		lines:                 make(chan string, 1024),
+		lines:                 make(chan string, lineBuffer),
+		handlerMetrics:        make(map[string]*handlerStats),
 		seenDomainsPassive:    make(map[string]struct{}),
 		seenDomainsActive:     make(map[string]struct{}),
 		seenRoutesPassive:     make(map[string]struct{}),
@@ -319,20 +371,21 @@ type lineHandler func(*Sink, string, bool) bool
 
 var prefixHandlers = []struct {
 	prefix  string
+	name    string
 	handler lineHandler
 }{
-	{prefix: "meta:", handler: handleMeta},
-	{prefix: "rdap:", handler: handleRDAP},
-	{prefix: "js:", handler: handleJS},
-	{prefix: "html:", handler: handleHTML},
-	{prefix: "maps:", handler: handleMaps},
-	{prefix: "json:", handler: handleJSONCategory},
-	{prefix: "api:", handler: handleAPICategory},
-	{prefix: "wasm:", handler: handleWASMCategory},
-	{prefix: "svg:", handler: handleSVGCategory},
-	{prefix: "crawl:", handler: handleCrawlCategory},
-	{prefix: "meta-route:", handler: handleMetaCategory},
-	{prefix: "cert:", handler: handleCert},
+	{prefix: "meta:", name: "handleMeta", handler: handleMeta},
+	{prefix: "rdap:", name: "handleRDAP", handler: handleRDAP},
+	{prefix: "js:", name: "handleJS", handler: handleJS},
+	{prefix: "html:", name: "handleHTML", handler: handleHTML},
+	{prefix: "maps:", name: "handleMaps", handler: handleMaps},
+	{prefix: "json:", name: "handleJSONCategory", handler: handleJSONCategory},
+	{prefix: "api:", name: "handleAPICategory", handler: handleAPICategory},
+	{prefix: "wasm:", name: "handleWASMCategory", handler: handleWASMCategory},
+	{prefix: "svg:", name: "handleSVGCategory", handler: handleSVGCategory},
+	{prefix: "crawl:", name: "handleCrawlCategory", handler: handleCrawlCategory},
+	{prefix: "meta-route:", name: "handleMetaCategory", handler: handleMetaCategory},
+	{prefix: "cert:", name: "handleCert", handler: handleCert},
 }
 
 func (s *Sink) processLine(ln string) {
@@ -352,22 +405,69 @@ func (s *Sink) processLine(ln string) {
 
 	for _, entry := range prefixHandlers {
 		if strings.HasPrefix(l, entry.prefix) {
-			if entry.handler(s, l, isActive) {
+			if s.timedHandle(entry.name, entry.handler, l, isActive) {
 				return
 			}
 		}
 	}
 
-	if handleMeta(s, l, isActive) {
+	if s.timedHandle("handleMeta", handleMeta, l, isActive) {
 		return
 	}
-	if handleRoute(s, l, isActive) {
+	if s.timedHandle("handleRoute", handleRoute, l, isActive) {
 		return
 	}
-	if handleCert(s, l, isActive) {
+	if s.timedHandle("handleCert", handleCert, l, isActive) {
 		return
 	}
-	_ = handleDomain(s, l, isActive)
+	_ = s.timedHandle("handleDomain", handleDomain, l, isActive)
+}
+
+func (s *Sink) timedHandle(name string, handler lineHandler, line string, isActive bool) bool {
+	start := time.Now()
+	handled := handler(s, line, isActive)
+	s.recordHandlerMetric(name, time.Since(start))
+	return handled
+}
+
+func (s *Sink) recordHandlerMetric(name string, elapsed time.Duration) {
+	s.metricsMu.Lock()
+	stat := s.handlerMetrics[name]
+	if stat == nil {
+		stat = &handlerStats{}
+		s.handlerMetrics[name] = stat
+	}
+	stat.total += elapsed
+	stat.count++
+	s.metricsMu.Unlock()
+}
+
+// HandlerMetrics devuelve una instantánea ordenada de las métricas recolectadas
+// para cada handler. El orden es descendente por promedio y estable alfabéticamente
+// en caso de empate para facilitar la inspección.
+func (s *Sink) HandlerMetrics() []HandlerMetric {
+	s.metricsMu.Lock()
+	defer s.metricsMu.Unlock()
+	metrics := make([]HandlerMetric, 0, len(s.handlerMetrics))
+	for name, stat := range s.handlerMetrics {
+		if stat == nil || stat.count == 0 {
+			continue
+		}
+		avg := time.Duration(int64(stat.total) / int64(stat.count))
+		metrics = append(metrics, HandlerMetric{
+			Name:    name,
+			Count:   stat.count,
+			Total:   stat.total,
+			Average: avg,
+		})
+	}
+	sort.Slice(metrics, func(i, j int) bool {
+		if metrics[i].Average == metrics[j].Average {
+			return metrics[i].Name < metrics[j].Name
+		}
+		return metrics[i].Average > metrics[j].Average
+	})
+	return metrics
 }
 
 func handleMeta(s *Sink, line string, isActive bool) bool {
