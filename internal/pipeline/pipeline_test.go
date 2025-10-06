@@ -17,7 +17,7 @@ import (
 func newTestSink(t *testing.T, active bool) (*Sink, string) {
 	t.Helper()
 	dir := t.TempDir()
-	sink, err := NewSink(dir, active, "example.com")
+	sink, err := NewSink(dir, active, "example.com", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestSinkClassification(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com")
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestSinkFiltersOutOfScope(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com")
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(2))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestSinkFlush(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com")
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(2))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestNewSinkClosesWritersOnError(t *testing.T) {
 		t.Fatalf("unexpected open descriptors before NewSink: %d", got)
 	}
 
-	sink, err := NewSink(dir, false, "example.com")
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
 	if err == nil {
 		// Close to ensure no resources leak in this unexpected success case.
 		_ = sink.Close()
@@ -479,7 +479,7 @@ func TestActiveRoutesPopulatePassive(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com")
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -506,7 +506,7 @@ func TestActiveRoutesSkip404(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com")
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -538,7 +538,7 @@ func TestJSLinesAreWrittenToFile(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com")
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -568,7 +568,7 @@ func TestActiveJSExcludes404(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com")
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -592,7 +592,7 @@ func TestHTMLLinesAreWrittenToActiveFile(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com")
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -615,7 +615,7 @@ func TestHTMLActiveSkipsErrorResponses(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com")
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -637,7 +637,7 @@ func TestHTMLImageLinesAreRedirectedToImagesFile(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com")
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -670,7 +670,7 @@ func TestRouteCategorizationPassive(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com")
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -753,7 +753,7 @@ func TestRouteCategorizationActiveMode(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, true, "example.com")
+	sink, err := NewSink(dir, true, "example.com", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -807,7 +807,7 @@ func TestRouteCategorizationActiveModeSkipsErrorStatus(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, true, "example.com")
+	sink, err := NewSink(dir, true, "example.com", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -829,7 +829,7 @@ func TestRouteCategorizationPassiveModeEmitsActiveFiles(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com")
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -855,7 +855,7 @@ func TestRouteCategorizationDeduplicatesCategoryOutputs(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com")
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(2))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
