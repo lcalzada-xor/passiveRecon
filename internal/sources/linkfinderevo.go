@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"math/rand"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -22,6 +23,10 @@ import (
 var (
 	linkfinderFindBin = runner.FindBin
 	linkfinderRunCmd  = runner.RunCommandWithDir
+)
+
+const (
+	linkfinderMaxInputEntries = 500
 )
 
 type linkfinderEndpoint struct {
@@ -180,6 +185,17 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 			break
 		}
 
+		samplePath, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmpDir, input.label, data)
+		if err != nil {
+			recordLinkfinderError(&firstErr, err)
+			os.RemoveAll(tmpDir)
+			break
+		}
+		if samplePath != "" {
+			absPath = samplePath
+			out <- fmt.Sprintf("active: meta: linkfinderevo sampling %d of %d entries from %s", sampledEntries, totalEntries, input.path)
+		}
+
 		rawPath := filepath.Join(tmpDir, "findings.raw")
 		htmlPath := filepath.Join(tmpDir, "findings.html")
 		jsonPath := filepath.Join(tmpDir, "findings.json")
@@ -289,6 +305,82 @@ func buildLinkfinderArgs(inputPath, target, rawPath, htmlPath, jsonPath string) 
 	output := fmt.Sprintf("cli,raw=%s,html=%s,json=%s", rawPath, htmlPath, jsonPath)
 	args = append(args, "--output", output, "--gf", "all")
 	return args
+}
+
+func maybeSampleLinkfinderInput(tmpDir, label string, data []byte) (string, int, int, error) {
+	entries := parseLinkfinderEntries(data)
+	total := len(entries)
+	if total <= linkfinderMaxInputEntries {
+		return "", total, total, nil
+	}
+
+	sampled := sampleLinkfinderEntries(entries, linkfinderMaxInputEntries)
+	if len(sampled) == 0 {
+		return "", total, 0, nil
+	}
+
+	var buf bytes.Buffer
+	for _, entry := range sampled {
+		buf.Write(entry)
+		buf.WriteByte('\n')
+	}
+
+	sampleName := fmt.Sprintf("input.%s.sample", sanitizeLinkfinderLabel(label))
+	samplePath := filepath.Join(tmpDir, sampleName)
+	if err := os.WriteFile(samplePath, buf.Bytes(), 0o644); err != nil {
+		return "", total, len(sampled), err
+	}
+
+	return samplePath, total, len(sampled), nil
+}
+
+func parseLinkfinderEntries(data []byte) [][]byte {
+	lines := bytes.Split(data, []byte{'\n'})
+	entries := make([][]byte, 0, len(lines))
+	for _, line := range lines {
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 {
+			continue
+		}
+		// Copy to avoid retaining references to the original slice backing array.
+		entry := make([]byte, len(trimmed))
+		copy(entry, trimmed)
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+func sampleLinkfinderEntries(entries [][]byte, limit int) [][]byte {
+	if limit <= 0 || len(entries) <= limit {
+		return entries
+	}
+
+	idxs := rand.Perm(len(entries))[:limit]
+	sort.Ints(idxs)
+
+	sampled := make([][]byte, 0, limit)
+	for _, idx := range idxs {
+		sampled = append(sampled, entries[idx])
+	}
+	return sampled
+}
+
+func sanitizeLinkfinderLabel(label string) string {
+	trimmed := strings.TrimSpace(label)
+	if trimmed == "" {
+		return "input"
+	}
+	sanitized := strings.Map(func(r rune) rune {
+		switch r {
+		case '/', '\\', ':':
+			return '_'
+		}
+		return r
+	}, trimmed)
+	if sanitized == "" {
+		return "input"
+	}
+	return sanitized
 }
 
 func normalizeScope(target string) string {
