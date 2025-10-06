@@ -49,6 +49,7 @@ var defaultPipeline = []toolStep{
 	{Name: "amass", Group: "subdomain-sources", Run: stepAmass},
 	{Name: "subfinder", Group: "subdomain-sources", Run: stepSubfinder},
 	{Name: "assetfinder", Group: "subdomain-sources", Run: stepAssetfinder},
+	{Name: "rdap", Group: "subdomain-sources", Run: stepRDAP},
 	{Name: "crtsh", Group: "cert-sources", Run: stepCRTSh},
 	{Name: "censys", Group: "cert-sources", Run: stepCensys},
 	{Name: "dedupe", Run: stepDedupe},
@@ -246,6 +247,10 @@ func stepSubfinder(ctx context.Context, _ *pipelineState, opts orchestratorOptio
 
 func stepAssetfinder(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
 	return sourceAssetfinder(ctx, opts.cfg.Target, opts.sink.In())
+}
+
+func stepRDAP(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
+	return sourceRDAP(ctx, opts.cfg.Target, opts.sink.In())
 }
 
 func stepCRTSh(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {

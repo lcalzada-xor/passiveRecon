@@ -47,6 +47,8 @@ When the `--active` flag is enabled the pipeline now includes [GoLinkfinderEVO](
 The tool inspects the active HTML, JavaScript and crawl lists, stores consolidated reports under `routes/linkFindings/` (`findings.json`, `findings.html` and `findings.raw`) and feeds the discovered endpoints back into the categorised `.active` artifacts.
 For reference, the raw GoLinkfinderEVO outputs from each input list are also preserved alongside the consolidated files as `findings.html.*`, `findings.js.*` and `findings.crawl.*`.
 
+The passive stage now queries the public RDAP directory for the target domain. Its summaries are appended to `meta.passive` while a copy of the raw metadata lives under `rdap/rdap.passive`, making it easier to review registrar, status and nameserver details alongside the rest of the reconnaissance output.
+
 ### Configuration file
 
 You can pre-populate the CLI flags with a YAML or JSON configuration file by passing its path through `--config`:
