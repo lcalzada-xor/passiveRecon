@@ -67,7 +67,7 @@ func (agg *linkfinderAggregate) add(resource string, endpoint linkfinderEndpoint
 	if resource == "" {
 		return
 	}
-	endpoint.Link = strings.TrimSpace(endpoint.Link)
+	endpoint.Link = cleanLinkfinderEndpointLink(endpoint.Link)
 	if endpoint.Link == "" {
 		return
 	}
@@ -630,6 +630,23 @@ func writeLinkfinderUndetected(path string, entries []string) error {
 	}
 
 	return os.WriteFile(path, buf.Bytes(), 0o644)
+}
+
+func cleanLinkfinderEndpointLink(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+
+	trimmed = strings.Trim(trimmed, "\"'`")
+
+	if idx := strings.IndexAny(trimmed, " \t\r\n\"'<>[]{}()"); idx != -1 {
+		trimmed = trimmed[:idx]
+	}
+
+	trimmed = strings.TrimRight(trimmed, ",.;")
+
+	return strings.TrimSpace(trimmed)
 }
 
 const linkfinderTemplate = `<!DOCTYPE html>

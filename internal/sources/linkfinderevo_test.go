@@ -141,6 +141,28 @@ func TestWriteLinkfinderOutputsCreatesAllFormats(t *testing.T) {
 	}
 }
 
+func TestCleanLinkfinderEndpointLink(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "already clean", input: "https://example.com/app.js", want: "https://example.com/app.js"},
+		{name: "trailing script noise", input: "https://uvesa.es/})}else{visibilityCache=[]", want: "https://uvesa.es/"},
+		{name: "wrapped in quotes", input: "\"/static/app.js\"", want: "/static/app.js"},
+		{name: "with trailing punctuation", input: "https://example.com/api/v1/users,", want: "https://example.com/api/v1/users"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			if got := cleanLinkfinderEndpointLink(tt.input); got != tt.want {
+				t.Fatalf("cleanLinkfinderEndpointLink(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLinkFinderEVOIntegrationGeneratesReports(t *testing.T) {
 	if _, err := os.Stat("/tmp/golinkfinder"); err != nil {
 		t.Skip("GoLinkfinderEVO binary not available for integration test")
