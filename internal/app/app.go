@@ -91,6 +91,9 @@ func Run(cfg *config.Config) error {
 
 	if metrics != nil {
 		logPipelineMetrics(metrics)
+		if err := writePipelineMetricsReport(cfg.OutDir, metrics, pipelineDuration); err != nil {
+			logx.Warnf("no se pudo escribir metrics: %v", err)
+		}
 	}
 
 	sink.Flush()

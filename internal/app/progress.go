@@ -10,16 +10,17 @@ import (
 )
 
 type progressBar struct {
-	mu           sync.Mutex
-	total        int
-	current      int
-	width        int
-	lastLineLen  int
-	done         bool
-	out          io.Writer
-	lastRendered string
-	missing      []string
-	startTimes   map[string]time.Time
+	mu            sync.Mutex
+	total         int
+	current       int
+	width         int
+	lastLineLen   int
+	done          bool
+	out           io.Writer
+	lastRendered  string
+	missing       []string
+	startTimes    map[string]time.Time
+	pipelineStart time.Time
 }
 
 func newProgressBar(total int, out io.Writer) *progressBar {
@@ -72,9 +73,17 @@ func (p *progressBar) StepRunning(tool string) {
 		p.startTimes = make(map[string]time.Time)
 	}
 	now := time.Now()
+	if p.pipelineStart.IsZero() {
+		p.pipelineStart = now
+	}
 	p.startTimes[tool] = now
 
-	p.renderLocked(tool, fmt.Sprintf("inicio %s", now.Format("15:04:05")))
+	label := "inicio"
+	if eta, ok := p.estimatedRemainingLocked(); ok {
+		label = fmt.Sprintf("inicio ETA %s", formatShortDuration(eta))
+	}
+
+	p.renderLocked(tool, label)
 }
 
 func (p *progressBar) StepDone(tool, status string) {
@@ -110,15 +119,19 @@ func (p *progressBar) StepDone(tool, status string) {
 	}
 
 	var label string
-	start, ok := p.startTimes[tool]
-	if ok && !start.IsZero() && status != "omitido" {
-		end := time.Now()
-		duration := end.Sub(start)
-		label = fmt.Sprintf("%s %s fin %s", status, formatShortDuration(duration), end.Format("15:04:05"))
-	} else {
+	if status != "" {
 		label = status
 	}
 	delete(p.startTimes, tool)
+
+	if eta, ok := p.estimatedRemainingLocked(); ok {
+		etaLabel := fmt.Sprintf("ETA %s", formatShortDuration(eta))
+		if label != "" {
+			label = fmt.Sprintf("%s %s", label, etaLabel)
+		} else {
+			label = etaLabel
+		}
+	}
 
 	p.renderLocked(tool, label)
 	if p.current == p.total {
@@ -127,6 +140,36 @@ func (p *progressBar) StepDone(tool, status string) {
 		p.done = true
 		p.lastRendered = ""
 	}
+}
+
+func (p *progressBar) estimatedRemainingLocked() (time.Duration, bool) {
+	if p.total <= 0 {
+		return 0, false
+	}
+	if p.pipelineStart.IsZero() {
+		return 0, false
+	}
+	completed := p.current
+	if completed <= 0 {
+		return 0, false
+	}
+
+	progress := float64(completed) / float64(p.total)
+	if progress <= 0 {
+		return 0, false
+	}
+
+	elapsed := time.Since(p.pipelineStart)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+
+	remaining := time.Duration(float64(elapsed) * (1 - progress) / progress)
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	return remaining, true
 }
 
 func (p *progressBar) renderLocked(tool, status string) {

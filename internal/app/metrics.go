@@ -1,6 +1,10 @@
 package app
 
 import (
+	"encoding/json"
+	"math"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -149,6 +153,211 @@ func logPipelineMetrics(metrics *pipelineMetrics) {
 	p95Duration := percentileDuration(durations, 95)
 
 	logx.Infof("pipeline: resumen tiempos pasos=%d p95=%s max=%s", len(durations), p95Duration.Round(time.Millisecond), maxDuration.Round(time.Millisecond))
+}
+
+func writePipelineMetricsReport(outDir string, metrics *pipelineMetrics, pipelineDuration time.Duration) error {
+	if metrics == nil {
+		return nil
+	}
+
+	summaries := metrics.Summaries()
+
+	type stepEntry struct {
+		Name            string  `json:"name"`
+		Status          string  `json:"status"`
+		DurationSeconds float64 `json:"duration_seconds,omitempty"`
+		Start           string  `json:"start,omitempty"`
+		End             string  `json:"end,omitempty"`
+		Skipped         bool    `json:"skipped"`
+		SkipReason      string  `json:"skip_reason,omitempty"`
+		TimeoutSeconds  float64 `json:"timeout_seconds,omitempty"`
+	}
+
+	type bottleneckEntry struct {
+		Name            string  `json:"name"`
+		DurationSeconds float64 `json:"duration_seconds"`
+	}
+
+	type pipelineEntry struct {
+		DurationSeconds     float64 `json:"duration_seconds"`
+		StepsTotal          int     `json:"steps_total"`
+		StepsCompleted      int     `json:"steps_completed"`
+		StepsSuccessful     int     `json:"steps_successful"`
+		StepsSkipped        int     `json:"steps_skipped"`
+		StepsFailed         int     `json:"steps_failed"`
+		StepsTimeout        int     `json:"steps_timeout"`
+		StepsMissing        int     `json:"steps_missing"`
+		AverageDuration     float64 `json:"average_duration_seconds,omitempty"`
+		P95Duration         float64 `json:"p95_duration_seconds,omitempty"`
+		MaxDuration         float64 `json:"max_duration_seconds,omitempty"`
+		Start               string  `json:"start,omitempty"`
+		End                 string  `json:"end,omitempty"`
+		LongestStep         string  `json:"longest_step,omitempty"`
+		LongestStepDuration float64 `json:"longest_step_duration_seconds,omitempty"`
+	}
+
+	type report struct {
+		GeneratedAt time.Time         `json:"generated_at"`
+		Pipeline    pipelineEntry     `json:"pipeline"`
+		Steps       []stepEntry       `json:"steps"`
+		Bottlenecks []bottleneckEntry `json:"bottlenecks,omitempty"`
+	}
+
+	if len(summaries) == 0 {
+		data := report{
+			GeneratedAt: time.Now().UTC(),
+			Pipeline: pipelineEntry{
+				DurationSeconds: secondsWithMillis(pipelineDuration),
+			},
+			Steps: make([]stepEntry, 0),
+		}
+		return writeMetricsFile(outDir, data)
+	}
+
+	steps := make([]stepEntry, 0, len(summaries))
+	durationSamples := make([]time.Duration, 0, len(summaries))
+	completed := 0
+	successful := 0
+	skipped := 0
+	failed := 0
+	timeouts := 0
+	missing := 0
+	var totalDuration time.Duration
+	var earliestStart time.Time
+	var latestEnd time.Time
+	var longestName string
+	var longestDuration time.Duration
+	bottleneckCandidates := make([]bottleneckEntry, 0, len(summaries))
+
+	for _, metric := range summaries {
+		entry := stepEntry{
+			Name:       metric.Name,
+			Status:     metric.Status,
+			Skipped:    metric.Skipped,
+			SkipReason: metric.SkipReason,
+		}
+		if !metric.Start.IsZero() {
+			entry.Start = metric.Start.Format(time.RFC3339)
+			if earliestStart.IsZero() || metric.Start.Before(earliestStart) {
+				earliestStart = metric.Start
+			}
+		}
+		if !metric.End.IsZero() {
+			entry.End = metric.End.Format(time.RFC3339)
+			if latestEnd.IsZero() || metric.End.After(latestEnd) {
+				latestEnd = metric.End
+			}
+		}
+		if metric.Timeout > 0 {
+			entry.TimeoutSeconds = secondsWithMillis(metric.Timeout)
+		}
+		if !metric.Skipped {
+			completed++
+			entry.DurationSeconds = secondsWithMillis(metric.Duration)
+			totalDuration += metric.Duration
+			switch metric.Status {
+			case "ok":
+				successful++
+			case "timeout":
+				timeouts++
+				failed++
+			case "error":
+				failed++
+			case "faltante":
+				missing++
+			}
+			if metric.Duration > 0 {
+				durationSamples = append(durationSamples, metric.Duration)
+				if metric.Duration > longestDuration {
+					longestDuration = metric.Duration
+					longestName = metric.Name
+				}
+				bottleneckCandidates = append(bottleneckCandidates, bottleneckEntry{
+					Name:            metric.Name,
+					DurationSeconds: secondsWithMillis(metric.Duration),
+				})
+			}
+		} else {
+			skipped++
+		}
+		steps = append(steps, entry)
+	}
+
+	sort.Slice(bottleneckCandidates, func(i, j int) bool {
+		return bottleneckCandidates[i].DurationSeconds > bottleneckCandidates[j].DurationSeconds
+	})
+	const maxBottlenecks = 5
+	if len(bottleneckCandidates) > maxBottlenecks {
+		bottleneckCandidates = bottleneckCandidates[:maxBottlenecks]
+	}
+
+	avgDuration := 0.0
+	if completed > 0 {
+		avg := time.Duration(int64(totalDuration) / int64(completed))
+		avgDuration = secondsWithMillis(avg)
+	}
+
+	p95 := 0.0
+	maxDuration := 0.0
+	if len(durationSamples) > 0 {
+		p95Duration := percentileDuration(durationSamples, 95)
+		p95 = secondsWithMillis(p95Duration)
+		maxDuration = secondsWithMillis(longestDuration)
+	}
+
+	pipelineInfo := pipelineEntry{
+		DurationSeconds:     secondsWithMillis(pipelineDuration),
+		StepsTotal:          len(summaries),
+		StepsCompleted:      completed,
+		StepsSuccessful:     successful,
+		StepsSkipped:        skipped,
+		StepsFailed:         failed,
+		StepsTimeout:        timeouts,
+		StepsMissing:        missing,
+		AverageDuration:     avgDuration,
+		P95Duration:         p95,
+		MaxDuration:         maxDuration,
+		LongestStep:         longestName,
+		LongestStepDuration: maxDuration,
+	}
+
+	if !earliestStart.IsZero() {
+		pipelineInfo.Start = earliestStart.Format(time.RFC3339)
+	}
+	if !latestEnd.IsZero() {
+		pipelineInfo.End = latestEnd.Format(time.RFC3339)
+	}
+
+	data := report{
+		GeneratedAt: time.Now().UTC(),
+		Pipeline:    pipelineInfo,
+		Steps:       steps,
+	}
+	if len(bottleneckCandidates) > 0 {
+		data.Bottlenecks = bottleneckCandidates
+	}
+
+	return writeMetricsFile(outDir, data)
+}
+
+func secondsWithMillis(d time.Duration) float64 {
+	if d <= 0 {
+		return 0
+	}
+	return math.Round(d.Seconds()*1000) / 1000
+}
+
+func writeMetricsFile(outDir string, payload any) error {
+	metricsPath := filepath.Join(outDir, "metrics")
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmpPath := metricsPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, metricsPath)
 }
 
 func percentileDuration(durations []time.Duration, percentile int) time.Duration {

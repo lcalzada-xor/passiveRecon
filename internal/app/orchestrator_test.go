@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -93,8 +94,8 @@ func TestRunPipelineConcurrentGroupProgress(t *testing.T) {
 	if len(observed) != 2 {
 		t.Fatalf("expected both sources to start, got %v", observed)
 	}
-	if count := strings.Count(buf.String(), "(inicio "); count < 2 {
-		t.Fatalf("expected progress bar to report running steps with timestamps, got %q", buf.String())
+	if count := strings.Count(buf.String(), "(inicio"); count < 2 {
+		t.Fatalf("expected progress bar to report running steps, got %q", buf.String())
 	}
 
 	close(release)
@@ -109,6 +110,9 @@ func TestRunPipelineConcurrentGroupProgress(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "subfinder (ok") {
 		t.Fatalf("expected subfinder completion in progress output, got %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "ETA") {
+		t.Fatalf("expected progress output to include ETA information, got %q", buf.String())
 	}
 }
 
@@ -133,7 +137,8 @@ func TestRunPipelineConcurrentSourcesDedupesSink(t *testing.T) {
 	}
 
 	cfg := &config.Config{Target: "example.com", OutDir: dir}
-	opts := orchestratorOptions{cfg: cfg, sink: sink, requested: requested}
+	metrics := newPipelineMetrics()
+	opts := orchestratorOptions{cfg: cfg, sink: sink, requested: requested, metrics: metrics}
 
 	started := make(chan string, 3)
 	release := make(chan struct{})
@@ -180,6 +185,7 @@ func TestRunPipelineConcurrentSourcesDedupesSink(t *testing.T) {
 
 	ctx := context.Background()
 	done := make(chan struct{})
+	pipelineStart := time.Now()
 	go func() {
 		runPipeline(ctx, steps, opts)
 		close(done)
@@ -197,6 +203,11 @@ func TestRunPipelineConcurrentSourcesDedupesSink(t *testing.T) {
 	}
 	close(release)
 	<-done
+
+	pipelineDuration := time.Since(pipelineStart)
+	if err := writePipelineMetricsReport(dir, metrics, pipelineDuration); err != nil {
+		t.Fatalf("writePipelineMetricsReport: %v", err)
+	}
 
 	sink.Flush()
 
@@ -219,6 +230,33 @@ func TestRunPipelineConcurrentSourcesDedupesSink(t *testing.T) {
 	checkNoDuplicates(t, routesActive, "routes.active")
 	if len(routesActive) != 1 || routesActive[0] != "https://www.example.com/login" {
 		t.Fatalf("unexpected active routes: %#v", routesActive)
+	}
+
+	metricsPath := filepath.Join(dir, "metrics")
+	data, err := os.ReadFile(metricsPath)
+	if err != nil {
+		t.Fatalf("read metrics file: %v", err)
+	}
+	var report struct {
+		Pipeline struct {
+			StepsTotal     int     `json:"steps_total"`
+			StepsFailed    int     `json:"steps_failed"`
+			DurationSecond float64 `json:"duration_seconds"`
+		} `json:"pipeline"`
+		Steps []struct {
+			Name    string `json:"name"`
+			Status  string `json:"status"`
+			Skipped bool   `json:"skipped"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal(data, &report); err != nil {
+		t.Fatalf("unmarshal metrics: %v\ncontent: %s", err, string(data))
+	}
+	if report.Pipeline.StepsTotal == 0 {
+		t.Fatalf("expected metrics to report pipeline steps, got %+v", report.Pipeline)
+	}
+	if len(report.Steps) == 0 {
+		t.Fatalf("expected metrics to include per-step entries")
 	}
 }
 
