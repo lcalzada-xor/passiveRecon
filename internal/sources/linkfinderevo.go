@@ -21,7 +21,7 @@ import (
 
 var (
 	linkfinderFindBin = runner.FindBin
-	linkfinderRunCmd  = runner.RunCommand
+	linkfinderRunCmd  = runner.RunCommandWithDir
 )
 
 type linkfinderEndpoint struct {
@@ -137,6 +137,11 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 		return err
 	}
 
+	gfDir := filepath.Join(outdir, "linkfindings")
+	if err := os.MkdirAll(gfDir, 0o755); err != nil {
+		return err
+	}
+
 	inputs := []struct {
 		label string
 		path  string
@@ -191,7 +196,7 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 			}
 		}()
 
-		runErr := linkfinderRunCmd(ctx, bin, args, intermediate)
+		runErr := linkfinderRunCmd(ctx, tmpDir, bin, args, intermediate)
 		close(intermediate)
 		wg.Wait()
 
@@ -201,6 +206,9 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 
 		if runErr == nil {
 			if err := persistLinkfinderArtifacts(findingsDir, input.label, rawPath, htmlPath, jsonPath); err != nil {
+				recordLinkfinderError(&firstErr, err)
+			}
+			if err := persistLinkfinderGFArtifacts(gfDir, input.label, tmpDir); err != nil {
 				recordLinkfinderError(&firstErr, err)
 			}
 		}
@@ -279,7 +287,7 @@ func buildLinkfinderArgs(inputPath, target, rawPath, htmlPath, jsonPath string) 
 		args = append(args, "-scope", scope, "--scope-include-subdomains")
 	}
 	output := fmt.Sprintf("cli,raw=%s,html=%s,json=%s", rawPath, htmlPath, jsonPath)
-	args = append(args, "--output", output)
+	args = append(args, "--output", output, "--gf", "all")
 	return args
 }
 
@@ -359,6 +367,25 @@ func persistLinkfinderArtifacts(findingsDir, label, rawPath, htmlPath, jsonPath 
 
 	for _, output := range outputs {
 		if err := copyLinkfinderArtifact(output.src, output.dest); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func persistLinkfinderGFArtifacts(gfDir, label, srcDir string) error {
+	outputs := []struct {
+		name string
+		dest string
+	}{
+		{name: "gf.txt", dest: filepath.Join(gfDir, fmt.Sprintf("gf.%s.txt", label))},
+		{name: "gf.json", dest: filepath.Join(gfDir, fmt.Sprintf("gf.%s.json", label))},
+	}
+
+	for _, output := range outputs {
+		src := filepath.Join(srcDir, output.name)
+		if err := copyLinkfinderArtifact(src, output.dest); err != nil {
 			return err
 		}
 	}

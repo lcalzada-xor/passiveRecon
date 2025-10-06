@@ -70,6 +70,17 @@ func FindBin(names ...string) (string, bool) {
 }
 
 func RunCommand(ctx context.Context, name string, args []string, out chan<- string) error {
+	return runCommand(ctx, name, args, out, "")
+}
+
+// RunCommandWithDir executes the provided command while setting the working
+// directory to dir. The stdout stream is forwarded line-by-line to the provided
+// channel. If dir is empty this behaves like RunCommand.
+func RunCommandWithDir(ctx context.Context, dir string, name string, args []string, out chan<- string) error {
+	return runCommand(ctx, name, args, out, dir)
+}
+
+func runCommand(ctx context.Context, name string, args []string, out chan<- string, dir string) error {
 	resolvedPath, lookErr := exec.LookPath(name)
 	if lookErr != nil {
 		logx.Tracef("lookup %s: %v", name, lookErr)
@@ -79,6 +90,9 @@ func RunCommand(ctx context.Context, name string, args []string, out chan<- stri
 
 	if resolvedPath != "" {
 		cmd.Path = resolvedPath
+	}
+	if dir != "" {
+		cmd.Dir = dir
 	}
 
 	argsJoined := strings.Join(args, " ")
