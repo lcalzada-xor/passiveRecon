@@ -2,6 +2,7 @@ package sources
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ func TestDNSXInvokesBinaryAndWritesOutput(t *testing.T) {
 
 	originalFinder := dnsxBinFinder
 	originalRunCmd := dnsxRunCmd
+	originalPTR := dnsxPTRLookup
 	dnsxBinFinder = func() (string, error) { return "dnsx", nil }
 	var capturedArgs []string
 	var inputContents string
@@ -35,9 +37,20 @@ func TestDNSXInvokesBinaryAndWritesOutput(t *testing.T) {
 		out <- "vpn.example.com [AAAA] 2001:db8::1"
 		return nil
 	}
+	dnsxPTRLookup = func(ctx context.Context, addr string) ([]string, error) {
+		switch addr {
+		case "203.0.113.10":
+			return []string{"vpn.provider.example."}, nil
+		case "2001:db8::1":
+			return []string{"vpn6.provider.example."}, nil
+		default:
+			return nil, nil
+		}
+	}
 	t.Cleanup(func() {
 		dnsxBinFinder = originalFinder
 		dnsxRunCmd = originalRunCmd
+		dnsxPTRLookup = originalPTR
 	})
 
 	metaCh := make(chan string, 4)
@@ -51,22 +64,45 @@ func TestDNSXInvokesBinaryAndWritesOutput(t *testing.T) {
 		t.Fatalf("unexpected meta output: %v", meta)
 	}
 
-	if len(capturedArgs) < 4 || capturedArgs[0] != "dnsx" {
+	if len(capturedArgs) < 5 || capturedArgs[0] != "dnsx" {
 		t.Fatalf("unexpected args: %v", capturedArgs)
 	}
 	if capturedArgs[1] != "-all" {
 		t.Fatalf("expected -all flag, got %v", capturedArgs)
 	}
-	if capturedArgs[2] != "-l" {
+	if capturedArgs[2] != "-json" {
+		t.Fatalf("expected -json flag, got %v", capturedArgs)
+	}
+	if capturedArgs[3] != "-l" {
 		t.Fatalf("expected -l flag, got %v", capturedArgs)
 	}
 	if got, want := inputContents, "vpn.example.com\ncdn.example.com\n"; got != want {
 		t.Fatalf("unexpected dnsx input (-want +got):\n-%q\n+%q", want, got)
 	}
 
-	output := readFile(t, filepath.Join(dir, "dns", "dns.active"))
-	if !strings.Contains(output, "vpn.example.com [A] 203.0.113.10") {
-		t.Fatalf("expected output to contain dnsx results, got %q", output)
+	output := strings.TrimSpace(readFile(t, filepath.Join(dir, "dns", "dns.active")))
+	lines := strings.Split(output, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 JSON lines, got %d (%q)", len(lines), output)
+	}
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			t.Fatalf("unexpected empty JSON line in output: %q", output)
+		}
+	}
+	var records []dnsxRecord
+	for _, line := range lines {
+		var rec dnsxRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("invalid JSON line %q: %v", line, err)
+		}
+		records = append(records, rec)
+	}
+	if got := records[0].PTR; len(got) == 0 || got[0] != "vpn.provider.example" {
+		t.Fatalf("expected PTR lookup for A record, got %v", records[0].PTR)
+	}
+	if got := records[2].PTR; len(got) == 0 || got[0] != "vpn6.provider.example" {
+		t.Fatalf("expected PTR lookup for AAAA record, got %v", records[2].PTR)
 	}
 }
 
