@@ -38,6 +38,10 @@ func TestProgressBarWrapAndMissingTools(t *testing.T) {
 		t.Fatalf("expected timeout status in buffer, got: %q", buf.String())
 	}
 
+	if !strings.Contains(buf.String(), "ETA") {
+		t.Fatalf("expected ETA information in buffer, got: %q", buf.String())
+	}
+
 	pb.StepDone("toolmissing", "faltante")
 	pb.StepDone("TOOLMISSING", "faltante")
 
@@ -57,7 +61,7 @@ func TestProgressBarStepRunning(t *testing.T) {
 
 	pb.StepRunning("ToolRun")
 
-	if !strings.Contains(buf.String(), "ToolRun (inicio ") {
-		t.Fatalf("expected running status with start time in buffer, got: %q", buf.String())
+	if !strings.Contains(buf.String(), "ToolRun (inicio") {
+		t.Fatalf("expected running status with inicio label in buffer, got: %q", buf.String())
 	}
 }

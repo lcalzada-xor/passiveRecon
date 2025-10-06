@@ -7,15 +7,21 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"passive-rec/internal/runner"
 )
 
+var dnsxTestMu sync.Mutex
+
 func TestDNSXInvokesBinaryAndWritesOutput(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
+
+	dnsxTestMu.Lock()
+	t.Cleanup(func() { dnsxTestMu.Unlock() })
 
 	originalFinder := dnsxBinFinder
 	originalRunCmd := dnsxRunCmd
@@ -111,6 +117,9 @@ func TestDNSXMissingBinary(t *testing.T) {
 
 	dir := t.TempDir()
 
+	dnsxTestMu.Lock()
+	t.Cleanup(func() { dnsxTestMu.Unlock() })
+
 	originalFinder := dnsxBinFinder
 	dnsxBinFinder = func() (string, error) { return "", runner.ErrMissingBinary }
 	t.Cleanup(func() { dnsxBinFinder = originalFinder })
@@ -131,6 +140,9 @@ func TestDNSXSkipsWhenNoDomains(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
+
+	dnsxTestMu.Lock()
+	t.Cleanup(func() { dnsxTestMu.Unlock() })
 
 	originalFinder := dnsxBinFinder
 	dnsxBinFinder = func() (string, error) { return "dnsx", nil }
