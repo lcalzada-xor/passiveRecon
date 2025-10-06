@@ -142,11 +142,6 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 		return err
 	}
 
-	gfDir := filepath.Join(outdir, "linkfindings")
-	if err := os.MkdirAll(gfDir, 0o755); err != nil {
-		return err
-	}
-
 	inputs := []struct {
 		label string
 		path  string
@@ -224,7 +219,7 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 			if err := persistLinkfinderArtifacts(findingsDir, input.label, rawPath, htmlPath, jsonPath); err != nil {
 				recordLinkfinderError(&firstErr, err)
 			}
-			if err := persistLinkfinderGFArtifacts(gfDir, input.label, tmpDir); err != nil {
+			if err := persistLinkfinderGFArtifacts(findingsDir, input.label, tmpDir); err != nil {
 				recordLinkfinderError(&firstErr, err)
 			}
 		}
@@ -430,6 +425,12 @@ func cleanupLinkfinderOutputs(findingsDir string) {
 		"findings.json",
 		"findings.raw",
 		"findings.html",
+		"gf.html.txt",
+		"gf.html.json",
+		"gf.js.txt",
+		"gf.js.json",
+		"gf.crawl.txt",
+		"gf.crawl.json",
 		"undetected.active",
 		"findings.active",
 		"findings.html.raw",
@@ -466,13 +467,13 @@ func persistLinkfinderArtifacts(findingsDir, label, rawPath, htmlPath, jsonPath 
 	return nil
 }
 
-func persistLinkfinderGFArtifacts(gfDir, label, srcDir string) error {
+func persistLinkfinderGFArtifacts(findingsDir, label, srcDir string) error {
 	outputs := []struct {
 		name string
 		dest string
 	}{
-		{name: "gf.txt", dest: filepath.Join(gfDir, fmt.Sprintf("gf.%s.txt", label))},
-		{name: "gf.json", dest: filepath.Join(gfDir, fmt.Sprintf("gf.%s.json", label))},
+		{name: "gf.txt", dest: filepath.Join(findingsDir, fmt.Sprintf("gf.%s.txt", label))},
+		{name: "gf.json", dest: filepath.Join(findingsDir, fmt.Sprintf("gf.%s.json", label))},
 	}
 
 	for _, output := range outputs {

@@ -2,8 +2,8 @@ package sources
 
 import (
 	"context"
-	"fmt"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -340,5 +340,15 @@ func TestLinkFinderEVOIntegrationGeneratesReports(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(findingsDir, name)); err != nil {
 			t.Fatalf("expected intermediate artifact %s: %v", name, err)
 		}
+	}
+
+	for _, name := range []string{"gf.html.txt", "gf.html.json"} {
+		if _, err := os.Stat(filepath.Join(findingsDir, name)); err != nil {
+			t.Fatalf("expected gf artifact %s: %v", name, err)
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(tmp, "linkfindings")); err == nil || !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unexpected legacy linkfindings directory state: err=%v", err)
 	}
 }
