@@ -3,6 +3,7 @@ package sources
 import (
 	"context"
 	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -140,6 +141,60 @@ func TestWriteLinkfinderOutputsCreatesAllFormats(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected %s to be created: %v", name, err)
 		}
+	}
+}
+
+func TestBuildLinkfinderArgsIncludesGF(t *testing.T) {
+	args := buildLinkfinderArgs("input", "example.com", "raw", "html", "json")
+	found := false
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--gf" && i+1 < len(args) && args[i+1] == "all" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected buildLinkfinderArgs to include --gf all, got %v", args)
+	}
+}
+
+func TestPersistLinkfinderGFArtifacts(t *testing.T) {
+	srcDir := t.TempDir()
+	destDir := t.TempDir()
+
+	gfTxt := filepath.Join(srcDir, "gf.txt")
+	gfJSON := filepath.Join(srcDir, "gf.json")
+	if err := os.WriteFile(gfTxt, []byte("match"), 0o644); err != nil {
+		t.Fatalf("failed to write gf.txt: %v", err)
+	}
+	if err := os.WriteFile(gfJSON, []byte("{}"), 0o644); err != nil {
+		t.Fatalf("failed to write gf.json: %v", err)
+	}
+
+	if err := persistLinkfinderGFArtifacts(destDir, "html", srcDir); err != nil {
+		t.Fatalf("persistLinkfinderGFArtifacts returned error: %v", err)
+	}
+
+	wantFiles := []string{
+		filepath.Join(destDir, "gf.html.txt"),
+		filepath.Join(destDir, "gf.html.json"),
+	}
+	for _, name := range wantFiles {
+		if _, err := os.Stat(name); err != nil {
+			t.Fatalf("expected %s to exist: %v", name, err)
+		}
+	}
+
+	if err := os.Remove(gfTxt); err != nil {
+		t.Fatalf("failed to remove gf.txt: %v", err)
+	}
+
+	if err := persistLinkfinderGFArtifacts(destDir, "html", srcDir); err != nil {
+		t.Fatalf("persistLinkfinderGFArtifacts returned error on cleanup: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(destDir, "gf.html.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected gf.html.txt to be removed, got err=%v", err)
 	}
 }
 
