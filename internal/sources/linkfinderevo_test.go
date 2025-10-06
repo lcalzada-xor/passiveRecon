@@ -2,9 +2,11 @@ package sources
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -160,6 +162,63 @@ func TestCleanLinkfinderEndpointLink(t *testing.T) {
 				t.Fatalf("cleanLinkfinderEndpointLink(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestMaybeSampleLinkfinderInputLimitsEntries(t *testing.T) {
+	tmp := t.TempDir()
+
+	var builder strings.Builder
+	total := linkfinderMaxInputEntries + 50
+	for i := 0; i < total; i++ {
+		builder.WriteString(fmt.Sprintf("file://example.com/%d\n", i))
+	}
+
+	path, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmp, "html", []byte(builder.String()))
+	if err != nil {
+		t.Fatalf("maybeSampleLinkfinderInput returned error: %v", err)
+	}
+	if path == "" {
+		t.Fatalf("expected sampling to occur when total=%d", total)
+	}
+	if totalEntries != total {
+		t.Fatalf("unexpected total entries: got %d want %d", totalEntries, total)
+	}
+	if sampledEntries != linkfinderMaxInputEntries {
+		t.Fatalf("unexpected sampled entries: got %d want %d", sampledEntries, linkfinderMaxInputEntries)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read sample file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != linkfinderMaxInputEntries {
+		t.Fatalf("sample file has unexpected number of entries: got %d want %d", len(lines), linkfinderMaxInputEntries)
+	}
+	for _, line := range lines {
+		if strings.TrimSpace(line) != line {
+			t.Fatalf("expected sample lines to be trimmed, got %q", line)
+		}
+	}
+}
+
+func TestMaybeSampleLinkfinderInputNoopWhenBelowLimit(t *testing.T) {
+	tmp := t.TempDir()
+
+	data := []byte("file://example.com/1\nfile://example.com/2\n")
+	path, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmp, "html", data)
+	if err != nil {
+		t.Fatalf("maybeSampleLinkfinderInput returned error: %v", err)
+	}
+	if path != "" {
+		t.Fatalf("expected no sampling, but got path %q", path)
+	}
+	if totalEntries != 2 {
+		t.Fatalf("unexpected total entries: got %d want 2", totalEntries)
+	}
+	if sampledEntries != 2 {
+		t.Fatalf("unexpected sampled entries: got %d want 2", sampledEntries)
 	}
 }
 
