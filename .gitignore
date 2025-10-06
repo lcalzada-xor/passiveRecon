@@ -32,6 +32,8 @@ passive-rec
 **/*_*/domains/
 **/*_*/routes/
 **/*_*/dns/
+# Execution cache files
+**/.passive-cache.json
 
 # env file
 .env

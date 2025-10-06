@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"passive-rec/internal/config"
 	"passive-rec/internal/logx"
@@ -39,11 +40,14 @@ type orchestratorOptions struct {
 	requested map[string]bool
 	bar       *progressBar
 	metrics   *pipelineMetrics
+	cache     *executionCache
+	runHash   string
 }
 
 type pipelineState struct {
 	DomainListFile string
 	DedupedDomains []string
+	DomainsDirty   bool
 }
 
 var defaultPipeline = []toolStep{
@@ -94,6 +98,11 @@ var (
 	defaultSteps     = buildStepMap(defaultPipeline)
 )
 
+const (
+	cacheMaxAge        = 24 * time.Hour
+	cacheSkipBaseLabel = "resultado reutilizado desde cache"
+)
+
 func runPipeline(ctx context.Context, steps []toolStep, opts orchestratorOptions) *pipelineState {
 	state := &pipelineState{DomainListFile: filepath.Join("domains", "domains.passive")}
 
@@ -124,8 +133,34 @@ func executeStep(ctx context.Context, step toolStep, state *pipelineState, opts 
 		}
 		return nil, false
 	}
+
+	if opts.cache != nil && opts.runHash != "" {
+		if step.Name == "dedupe" && state.DomainsDirty {
+			// Nuevos dominios detectados en esta ejecución: no reutilizamos cache.
+		} else if ok, completedAt := opts.cache.ShouldSkip(step.Name, opts.runHash, cacheMaxAge); ok {
+			if step.Name == "dedupe" {
+				if !loadCachedDedupe(state, opts) {
+					logx.Warnf("cache dedupe inválido, se vuelve a ejecutar paso")
+					if err := opts.cache.Invalidate(step.Name); err != nil {
+						logx.Warnf("no se pudo invalidar cache de %s: %v", step.Name, err)
+					}
+				} else {
+					state.DomainsDirty = false
+					announceCacheReuse(step, opts, completedAt)
+					return nil, false
+				}
+			} else {
+				announceCacheReuse(step, opts, completedAt)
+				return nil, false
+			}
+		}
+	}
 	if !shouldRunStep(step, state, opts) {
 		return nil, false
+	}
+
+	if producesDomainData(step.Name) {
+		state.DomainsDirty = true
 	}
 
 	timeout := computeStepTimeout(step, state, opts)
@@ -140,11 +175,21 @@ func executeStep(ctx context.Context, step toolStep, state *pipelineState, opts 
 	}
 
 	wrapped := func() error {
-		if err := task(); err != nil {
+		err := task()
+		if err != nil {
 			if errors.Is(err, runner.ErrMissingBinary) {
 				return runner.ErrMissingBinary
 			}
 			logx.Warnf("source error: %v", err)
+			return nil
+		}
+		if opts.cache != nil && opts.runHash != "" {
+			if markErr := opts.cache.MarkComplete(step.Name, opts.runHash); markErr != nil {
+				logx.Warnf("no se pudo actualizar cache para %s: %v", step.Name, markErr)
+			}
+		}
+		if step.Name == "dedupe" {
+			state.DomainsDirty = false
 		}
 		return nil
 	}
@@ -391,4 +436,60 @@ func notifyUnknownTools(sink sink, bar *progressBar, unknown []string) {
 			bar.StepDone(tool, "desconocido")
 		}
 	}
+}
+
+func announceCacheReuse(step toolStep, opts orchestratorOptions, completedAt time.Time) {
+	if opts.sink != nil {
+		opts.sink.In() <- fmt.Sprintf("meta: %s reutilizado desde cache%s", step.Name, cacheAgeSuffix(completedAt))
+	}
+	if opts.bar != nil {
+		opts.bar.StepDone(step.Name, "cache")
+	}
+	if opts.metrics != nil {
+		opts.metrics.RecordSkip(step.Name, cacheSkipReason(completedAt))
+	}
+}
+
+func cacheAgeSuffix(completedAt time.Time) string {
+	if completedAt.IsZero() {
+		return ""
+	}
+	age := time.Since(completedAt)
+	if age < 0 {
+		age = 0
+	}
+	return fmt.Sprintf(" (edad %s)", age.Round(time.Second))
+}
+
+func cacheSkipReason(completedAt time.Time) string {
+	if completedAt.IsZero() {
+		return cacheSkipBaseLabel
+	}
+	age := time.Since(completedAt)
+	if age < 0 {
+		age = 0
+	}
+	return fmt.Sprintf("%s (%s)", cacheSkipBaseLabel, age.Round(time.Second))
+}
+
+func producesDomainData(stepName string) bool {
+	switch stepName {
+	case "amass", "subfinder", "assetfinder", "rdap", "crtsh", "censys":
+		return true
+	default:
+		return false
+	}
+}
+
+func loadCachedDedupe(state *pipelineState, opts orchestratorOptions) bool {
+	if opts.cfg == nil {
+		return false
+	}
+	domains, err := readDedupeFile(opts.cfg.OutDir)
+	if err != nil {
+		return false
+	}
+	state.DedupedDomains = domains
+	state.DomainListFile = filepath.Join("domains", "domains.dedupe")
+	return true
 }
