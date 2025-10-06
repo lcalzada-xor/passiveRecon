@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -209,25 +211,39 @@ type Sink struct {
 	scope                 *netutil.Scope
 }
 
+func ensureOutputFile(base, subdir, name string) error {
+	targetDir := base
+	if subdir != "" {
+		targetDir = filepath.Join(base, subdir)
+	}
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return err
+	}
+	path := filepath.Join(targetDir, name)
+	if info, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			f, createErr := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o644)
+			if createErr != nil {
+				return createErr
+			}
+			return f.Close()
+		}
+		return err
+	} else if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s exists and is not a regular file", path)
+	}
+	return nil
+}
+
 func NewSink(outdir string, active bool, target string, lineBuffer int) (*Sink, error) {
 	if lineBuffer <= 0 {
 		lineBuffer = defaultLineBuffer
 	}
-	var opened []sinkWriter
-	newWriter := func(subdir, name string) (*out.Writer, error) {
-		targetDir := outdir
-		if subdir != "" {
-			targetDir = filepath.Join(outdir, subdir)
-		}
-		w, err := out.New(targetDir, name)
-		if err != nil {
-			for _, ow := range opened {
-				_ = ow.Close()
-			}
+	newWriter := func(subdir, name string) (sinkWriter, error) {
+		if err := ensureOutputFile(outdir, subdir, name); err != nil {
 			return nil, err
 		}
-		opened = append(opened, w)
-		return w, nil
+		return newLazyWriter(outdir, subdir, name), nil
 	}
 
 	if err := os.MkdirAll(filepath.Join(outdir, "dns"), 0o755); err != nil {
