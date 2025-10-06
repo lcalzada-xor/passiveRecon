@@ -1,15 +1,12 @@
 package app
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"sync"
-
-	"passive-rec/internal/runner"
+	"time"
 )
 
 type progressBar struct {
@@ -22,6 +19,7 @@ type progressBar struct {
 	out          io.Writer
 	lastRendered string
 	missing      []string
+	startTimes   map[string]time.Time
 }
 
 func newProgressBar(total int, out io.Writer) *progressBar {
@@ -53,17 +51,7 @@ func (p *progressBar) Wrap(tool string, fn func() error) func() error {
 	return func() error {
 		p.StepRunning(tool)
 		err := fn()
-		status := "ok"
-		if err != nil {
-			switch {
-			case errors.Is(err, runner.ErrMissingBinary):
-				status = "faltante"
-			case errors.Is(err, context.DeadlineExceeded):
-				status = "timeout"
-			default:
-				status = "error"
-			}
-		}
+		status := classifyStepError(err)
 		p.StepDone(tool, status)
 		return err
 	}
@@ -80,7 +68,13 @@ func (p *progressBar) StepRunning(tool string) {
 		return
 	}
 
-	p.renderLocked(tool, "ejecutando")
+	if p.startTimes == nil {
+		p.startTimes = make(map[string]time.Time)
+	}
+	now := time.Now()
+	p.startTimes[tool] = now
+
+	p.renderLocked(tool, fmt.Sprintf("inicio %s", now.Format("15:04:05")))
 }
 
 func (p *progressBar) StepDone(tool, status string) {
@@ -115,7 +109,18 @@ func (p *progressBar) StepDone(tool, status string) {
 		}
 	}
 
-	p.renderLocked(tool, status)
+	var label string
+	start, ok := p.startTimes[tool]
+	if ok && !start.IsZero() && status != "omitido" {
+		end := time.Now()
+		duration := end.Sub(start)
+		label = fmt.Sprintf("%s %s fin %s", status, formatShortDuration(duration), end.Format("15:04:05"))
+	} else {
+		label = status
+	}
+	delete(p.startTimes, tool)
+
+	p.renderLocked(tool, label)
 	if p.current == p.total {
 		fmt.Fprintln(p.out)
 		p.lastLineLen = 0
@@ -212,4 +217,14 @@ func (w *progressWriter) Write(data []byte) (int, error) {
 	}
 
 	return len(data), nil
+}
+
+func formatShortDuration(d time.Duration) string {
+	if d <= 0 {
+		return "0s"
+	}
+	if d < time.Second {
+		return d.Round(time.Millisecond).String()
+	}
+	return d.Round(10 * time.Millisecond).String()
 }

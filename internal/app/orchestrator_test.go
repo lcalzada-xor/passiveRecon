@@ -93,8 +93,8 @@ func TestRunPipelineConcurrentGroupProgress(t *testing.T) {
 	if len(observed) != 2 {
 		t.Fatalf("expected both sources to start, got %v", observed)
 	}
-	if count := strings.Count(buf.String(), "ejecutando"); count < 2 {
-		t.Fatalf("expected progress bar to report running steps, got %q", buf.String())
+	if count := strings.Count(buf.String(), "(inicio "); count < 2 {
+		t.Fatalf("expected progress bar to report running steps with timestamps, got %q", buf.String())
 	}
 
 	close(release)
@@ -104,10 +104,10 @@ func TestRunPipelineConcurrentGroupProgress(t *testing.T) {
 		t.Fatalf("expected progress bar to finish all steps, got %d/%d", pb.current, pb.total)
 	}
 
-	if !strings.Contains(buf.String(), "amass (ok)") {
+	if !strings.Contains(buf.String(), "amass (ok") {
 		t.Fatalf("expected amass completion in progress output, got %q", buf.String())
 	}
-	if !strings.Contains(buf.String(), "subfinder (ok)") {
+	if !strings.Contains(buf.String(), "subfinder (ok") {
 		t.Fatalf("expected subfinder completion in progress output, got %q", buf.String())
 	}
 }

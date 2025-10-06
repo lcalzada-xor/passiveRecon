@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"passive-rec/internal/config"
 	"passive-rec/internal/logx"
@@ -70,14 +71,27 @@ func Run(cfg *config.Config) error {
 		bar:       bar,
 	}
 
+	buildStepsStart := time.Now()
 	var steps []toolStep
 	for _, name := range ordered {
 		if step, ok := defaultSteps[name]; ok {
 			steps = append(steps, step)
 		}
 	}
+	buildStepsDuration := time.Since(buildStepsStart)
+	logx.Infof("orquestador: armado de steps en %s", buildStepsDuration.Round(time.Millisecond))
 
+	metrics := newPipelineMetrics()
+	opts.metrics = metrics
+
+	pipelineStart := time.Now()
 	runPipeline(ctx, steps, opts)
+	pipelineDuration := time.Since(pipelineStart)
+	logx.Infof("orquestador: pipeline ejecutado en %s", pipelineDuration.Round(time.Millisecond))
+
+	if metrics != nil {
+		logPipelineMetrics(metrics)
+	}
 
 	sink.Flush()
 	executePostProcessing(ctx, cfg, sink, bar, unknown)

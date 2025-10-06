@@ -20,21 +20,21 @@ func TestProgressBarWrapAndMissingTools(t *testing.T) {
 	if err := pb.Wrap("ToolOk", func() error { return nil })(); err != nil {
 		t.Fatalf("wrap ok returned error: %v", err)
 	}
-	if !strings.Contains(buf.String(), "ToolOk (ok)") {
+	if !strings.Contains(buf.String(), "ToolOk (ok") {
 		t.Fatalf("expected ok status in buffer, got: %q", buf.String())
 	}
 
 	if err := pb.Wrap("ToolMissing", func() error { return runner.ErrMissingBinary })(); err == nil {
 		t.Fatalf("expected missing binary error")
 	}
-	if !strings.Contains(buf.String(), "ToolMissing (faltante)") {
+	if !strings.Contains(buf.String(), "ToolMissing (faltante") {
 		t.Fatalf("expected missing status in buffer, got: %q", buf.String())
 	}
 
 	if err := pb.Wrap("ToolTimeout", func() error { return context.DeadlineExceeded })(); err == nil {
 		t.Fatalf("expected deadline exceeded error")
 	}
-	if !strings.Contains(buf.String(), "ToolTimeout (timeout)") {
+	if !strings.Contains(buf.String(), "ToolTimeout (timeout") {
 		t.Fatalf("expected timeout status in buffer, got: %q", buf.String())
 	}
 
@@ -57,7 +57,7 @@ func TestProgressBarStepRunning(t *testing.T) {
 
 	pb.StepRunning("ToolRun")
 
-	if !strings.Contains(buf.String(), "ToolRun (ejecutando)") {
-		t.Fatalf("expected running status in buffer, got: %q", buf.String())
+	if !strings.Contains(buf.String(), "ToolRun (inicio ") {
+		t.Fatalf("expected running status with start time in buffer, got: %q", buf.String())
 	}
 }
