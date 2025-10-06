@@ -216,7 +216,8 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 			recordLinkfinderError(&firstErr, err)
 		}
 
-		if runErr == nil {
+		shouldPersist := runErr == nil || errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded)
+		if shouldPersist {
 			if err := persistLinkfinderArtifacts(findingsDir, input.label, rawPath, htmlPath, jsonPath); err != nil {
 				recordLinkfinderError(&firstErr, err)
 			}
@@ -227,11 +228,13 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 
 		if runErr != nil {
 			recordLinkfinderError(&firstErr, runErr)
-			os.RemoveAll(tmpDir)
-			break
 		}
 
 		os.RemoveAll(tmpDir)
+
+		if runErr != nil {
+			break
+		}
 	}
 
 	if err := writeLinkfinderOutputs(outdir, aggregate, out); err != nil {
