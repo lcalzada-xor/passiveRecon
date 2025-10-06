@@ -27,7 +27,7 @@ var (
 )
 
 const (
-	linkfinderMaxInputEntries  = 500
+	linkfinderMaxInputEntries  = 200
 	linkfinderEntriesPerSecond = 15
 )
 
@@ -331,7 +331,7 @@ func writeLinkfinderOutputs(outdir string, aggregate *linkfinderAggregate, out c
 }
 
 func buildLinkfinderArgs(inputPath, target, rawPath, htmlPath, jsonPath string) []string {
-	args := []string{"-i", inputPath, "-d", "-max-depth", "5", "--insecure"}
+	args := []string{"-i", inputPath, "-d", "-max-depth", "2", "--insecure"}
 	scope := normalizeScope(target)
 	if scope != "" {
 		args = append(args, "-scope", scope, "--scope-include-subdomains")
