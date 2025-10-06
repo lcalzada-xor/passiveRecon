@@ -2,6 +2,7 @@ package report
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -85,7 +86,7 @@ func Generate(ctx context.Context, cfg *config.Config, files SinkFiles) error {
 		if err != nil {
 			return fmt.Errorf("report: routes active: %w", err)
 		}
-		activeDNS, err := readLines(ctx, files.ActiveDNS)
+		activeDNSRecords, err := readDNSRecords(ctx, files.ActiveDNS)
 		if err != nil {
 			return fmt.Errorf("report: dns active: %w", err)
 		}
@@ -101,12 +102,12 @@ func Generate(ctx context.Context, cfg *config.Config, files SinkFiles) error {
 		active = activeData{
 			RawDomains: activeDomains,
 			RawRoutes:  activeRoutes,
-			RawDNS:     activeDNS,
+			RawDNS:     formatDNSRecords(activeDNSRecords),
 			Meta:       activeMeta,
 		}
 		active.Domains = buildDomainStats(activeDomains)
 		active.Routes = buildRouteStats(activeRoutes)
-		active.DNS = buildDNSStats(activeDNS)
+		active.DNS = buildDNSStats(activeDNSRecords)
 		active.Certificates = buildCertStats(activeCerts)
 		active.Highlights = buildHighlights(active.Domains, active.Routes, active.Certificates)
 	}
@@ -243,6 +244,14 @@ type dnsStats struct {
 	RecordTypes []countItem
 }
 
+type dnsRecord struct {
+	Host  string   `json:"host,omitempty"`
+	Type  string   `json:"type,omitempty"`
+	Value string   `json:"value,omitempty"`
+	Raw   string   `json:"raw,omitempty"`
+	PTR   []string `json:"ptr,omitempty"`
+}
+
 const (
 	topN               = 10
 	certExpirySoonDays = 30
@@ -295,6 +304,72 @@ func readLines(ctx context.Context, path string) ([]string, error) {
 		lines[i] = strings.TrimSpace(ln)
 	}
 	return lines, nil
+}
+
+func readDNSRecords(ctx context.Context, path string) ([]dnsRecord, error) {
+	if path == "" {
+		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	contents := strings.TrimSpace(string(data))
+	if contents == "" {
+		return nil, nil
+	}
+	lines := strings.Split(contents, "\n")
+	records := make([]dnsRecord, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		var record dnsRecord
+		if err := json.Unmarshal([]byte(trimmed), &record); err != nil {
+			return nil, fmt.Errorf("report: decode dns record: %w", err)
+		}
+		if record.Raw == "" {
+			record.Raw = trimmed
+		}
+		records = append(records, record)
+	}
+	return records, nil
+}
+
+func formatDNSRecords(records []dnsRecord) []string {
+	if len(records) == 0 {
+		return nil
+	}
+	formatted := make([]string, 0, len(records))
+	for _, record := range records {
+		host := strings.TrimSpace(record.Host)
+		recordType := strings.TrimSpace(record.Type)
+		value := strings.TrimSpace(record.Value)
+		raw := strings.TrimSpace(record.Raw)
+		var display string
+		if host != "" && recordType != "" {
+			display = fmt.Sprintf("%s [%s]", host, recordType)
+			if value != "" {
+				display += " " + value
+			}
+		} else if raw != "" {
+			display = raw
+		} else {
+			continue
+		}
+		if len(record.PTR) > 0 {
+			display = fmt.Sprintf("%s (PTR: %s)", display, strings.Join(record.PTR, ", "))
+		}
+		formatted = append(formatted, display)
+	}
+	return formatted
 }
 
 func buildDomainStats(domains []string) domainStats {
@@ -358,33 +433,41 @@ func buildDomainStats(domains []string) domainStats {
 	return stats
 }
 
-func buildDNSStats(records []string) dnsStats {
+func buildDNSStats(records []dnsRecord) dnsStats {
 	stats := dnsStats{}
 	if len(records) == 0 {
 		return stats
 	}
 	typeCounts := make(map[string]int)
 	seenHosts := make(map[string]struct{})
-	for _, raw := range records {
-		trimmed := strings.TrimSpace(raw)
-		if trimmed == "" {
+	for _, record := range records {
+		trimmedRaw := strings.TrimSpace(record.Raw)
+		host := strings.TrimSpace(record.Host)
+		if host == "" && trimmedRaw == "" {
 			continue
 		}
 		stats.Total++
-		host := trimmed
-		if idx := strings.IndexAny(trimmed, " \t"); idx != -1 {
-			host = trimmed[:idx]
+		candidate := host
+		if candidate == "" {
+			candidate = trimmedRaw
+			if idx := strings.IndexAny(candidate, " \t"); idx != -1 {
+				candidate = candidate[:idx]
+			}
 		}
-		if normalized := netutil.NormalizeDomain(host); normalized != "" {
+		if normalized := netutil.NormalizeDomain(candidate); normalized != "" {
 			seenHosts[normalized] = struct{}{}
 		}
-		start := strings.Index(trimmed, "[")
-		end := strings.Index(trimmed[start+1:], "]")
-		if start >= 0 && end >= 0 {
-			recordType := strings.TrimSpace(trimmed[start+1 : start+1+end])
-			if recordType != "" {
-				typeCounts[recordType]++
+		recordType := strings.TrimSpace(record.Type)
+		if recordType == "" && trimmedRaw != "" {
+			if start := strings.Index(trimmedRaw, "["); start >= 0 {
+				if end := strings.Index(trimmedRaw[start+1:], "]"); end >= 0 {
+					end += start + 1
+					recordType = strings.TrimSpace(trimmedRaw[start+1 : end])
+				}
 			}
+		}
+		if recordType != "" {
+			typeCounts[recordType]++
 		}
 	}
 	stats.UniqueHosts = len(seenHosts)
@@ -1401,4 +1484,3 @@ const reportTemplate = `<!DOCTYPE html>
         </div>
 </body>
 </html>`
-

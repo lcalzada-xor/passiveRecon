@@ -3,7 +3,9 @@ package sources
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +18,18 @@ import (
 var (
 	dnsxBinFinder = runner.DNSXBin
 	dnsxRunCmd    = runner.RunCommand
+	dnsxPTRLookup = func(ctx context.Context, addr string) ([]string, error) {
+		return net.DefaultResolver.LookupAddr(ctx, addr)
+	}
 )
+
+type dnsxRecord struct {
+	Host  string   `json:"host,omitempty"`
+	Type  string   `json:"type,omitempty"`
+	Value string   `json:"value,omitempty"`
+	Raw   string   `json:"raw,omitempty"`
+	PTR   []string `json:"ptr,omitempty"`
+}
 
 // DNSX executes ProjectDiscovery's dnsx against the provided domains and writes
 // the raw output to dns/dns.active within outDir. Any informational messages are
@@ -103,6 +116,9 @@ func DNSX(ctx context.Context, domains []string, outDir string, out chan<- strin
 	records := 0
 	seenHosts := make(map[string]struct{})
 
+	encoder := json.NewEncoder(writer)
+	encoder.SetEscapeHTML(false)
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -112,28 +128,37 @@ func DNSX(ctx context.Context, domains []string, outDir string, out chan<- strin
 				continue
 			}
 			records++
-			host := trimmed
-			if idx := strings.IndexAny(trimmed, " \t"); idx != -1 {
-				host = trimmed[:idx]
+			host, recordType, value := parseDNSXLine(trimmed)
+			record := dnsxRecord{Raw: trimmed}
+			if host != "" {
+				record.Host = host
 			}
-			if normalized := netutil.NormalizeDomain(host); normalized != "" {
+			if recordType != "" {
+				record.Type = recordType
+			}
+			if value != "" {
+				record.Value = value
+			}
+			if normalized := extractNormalizedHost(host, trimmed); normalized != "" {
 				seenHosts[normalized] = struct{}{}
+			}
+			if recordType != "" && (strings.EqualFold(recordType, "A") || strings.EqualFold(recordType, "AAAA")) {
+				ptrs := resolvePTRs(ctx, value)
+				if len(ptrs) > 0 {
+					record.PTR = ptrs
+				}
 			}
 			if writeErr != nil {
 				continue
 			}
-			if _, err := writer.WriteString(trimmed); err != nil {
-				writeErr = err
-				continue
-			}
-			if err := writer.WriteByte('\n'); err != nil {
+			if err := encoder.Encode(record); err != nil {
 				writeErr = err
 				continue
 			}
 		}
 	}()
 
-	execErr := dnsxRunCmd(ctx, bin, []string{"-all", "-l", tmpFile.Name()}, lineCh)
+	execErr := dnsxRunCmd(ctx, bin, []string{"-all", "-json", "-l", tmpFile.Name()}, lineCh)
 	close(lineCh)
 	wg.Wait()
 
@@ -155,4 +180,101 @@ func DNSX(ctx context.Context, domains []string, outDir string, out chan<- strin
 	}
 
 	return nil
+}
+
+func parseDNSXLine(line string) (host, recordType, value string) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return "", "", ""
+	}
+	host = trimmed
+	start := strings.Index(trimmed, "[")
+	if start == -1 {
+		return host, "", ""
+	}
+	end := strings.Index(trimmed[start+1:], "]")
+	if end == -1 {
+		return strings.TrimSpace(trimmed[:start]), "", strings.TrimSpace(trimmed[start+1:])
+	}
+	end += start + 1
+	host = strings.TrimSpace(trimmed[:start])
+	recordType = strings.TrimSpace(trimmed[start+1 : end])
+	if end+1 < len(trimmed) {
+		value = strings.TrimSpace(trimmed[end+1:])
+	}
+	return host, recordType, value
+}
+
+func extractNormalizedHost(host, raw string) string {
+	if normalized := netutil.NormalizeDomain(host); normalized != "" {
+		return normalized
+	}
+	candidate := strings.TrimSpace(raw)
+	if idx := strings.IndexAny(candidate, " \t"); idx != -1 {
+		candidate = candidate[:idx]
+	}
+	return netutil.NormalizeDomain(candidate)
+}
+
+func resolvePTRs(ctx context.Context, value string) []string {
+	ips := extractIPs(value)
+	if len(ips) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	var out []string
+	for _, ip := range ips {
+		if ctx != nil {
+			if err := ctx.Err(); err != nil {
+				break
+			}
+		}
+		ptrs, err := dnsxPTRLookup(ctx, ip)
+		if err != nil {
+			continue
+		}
+		for _, ptr := range ptrs {
+			cleaned := cleanPTR(ptr)
+			if cleaned == "" {
+				continue
+			}
+			if _, ok := seen[cleaned]; ok {
+				continue
+			}
+			seen[cleaned] = struct{}{}
+			out = append(out, cleaned)
+		}
+	}
+	return out
+}
+
+func extractIPs(value string) []string {
+	if value == "" {
+		return nil
+	}
+	var ips []string
+	fields := strings.Fields(value)
+	for _, field := range fields {
+		cleaned := strings.Trim(field, "\"'()[]{}<>,;")
+		if cleaned == "" {
+			continue
+		}
+		if ip := net.ParseIP(cleaned); ip != nil {
+			ips = append(ips, cleaned)
+		}
+	}
+	return ips
+}
+
+func cleanPTR(value string) string {
+	if value == "" {
+		return ""
+	}
+	cleaned := strings.TrimSpace(value)
+	cleaned = strings.TrimSuffix(cleaned, ".")
+	cleaned = strings.TrimSpace(cleaned)
+	if cleaned == "" {
+		return ""
+	}
+	return strings.ToLower(cleaned)
 }

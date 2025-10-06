@@ -2,6 +2,7 @@ package report
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -133,7 +134,17 @@ func TestGenerateIncludesActiveData(t *testing.T) {
 	activeRoute := "http://vpn-admin.example.com/login [200]"
 	writeFixture(t, filepath.Join(dir, "domains", "domains.active"), activeDomain)
 	writeFixture(t, filepath.Join(dir, "routes", "routes.active"), activeRoute)
-	writeFixture(t, filepath.Join(dir, "dns", "dns.active"), "vpn-admin.example.com [A] 203.0.113.10\n")
+	dnsJSON, err := json.Marshal(dnsRecord{
+		Host:  "vpn-admin.example.com",
+		Type:  "A",
+		Value: "203.0.113.10",
+		Raw:   "vpn-admin.example.com [A] 203.0.113.10",
+		PTR:   []string{"edge.provider.example"},
+	})
+	if err != nil {
+		t.Fatalf("marshal dns record: %v", err)
+	}
+	writeFixture(t, filepath.Join(dir, "dns", "dns.active"), string(dnsJSON)+"\n")
 	writeFixture(t, filepath.Join(dir, "meta.active"), "httpx(active): 1/1 ok\n")
 
 	cfg := &config.Config{Target: "example.com", OutDir: dir, Active: true}
@@ -153,7 +164,7 @@ func TestGenerateIncludesActiveData(t *testing.T) {
 		activeDomain,
 		activeRoute,
 		"Registros DNS",
-		"vpn-admin.example.com [A] 203.0.113.10",
+		"vpn-admin.example.com [A] 203.0.113.10 (PTR: edge.provider.example)",
 		"httpx(active): 1/1 ok",
 	}
 	for _, want := range checks {
@@ -194,11 +205,11 @@ func TestBuildDomainStatsSkipsEmpty(t *testing.T) {
 func TestBuildDNSStats(t *testing.T) {
 	t.Parallel()
 
-	stats := buildDNSStats([]string{
-		"api.example.com [A] 1.1.1.1",
-		"api.example.com [AAAA] ::1",
-		"cdn.example.com [CNAME] edge.example.net",
-		" ",
+	stats := buildDNSStats([]dnsRecord{
+		{Host: "api.example.com", Type: "A", Value: "1.1.1.1", Raw: "api.example.com [A] 1.1.1.1"},
+		{Host: "api.example.com", Type: "AAAA", Value: "::1", Raw: "api.example.com [AAAA] ::1"},
+		{Host: "cdn.example.com", Type: "CNAME", Value: "edge.example.net", Raw: "cdn.example.com [CNAME] edge.example.net"},
+		{Raw: " "},
 	})
 	if stats.Total != 3 {
 		t.Fatalf("Total = %d, want 3", stats.Total)
