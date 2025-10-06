@@ -144,6 +144,29 @@ func TestRDAPFetch(t *testing.T) {
 	}
 }
 
+func TestNormalizeRDAPDomain(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"example.com":               "example.com",
+		"*.example.com":             "example.com",
+		"*example.com":              "example.com",
+		"https://*.example.com":     "example.com",
+		"https://*example.com":      "example.com",
+		"":                          "",
+		"invalid":                   "",
+		"*.sub.*.example.com":       "sub.example.com",
+		"https://*.sub.example.com": "sub.example.com",
+	}
+
+	for input, want := range cases {
+		got := normalizeRDAPDomain(input)
+		if got != want {
+			t.Fatalf("normalizeRDAPDomain(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func diffStrings(got, want []string) string {
 	if len(got) != len(want) {
 		return "length mismatch"
