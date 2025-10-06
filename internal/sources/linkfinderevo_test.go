@@ -2,8 +2,8 @@ package sources
 
 import (
 	"context"
-	"fmt"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,6 +16,15 @@ import (
 	"passive-rec/internal/routes"
 )
 
+func sortedCopy(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	cp := append([]string(nil), values...)
+	sort.Strings(cp)
+	return cp
+}
+
 func TestClassifyLinkfinderEndpoint(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -23,12 +32,14 @@ func TestClassifyLinkfinderEndpoint(t *testing.T) {
 		wantJS     bool
 		wantHTML   bool
 		undetected bool
+		wantImage  bool
 		wantCats   []routes.Category
 	}{
 		{name: "javascript absolute", input: "https://example.com/app/main.js", wantJS: true},
 		{name: "html absolute", input: "https://example.com/index.html", wantHTML: true},
+		{name: "image absolute", input: "https://example.com/static/logo.png", wantImage: true},
 		{name: "relative path", input: "api/v1/users", undetected: true},
-		{name: "svg relative", input: "logo.svg", undetected: true, wantCats: []routes.Category{routes.CategorySVG}},
+		{name: "svg relative", input: "logo.svg", undetected: true, wantImage: true, wantCats: []routes.Category{routes.CategorySVG}},
 		{name: "wasm", input: "https://example.com/app.wasm", wantCats: []routes.Category{routes.CategoryWASM}},
 	}
 
@@ -43,6 +54,9 @@ func TestClassifyLinkfinderEndpoint(t *testing.T) {
 			}
 			if got.undetected != tt.undetected {
 				t.Fatalf("undetected mismatch: got %v want %v", got.undetected, tt.undetected)
+			}
+			if got.isImage != tt.wantImage {
+				t.Fatalf("isImage mismatch: got %v want %v", got.isImage, tt.wantImage)
 			}
 			if diff := cmp.Diff(tt.wantCats, got.categories); diff != "" {
 				t.Fatalf("categories mismatch (-want +got):\n%s", diff)
@@ -65,7 +79,7 @@ func TestEmitLinkfinderFindingsFeedsCategories(t *testing.T) {
 	}}
 
 	out := make(chan string, 20)
-	undetected, err := emitLinkfinderFindings(reports, out)
+	result, err := emitLinkfinderFindings(reports, out)
 	if err != nil {
 		t.Fatalf("emitLinkfinderFindings returned error: %v", err)
 	}
@@ -85,6 +99,7 @@ func TestEmitLinkfinderFindingsFeedsCategories(t *testing.T) {
 		"active: https://example.com/static/app.js",
 		"active: api: https://example.com/openapi.json",
 		"active: crawl: https://example.com/sitemap.xml",
+		"active: html: logo.svg",
 		"active: js: https://example.com/static/app.js",
 		"active: json: https://example.com/config.json",
 		"active: meta-route: https://example.com/config.json",
@@ -98,9 +113,33 @@ func TestEmitLinkfinderFindingsFeedsCategories(t *testing.T) {
 		t.Fatalf("unexpected lines (-want +got):\n%s", diff)
 	}
 
-	sort.Strings(undetected)
-	if diff := cmp.Diff([]string{"logo.svg"}, undetected); diff != "" {
+	sort.Strings(result.Undetected)
+	if diff := cmp.Diff([]string{"logo.svg"}, result.Undetected); diff != "" {
 		t.Fatalf("unexpected undetected entries (-want +got):\n%s", diff)
+	}
+
+	if diff := cmp.Diff([]string{
+		"https://example.com/app.wasm",
+		"https://example.com/config.json",
+		"https://example.com/openapi.json",
+		"https://example.com/sitemap.xml",
+		"https://example.com/static/app.js",
+		"logo.svg",
+	}, sortedCopy(result.Routes)); diff != "" {
+		t.Fatalf("unexpected routes list (-want +got):\n%s", diff)
+	}
+
+	if diff := cmp.Diff([]string{"https://example.com/static/app.js"}, sortedCopy(result.JS)); diff != "" {
+		t.Fatalf("unexpected JS routes (-want +got):\n%s", diff)
+	}
+
+	if diff := cmp.Diff([]string{"logo.svg"}, sortedCopy(result.Images)); diff != "" {
+		t.Fatalf("unexpected image routes (-want +got):\n%s", diff)
+	}
+
+	svgRoutes := sortedCopy(result.Categories[routes.CategorySVG])
+	if diff := cmp.Diff([]string{"logo.svg"}, svgRoutes); diff != "" {
+		t.Fatalf("unexpected svg routes (-want +got):\n%s", diff)
 	}
 }
 
@@ -196,6 +235,94 @@ func TestPersistLinkfinderGFArtifacts(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(destDir, "gf.html.txt")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected gf.html.txt to be removed, got err=%v", err)
 	}
+}
+
+func TestPersistLinkfinderActiveOutputsMergesEntries(t *testing.T) {
+	tmp := t.TempDir()
+
+	existingRoutes := filepath.Join(tmp, "routes", "routes.active")
+	if err := os.MkdirAll(filepath.Dir(existingRoutes), 0o755); err != nil {
+		t.Fatalf("failed to create routes dir: %v", err)
+	}
+	if err := os.WriteFile(existingRoutes, []byte("https://existing.example\n"), 0o644); err != nil {
+		t.Fatalf("failed to seed routes.active: %v", err)
+	}
+
+	emission := linkfinderEmissionResult{
+		Routes: []string{"https://existing.example", "https://example.com/new"},
+		JS:     []string{"https://example.com/app.js"},
+		HTML:   []string{"https://example.com/index.html"},
+		Images: []string{"https://example.com/logo.png"},
+		Categories: map[routes.Category][]string{
+			routes.CategoryJSON:  []string{"https://example.com/config.json"},
+			routes.CategorySVG:   []string{"https://example.com/icon.svg"},
+			routes.CategoryCrawl: []string{"https://example.com/sitemap.xml"},
+		},
+	}
+
+	if err := persistLinkfinderActiveOutputs(tmp, emission); err != nil {
+		t.Fatalf("persistLinkfinderActiveOutputs returned error: %v", err)
+	}
+
+	gotRoutes := readLinesFromFile(t, existingRoutes)
+	if diff := cmp.Diff([]string{
+		"https://example.com/new",
+		"https://existing.example",
+	}, gotRoutes); diff != "" {
+		t.Fatalf("unexpected routes.active contents (-want +got):\n%s", diff)
+	}
+
+	jsPath := filepath.Join(tmp, "routes", "js", "js.active")
+	gotJS := readLinesFromFile(t, jsPath)
+	if diff := cmp.Diff([]string{"https://example.com/app.js"}, gotJS); diff != "" {
+		t.Fatalf("unexpected js.active contents (-want +got):\n%s", diff)
+	}
+
+	imagesPath := filepath.Join(tmp, "routes", "images", "images.active")
+	gotImages := readLinesFromFile(t, imagesPath)
+	if diff := cmp.Diff([]string{"https://example.com/logo.png"}, gotImages); diff != "" {
+		t.Fatalf("unexpected images.active contents (-want +got):\n%s", diff)
+	}
+
+	jsonPath := filepath.Join(tmp, "routes", "json", "json.active")
+	gotJSON := readLinesFromFile(t, jsonPath)
+	if diff := cmp.Diff([]string{"https://example.com/config.json"}, gotJSON); diff != "" {
+		t.Fatalf("unexpected json.active contents (-want +got):\n%s", diff)
+	}
+
+	svgPath := filepath.Join(tmp, "routes", "svg", "svg.active")
+	gotSVG := readLinesFromFile(t, svgPath)
+	if diff := cmp.Diff([]string{"https://example.com/icon.svg"}, gotSVG); diff != "" {
+		t.Fatalf("unexpected svg.active contents (-want +got):\n%s", diff)
+	}
+
+	crawlPath := filepath.Join(tmp, "routes", "crawl", "crawl.active")
+	gotCrawl := readLinesFromFile(t, crawlPath)
+	if diff := cmp.Diff([]string{"https://example.com/sitemap.xml"}, gotCrawl); diff != "" {
+		t.Fatalf("unexpected crawl.active contents (-want +got):\n%s", diff)
+	}
+}
+
+func readLinesFromFile(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", path, err)
+	}
+	lines := strings.Split(string(data), "\n")
+	var result []string
+	for _, ln := range lines {
+		trimmed := strings.TrimSpace(ln)
+		if trimmed == "" {
+			continue
+		}
+		result = append(result, trimmed)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func TestCleanLinkfinderEndpointLink(t *testing.T) {
