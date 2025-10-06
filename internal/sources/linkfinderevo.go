@@ -1,6 +1,7 @@
 package sources
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -284,12 +285,16 @@ func writeLinkfinderOutputs(outdir string, aggregate *linkfinderAggregate, out c
 		return err
 	}
 
-	undetected, err := emitLinkfinderFindings(reports, out)
+	emission, err := emitLinkfinderFindings(reports, out)
 	if err != nil {
 		return err
 	}
 
-	if err := writeLinkfinderUndetected(filepath.Join(findingsDir, "undetected.active"), undetected); err != nil {
+	if err := writeLinkfinderUndetected(filepath.Join(findingsDir, "undetected.active"), emission.Undetected); err != nil {
+		return err
+	}
+
+	if err := persistLinkfinderActiveOutputs(outdir, emission); err != nil {
 		return err
 	}
 
@@ -614,10 +619,13 @@ func writeLinkfinderHTML(path string, payload linkfinderPayload) error {
 	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
 
-func emitLinkfinderFindings(reports []linkfinderReport, out chan<- string) ([]string, error) {
+func emitLinkfinderFindings(reports []linkfinderReport, out chan<- string) (linkfinderEmissionResult, error) {
+	result := linkfinderEmissionResult{Categories: make(map[routes.Category][]string)}
 	seenRoutes := make(map[string]struct{})
 	seenJS := make(map[string]struct{})
 	seenHTML := make(map[string]struct{})
+	seenHTMLTargets := make(map[string]struct{})
+	seenImages := make(map[string]struct{})
 	seenCategories := make(map[routes.Category]map[string]struct{})
 	undetectedSet := make(map[string]struct{})
 
@@ -630,6 +638,7 @@ func emitLinkfinderFindings(reports []linkfinderReport, out chan<- string) ([]st
 			if _, ok := seenRoutes[link]; !ok {
 				out <- "active: " + link
 				seenRoutes[link] = struct{}{}
+				result.Routes = append(result.Routes, link)
 			}
 
 			classification := classifyLinkfinderEndpoint(link)
@@ -637,12 +646,25 @@ func emitLinkfinderFindings(reports []linkfinderReport, out chan<- string) ([]st
 				if _, ok := seenJS[link]; !ok {
 					out <- "active: js: " + link
 					seenJS[link] = struct{}{}
+					result.JS = append(result.JS, link)
 				}
 			}
-			if classification.isHTML {
+			if classification.isHTML || classification.isImage {
 				if _, ok := seenHTML[link]; !ok {
 					out <- "active: html: " + link
 					seenHTML[link] = struct{}{}
+				}
+				if classification.isHTML {
+					if _, ok := seenHTMLTargets[link]; !ok {
+						seenHTMLTargets[link] = struct{}{}
+						result.HTML = append(result.HTML, link)
+					}
+				}
+				if classification.isImage {
+					if _, ok := seenImages[link]; !ok {
+						seenImages[link] = struct{}{}
+						result.Images = append(result.Images, link)
+					}
 				}
 			}
 			if len(classification.categories) > 0 {
@@ -661,6 +683,7 @@ func emitLinkfinderFindings(reports []linkfinderReport, out chan<- string) ([]st
 					}
 					set[link] = struct{}{}
 					out <- "active: " + prefix + ": " + link
+					result.Categories[cat] = append(result.Categories[cat], link)
 				}
 			}
 			if classification.undetected {
@@ -669,21 +692,22 @@ func emitLinkfinderFindings(reports []linkfinderReport, out chan<- string) ([]st
 		}
 	}
 
-	if len(undetectedSet) == 0 {
-		return nil, nil
+	if len(undetectedSet) > 0 {
+		undetected := make([]string, 0, len(undetectedSet))
+		for value := range undetectedSet {
+			undetected = append(undetected, value)
+		}
+		sort.Strings(undetected)
+		result.Undetected = undetected
 	}
 
-	undetected := make([]string, 0, len(undetectedSet))
-	for value := range undetectedSet {
-		undetected = append(undetected, value)
-	}
-	sort.Strings(undetected)
-	return undetected, nil
+	return result, nil
 }
 
 type linkfinderClassification struct {
 	isJS       bool
 	isHTML     bool
+	isImage    bool
 	undetected bool
 	categories []routes.Category
 }
@@ -703,6 +727,8 @@ func classifyLinkfinderEndpoint(link string) linkfinderClassification {
 		cls.isJS = true
 	case ".html", ".htm", ".php", ".asp", ".aspx", ".jsp", ".jspx", ".cfm", ".shtml":
 		cls.isHTML = true
+	case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tif", ".tiff", ".jfif", ".avif", ".apng", ".heic", ".heif":
+		cls.isImage = true
 	}
 
 	cls.categories = routes.DetectCategories(link)
@@ -712,6 +738,15 @@ func classifyLinkfinderEndpoint(link string) linkfinderClassification {
 	}
 
 	return cls
+}
+
+type linkfinderEmissionResult struct {
+	Routes     []string
+	JS         []string
+	HTML       []string
+	Images     []string
+	Categories map[routes.Category][]string
+	Undetected []string
 }
 
 var linkfinderCategoryPrefixes = map[routes.Category]string{
@@ -744,6 +779,118 @@ func writeLinkfinderUndetected(path string, entries []string) error {
 
 	var buf bytes.Buffer
 	for _, entry := range entries {
+		buf.WriteString(entry)
+		buf.WriteByte('\n')
+	}
+
+	return os.WriteFile(path, buf.Bytes(), 0o644)
+}
+
+func persistLinkfinderActiveOutputs(outdir string, emission linkfinderEmissionResult) error {
+	type target struct {
+		path    string
+		entries []string
+	}
+
+	targets := []target{{
+		path:    filepath.Join(outdir, "routes", "routes.active"),
+		entries: emission.Routes,
+	}, {
+		path:    filepath.Join(outdir, "routes", "js", "js.active"),
+		entries: emission.JS,
+	}, {
+		path:    filepath.Join(outdir, "routes", "html", "html.active"),
+		entries: emission.HTML,
+	}, {
+		path:    filepath.Join(outdir, "routes", "images", "images.active"),
+		entries: emission.Images,
+	}}
+
+	for cat, entries := range emission.Categories {
+		path := linkfinderCategoryActivePath(outdir, cat)
+		if path == "" {
+			continue
+		}
+		targets = append(targets, target{path: path, entries: entries})
+	}
+
+	for _, t := range targets {
+		if err := mergeAndWriteLinkfinderEntries(t.path, t.entries); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func linkfinderCategoryActivePath(outdir string, cat routes.Category) string {
+	switch cat {
+	case routes.CategoryMaps:
+		return filepath.Join(outdir, "routes", "maps", "maps.active")
+	case routes.CategoryJSON:
+		return filepath.Join(outdir, "routes", "json", "json.active")
+	case routes.CategoryAPI:
+		return filepath.Join(outdir, "routes", "api", "api.active")
+	case routes.CategoryWASM:
+		return filepath.Join(outdir, "routes", "wasm", "wasm.active")
+	case routes.CategorySVG:
+		return filepath.Join(outdir, "routes", "svg", "svg.active")
+	case routes.CategoryCrawl:
+		return filepath.Join(outdir, "routes", "crawl", "crawl.active")
+	case routes.CategoryMeta:
+		return filepath.Join(outdir, "routes", "meta", "meta.active")
+	default:
+		return ""
+	}
+}
+
+func mergeAndWriteLinkfinderEntries(path string, newEntries []string) error {
+	if len(newEntries) == 0 {
+		return nil
+	}
+
+	entriesSet := make(map[string]struct{})
+	data, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err == nil {
+		scanner := bufio.NewScanner(bytes.NewReader(data))
+		for scanner.Scan() {
+			entry := strings.TrimSpace(scanner.Text())
+			if entry == "" {
+				continue
+			}
+			entriesSet[entry] = struct{}{}
+		}
+		if err := scanner.Err(); err != nil {
+			return err
+		}
+	}
+
+	initialLen := len(entriesSet)
+	for _, entry := range newEntries {
+		trimmed := strings.TrimSpace(entry)
+		if trimmed == "" {
+			continue
+		}
+		entriesSet[trimmed] = struct{}{}
+	}
+	if len(entriesSet) == initialLen {
+		return nil
+	}
+
+	merged := make([]string, 0, len(entriesSet))
+	for entry := range entriesSet {
+		merged = append(merged, entry)
+	}
+	sort.Strings(merged)
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+
+	var buf bytes.Buffer
+	for _, entry := range merged {
 		buf.WriteString(entry)
 		buf.WriteByte('\n')
 	}
