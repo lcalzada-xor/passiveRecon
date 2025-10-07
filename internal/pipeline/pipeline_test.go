@@ -723,14 +723,17 @@ func TestArtifactsMergeTypes(t *testing.T) {
 	}
 
 	combined := matches[0]
-	if combined.Type != "route" && combined.Type != "html" {
+	switch combined.Type {
+	case "route":
+		if !containsType(combined.Types, "html") {
+			t.Fatalf("expected route artifact to include html as secondary type, got %v", combined.Types)
+		}
+	case "html":
+		if !containsType(combined.Types, "route") {
+			t.Fatalf("expected html artifact to include route as secondary type, got %v", combined.Types)
+		}
+	default:
 		t.Fatalf("unexpected primary type: %q", combined.Type)
-	}
-	if len(combined.Types) < 2 {
-		t.Fatalf("expected combined types, got %v", combined.Types)
-	}
-	if !containsType(combined.Types, "route") || !containsType(combined.Types, "html") {
-		t.Fatalf("expected artifact types to include route and html, got %v", combined.Types)
 	}
 }
 

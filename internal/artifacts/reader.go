@@ -102,13 +102,26 @@ func CollectArtifactsByType(outdir string, selectors map[string]ActiveState) (ma
 			continue
 		}
 
-		types := artifact.Types
-		if len(types) == 0 {
-			if artifact.Type != "" {
-				types = []string{artifact.Type}
+		typeSet := make(map[string]struct{})
+		orderedTypes := make([]string, 0, len(artifact.Types)+1)
+		if primary := strings.TrimSpace(artifact.Type); primary != "" {
+			if _, exists := typeSet[primary]; !exists {
+				typeSet[primary] = struct{}{}
+				orderedTypes = append(orderedTypes, primary)
 			}
 		}
-		for _, typ := range types {
+		for _, typ := range artifact.Types {
+			typ = strings.TrimSpace(typ)
+			if typ == "" {
+				continue
+			}
+			if _, exists := typeSet[typ]; exists {
+				continue
+			}
+			typeSet[typ] = struct{}{}
+			orderedTypes = append(orderedTypes, typ)
+		}
+		for _, typ := range orderedTypes {
 			typ = strings.TrimSpace(typ)
 			if typ == "" {
 				continue
@@ -122,6 +135,19 @@ func CollectArtifactsByType(outdir string, selectors map[string]ActiveState) (ma
 			}
 			artifactCopy := artifact
 			artifactCopy.Type = typ
+			extras := make([]string, 0, len(orderedTypes))
+			for _, candidate := range orderedTypes {
+				candidate = strings.TrimSpace(candidate)
+				if candidate == "" || candidate == typ {
+					continue
+				}
+				extras = append(extras, candidate)
+			}
+			if len(extras) == 0 {
+				artifactCopy.Types = nil
+			} else {
+				artifactCopy.Types = extras
+			}
 			result[typ] = append(result[typ], artifactCopy)
 		}
 	}
