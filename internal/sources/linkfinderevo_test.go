@@ -2,6 +2,7 @@ package sources
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -14,8 +15,28 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"passive-rec/internal/pipeline"
 	"passive-rec/internal/routes"
 )
+
+func writeLinkfinderArtifacts(t *testing.T, outdir string, data map[string][]string) {
+	t.Helper()
+	path := filepath.Join(outdir, "artifacts.jsonl")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create artifacts.jsonl: %v", err)
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	for typ, values := range data {
+		for _, value := range values {
+			if err := encoder.Encode(pipeline.Artifact{Type: typ, Value: value, Active: true}); err != nil {
+				t.Fatalf("encode artifact: %v", err)
+			}
+		}
+	}
+}
 
 func sortedCopy(values []string) []string {
 	if len(values) == 0 {
@@ -505,6 +526,10 @@ func TestLinkFinderEVOIntegrationGeneratesReports(t *testing.T) {
 		t.Fatalf("failed to write crawl list: %v", err)
 	}
 
+	writeLinkfinderArtifacts(t, tmp, map[string][]string{
+		"html": {"file://" + sample},
+	})
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -576,18 +601,25 @@ func TestLinkFinderEVOLimitsWorkloadByDeadline(t *testing.T) {
 
 	tmp := t.TempDir()
 	routesDir := filepath.Join(tmp, "routes")
+	artifactsData := make(map[string][]string)
 	for _, sub := range []string{"html", "js", "crawl"} {
 		if err := os.MkdirAll(filepath.Join(routesDir, sub), 0o755); err != nil {
 			t.Fatalf("failed to create %s dir: %v", sub, err)
 		}
 		var builder strings.Builder
+		var entries []string
 		for i := 0; i < 100; i++ {
-			builder.WriteString(fmt.Sprintf("file://example.com/%s/%d\n", sub, i))
+			value := fmt.Sprintf("file://example.com/%s/%d", sub, i)
+			builder.WriteString(value + "\n")
+			entries = append(entries, value)
 		}
 		if err := os.WriteFile(filepath.Join(routesDir, sub, fmt.Sprintf("%s.active", sub)), []byte(builder.String()), 0o644); err != nil {
 			t.Fatalf("failed to write %s list: %v", sub, err)
 		}
+		artifactsData[sub] = entries
 	}
+
+	writeLinkfinderArtifacts(t, tmp, artifactsData)
 
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(2*time.Second))
 	defer cancel()

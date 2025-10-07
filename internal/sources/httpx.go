@@ -2,10 +2,8 @@ package sources
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -17,6 +15,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"passive-rec/internal/artifacts"
 	"passive-rec/internal/runner"
 )
 
@@ -39,7 +38,7 @@ var (
 	}
 )
 
-func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- string) error {
+func HTTPX(ctx context.Context, outdir string, out chan<- string) error {
 	bin, err := httpxBinFinder()
 	if err != nil {
 		out <- "active: meta: httpx not found in PATH"
@@ -54,7 +53,7 @@ func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- st
 		httpxMetaEmit = originalMeta
 	}()
 
-	combined, err := collectHTTPXInputs(outdir, listFiles)
+	combined, err := collectHTTPXInputs(outdir)
 	if err != nil {
 		return err
 	}
@@ -69,48 +68,47 @@ func HTTPX(ctx context.Context, listFiles []string, outdir string, out chan<- st
 	return runHTTPXWorkers(ctx, bin, combined, intermediate, httpxRunCmd, writeHTTPXInput)
 }
 
-func collectHTTPXInputs(outdir string, listFiles []string) ([]string, error) {
+func collectHTTPXInputs(outdir string) ([]string, error) {
 	var combined []string
 	seen := make(map[string]struct{})
 
-	for _, list := range listFiles {
-		list = strings.TrimSpace(list)
-		if list == "" {
-			continue
-		}
+	selectors := map[string]artifacts.ActiveState{
+		"domain": artifacts.AnyState,
+		"route":  artifacts.PassiveOnly,
+	}
 
-		inputPath := filepath.Join(outdir, list)
-		data, err := os.ReadFile(inputPath)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				httpxMetaEmit("active: meta: httpx skipped missing input " + list)
-				continue
-			}
-			return nil, err
+	values, err := artifacts.CollectValuesByType(outdir, selectors)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			httpxMetaEmit("active: meta: httpx skipped (missing artifacts.jsonl)")
+			return nil, nil
 		}
+		return nil, err
+	}
 
-		scanner := bufio.NewScanner(bytes.NewReader(data))
-		scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" {
-				continue
-			}
-			if strings.HasPrefix(line, "#") {
-				continue
-			}
-			if shouldSkipHTTPXInput(line) {
-				continue
-			}
-			if _, ok := seen[line]; ok {
-				continue
-			}
-			seen[line] = struct{}{}
-			combined = append(combined, line)
+	appendValue := func(line string) {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			return
 		}
-		if err := scanner.Err(); err != nil {
-			return nil, fmt.Errorf("scan %s: %w", list, err)
+		if strings.HasPrefix(line, "#") {
+			return
 		}
+		if shouldSkipHTTPXInput(line) {
+			return
+		}
+		if _, ok := seen[line]; ok {
+			return
+		}
+		seen[line] = struct{}{}
+		combined = append(combined, line)
+	}
+
+	for _, domain := range values["domain"] {
+		appendValue(domain)
+	}
+	for _, route := range values["route"] {
+		appendValue(route)
 	}
 
 	return combined, nil

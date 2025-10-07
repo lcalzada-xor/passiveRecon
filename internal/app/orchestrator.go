@@ -395,10 +395,9 @@ func stepGAU(ctx context.Context, state *pipelineState, opts orchestratorOptions
 
 func stepHTTPX(ctx context.Context, state *pipelineState, opts orchestratorOptions) error {
 	opts.sink.Flush()
-	inputs := []string{state.DomainListFile, filepath.Join("routes", "routes.passive")}
 	input, done := toolInputChannel(opts.sink, "httpx")
 	defer done()
-	err := sourceHTTPX(ctx, inputs, opts.cfg.OutDir, input)
+	err := sourceHTTPX(ctx, opts.cfg.OutDir, input)
 	opts.sink.Flush()
 	return err
 }
@@ -449,7 +448,7 @@ func timeoutHTTPX(state *pipelineState, opts orchestratorOptions) int {
 func stepSubJS(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
 	input, done := toolInputChannel(opts.sink, "subjs")
 	defer done()
-	return sourceSubJS(ctx, filepath.Join("routes", "routes.active"), opts.cfg.OutDir, input)
+	return sourceSubJS(ctx, opts.cfg.OutDir, input)
 }
 
 func stepLinkFinderEVO(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {

@@ -2,6 +2,7 @@ package sources
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -12,8 +13,26 @@ import (
 	"testing"
 	"time"
 
+	"passive-rec/internal/pipeline"
 	"passive-rec/internal/runner"
 )
+
+func writeSubJSArtifacts(t *testing.T, outdir string, artifacts []pipeline.Artifact) {
+	t.Helper()
+	path := filepath.Join(outdir, "artifacts.jsonl")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create artifacts.jsonl: %v", err)
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	for _, artifact := range artifacts {
+		if err := encoder.Encode(artifact); err != nil {
+			t.Fatalf("encode artifact: %v", err)
+		}
+	}
+}
 
 func TestSubJSBinaryMissing(t *testing.T) {
 	originalFind := subjsFindBin
@@ -24,7 +43,7 @@ func TestSubJSBinaryMissing(t *testing.T) {
 	}
 
 	out := make(chan string, 1)
-	err := SubJS(context.Background(), filepath.Join("routes", "routes.active"), t.TempDir(), out)
+	err := SubJS(context.Background(), t.TempDir(), out)
 	if !errors.Is(err, runner.ErrMissingBinary) {
 		t.Fatalf("expected ErrMissingBinary, got %v", err)
 	}
@@ -57,12 +76,12 @@ func TestSubJSMissingInputFile(t *testing.T) {
 	})
 
 	out := make(chan string, 1)
-	if err := SubJS(context.Background(), filepath.Join("routes", "routes.active"), dir, out); err != nil {
+	if err := SubJS(context.Background(), dir, out); err != nil {
 		t.Fatalf("SubJS returned error: %v", err)
 	}
 	select {
 	case line := <-out:
-		expected := "active: meta: subjs skipped missing input routes/routes.active"
+		expected := "active: meta: subjs skipped (missing artifacts.jsonl)"
 		if line != expected {
 			t.Fatalf("unexpected output: %q", line)
 		}
@@ -73,14 +92,10 @@ func TestSubJSMissingInputFile(t *testing.T) {
 
 func TestSubJSSuccess(t *testing.T) {
 	dir := t.TempDir()
-	routesDir := filepath.Join(dir, "routes")
-	if err := os.MkdirAll(routesDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll routes: %v", err)
-	}
-	routesActive := filepath.Join(routesDir, "routes.active")
-	if err := os.WriteFile(routesActive, []byte("https://app.example.com/login [200]\nhttps://app.example.com/login\n"), 0o644); err != nil {
-		t.Fatalf("write routes.active: %v", err)
-	}
+	writeSubJSArtifacts(t, dir, []pipeline.Artifact{
+		{Type: "route", Value: "https://app.example.com/login [200]", Active: true},
+		{Type: "route", Value: "https://app.example.com/login", Active: true},
+	})
 
 	var (
 		mu          sync.Mutex
@@ -125,7 +140,7 @@ func TestSubJSSuccess(t *testing.T) {
 	})
 
 	out := make(chan string, 5)
-	if err := SubJS(context.Background(), filepath.Join("routes", "routes.active"), dir, out); err != nil {
+	if err := SubJS(context.Background(), dir, out); err != nil {
 		t.Fatalf("SubJS returned error: %v", err)
 	}
 
@@ -158,14 +173,7 @@ func TestSubJSSuccess(t *testing.T) {
 
 func TestSubJSAcceptsNonErrorStatuses(t *testing.T) {
 	dir := t.TempDir()
-	routesDir := filepath.Join(dir, "routes")
-	if err := os.MkdirAll(routesDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll routes: %v", err)
-	}
-	routesActive := filepath.Join(routesDir, "routes.active")
-	if err := os.WriteFile(routesActive, []byte("https://app.example.com/login\n"), 0o644); err != nil {
-		t.Fatalf("write routes.active: %v", err)
-	}
+	writeSubJSArtifacts(t, dir, []pipeline.Artifact{{Type: "route", Value: "https://app.example.com/login", Active: true}})
 
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -213,7 +221,7 @@ func TestSubJSAcceptsNonErrorStatuses(t *testing.T) {
 	})
 
 	out := make(chan string, 2)
-	if err := SubJS(context.Background(), filepath.Join("routes", "routes.active"), dir, out); err != nil {
+	if err := SubJS(context.Background(), dir, out); err != nil {
 		t.Fatalf("SubJS returned error: %v", err)
 	}
 

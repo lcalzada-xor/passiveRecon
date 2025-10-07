@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"passive-rec/internal/config"
+	"passive-rec/internal/pipeline"
 	"passive-rec/internal/runner"
 )
 
@@ -128,7 +130,7 @@ func TestRunFlushesBeforeReportForDeferredSources(t *testing.T) {
 		return ts, nil
 	}
 
-	sourceHTTPX = func(ctx context.Context, list []string, outdir string, out chan<- string) error {
+	sourceHTTPX = func(ctx context.Context, outdir string, out chan<- string) error {
 		out <- "http://deferred.test/path"
 		return nil
 	}
@@ -346,26 +348,16 @@ func TestExecuteStepHandlesErrors(t *testing.T) {
 
 func TestDedupeDomainListNormalizesAndFilters(t *testing.T) {
 	dir := t.TempDir()
-	domainsDir := filepath.Join(dir, "domains")
-	if err := os.MkdirAll(domainsDir, 0o755); err != nil {
-		t.Fatalf("mkdir domains: %v", err)
-	}
-
-	contents := strings.Join([]string{
-		"Example.com",
-		"api.example.com ",
-		"*.ignored.example.com",
-		"https://WWW.Example.com/path",
-		"login.example.com [source]",
-		"  # comment",
-		"[2001:db8::1]:443",
-		"api.example.com",
-	}, "\n")
-
-	inputPath := filepath.Join(domainsDir, "domains.passive")
-	if err := os.WriteFile(inputPath, []byte(contents), 0o644); err != nil {
-		t.Fatalf("write domains.passive: %v", err)
-	}
+	writeArtifactsFile(t, dir, []pipeline.Artifact{
+		{Type: "domain", Value: "Example.com"},
+		{Type: "domain", Value: "api.example.com "},
+		{Type: "domain", Value: "*.ignored.example.com"},
+		{Type: "domain", Value: "https://WWW.Example.com/path"},
+		{Type: "domain", Value: "login.example.com [source]"},
+		{Type: "domain", Value: "  # comment"},
+		{Type: "domain", Value: "[2001:db8::1]:443"},
+		{Type: "domain", Value: "api.example.com"},
+	})
 
 	got, err := dedupeDomainList(dir)
 	if err != nil {
@@ -377,7 +369,7 @@ func TestDedupeDomainListNormalizesAndFilters(t *testing.T) {
 		t.Fatalf("unexpected dedupe output (-want +got):\n%s", diff)
 	}
 
-	dedupePath := filepath.Join(domainsDir, "domains.dedupe")
+	dedupePath := filepath.Join(dir, "domains", "domains.dedupe")
 	data, err := os.ReadFile(dedupePath)
 	if err != nil {
 		t.Fatalf("read domains.dedupe: %v", err)
@@ -389,6 +381,23 @@ func TestDedupeDomainListNormalizesAndFilters(t *testing.T) {
 	}
 	if diff := cmp.Diff(want, lines); diff != "" {
 		t.Fatalf("unexpected domains.dedupe contents (-want +got):\n%s", diff)
+	}
+}
+
+func writeArtifactsFile(t *testing.T, outdir string, artifacts []pipeline.Artifact) {
+	t.Helper()
+	path := filepath.Join(outdir, "artifacts.jsonl")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create artifacts.jsonl: %v", err)
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	for _, artifact := range artifacts {
+		if err := encoder.Encode(artifact); err != nil {
+			t.Fatalf("encode artifact: %v", err)
+		}
 	}
 }
 

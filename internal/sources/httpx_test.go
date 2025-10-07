@@ -2,6 +2,7 @@ package sources
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -16,19 +17,30 @@ import (
 	"passive-rec/internal/pipeline"
 )
 
-func TestHTTPXCombinesAllLists(t *testing.T) {
-	tmp := t.TempDir()
-	mustWrite := func(name, contents string) {
-		fullPath := filepath.Join(tmp, name)
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", name, err)
-		}
-		if err := os.WriteFile(fullPath, []byte(contents), 0644); err != nil {
-			t.Fatalf("write %s: %v", name, err)
+func writeArtifactsFile(t *testing.T, outdir string, artifacts []pipeline.Artifact) {
+	t.Helper()
+	path := filepath.Join(outdir, "artifacts.jsonl")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create artifacts.jsonl: %v", err)
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	for _, artifact := range artifacts {
+		if err := encoder.Encode(artifact); err != nil {
+			t.Fatalf("encode artifact: %v", err)
 		}
 	}
-	mustWrite(filepath.Join("domains", "domains.passive"), "example.com\nsub.example.com\n")
-	mustWrite(filepath.Join("routes", "routes.passive"), "https://app.example.com/login\n")
+}
+
+func TestHTTPXCombinesAllLists(t *testing.T) {
+	tmp := t.TempDir()
+	writeArtifactsFile(t, tmp, []pipeline.Artifact{
+		{Type: "domain", Value: "example.com"},
+		{Type: "domain", Value: "sub.example.com"},
+		{Type: "route", Value: "https://app.example.com/login"},
+	})
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
@@ -75,7 +87,7 @@ func TestHTTPXCombinesAllLists(t *testing.T) {
 		return nil
 	}
 
-	if err := HTTPX(context.Background(), []string{"domains/domains.passive", "routes/routes.passive"}, tmp, make(chan string, 10)); err != nil {
+	if err := HTTPX(context.Background(), tmp, make(chan string, 10)); err != nil {
 		t.Fatalf("HTTPX returned error: %v", err)
 	}
 
@@ -95,18 +107,14 @@ func TestHTTPXCombinesAllLists(t *testing.T) {
 
 func TestCollectHTTPXInputsDedupesAndReportsMissing(t *testing.T) {
 	tmp := t.TempDir()
-	contents := strings.Join([]string{
-		"example.com",
-		"# comment",
-		"https://assets.example.com/favicon.ico",
-		"example.com",
-		"https://valid.example.com/path",
-		"",
-	}, "\n")
-
-	if err := os.WriteFile(filepath.Join(tmp, "list.passive"), []byte(contents), 0o644); err != nil {
-		t.Fatalf("write list: %v", err)
-	}
+	writeArtifactsFile(t, tmp, []pipeline.Artifact{
+		{Type: "domain", Value: "example.com"},
+		{Type: "domain", Value: "# comment"},
+		{Type: "route", Value: "https://assets.example.com/favicon.ico"},
+		{Type: "domain", Value: "example.com"},
+		{Type: "route", Value: "https://valid.example.com/path"},
+		{Type: "route", Value: ""},
+	})
 
 	originalMeta := httpxMetaEmit
 	var mu sync.Mutex
@@ -120,7 +128,7 @@ func TestCollectHTTPXInputsDedupesAndReportsMissing(t *testing.T) {
 		httpxMetaEmit = originalMeta
 	})
 
-	combined, err := collectHTTPXInputs(tmp, []string{"list.passive", "missing.passive", " "})
+	combined, err := collectHTTPXInputs(tmp)
 	if err != nil {
 		t.Fatalf("collect inputs: %v", err)
 	}
@@ -132,7 +140,35 @@ func TestCollectHTTPXInputsDedupesAndReportsMissing(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	wantMeta := []string{"active: meta: httpx skipped missing input missing.passive"}
+	if len(meta) != 0 {
+		t.Fatalf("expected no meta output when artifacts exist, got %v", meta)
+	}
+}
+
+func TestCollectHTTPXInputsMissingArtifacts(t *testing.T) {
+	tmp := t.TempDir()
+
+	originalMeta := httpxMetaEmit
+	var mu sync.Mutex
+	var meta []string
+	httpxMetaEmit = func(line string) {
+		mu.Lock()
+		defer mu.Unlock()
+		meta = append(meta, line)
+	}
+	t.Cleanup(func() { httpxMetaEmit = originalMeta })
+
+	combined, err := collectHTTPXInputs(tmp)
+	if err != nil {
+		t.Fatalf("collect inputs: %v", err)
+	}
+	if len(combined) != 0 {
+		t.Fatalf("expected empty input when artifacts missing, got %v", combined)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	wantMeta := []string{"active: meta: httpx skipped (missing artifacts.jsonl)"}
 	if diff := cmp.Diff(wantMeta, meta); diff != "" {
 		t.Fatalf("unexpected meta lines (-want +got):\n%s", diff)
 	}
@@ -248,18 +284,9 @@ func TestRunHTTPXWorkersCancellation(t *testing.T) {
 	}
 }
 
-func TestHTTPXSkipsMissingLists(t *testing.T) {
+func TestHTTPXProcessesRouteArtifactsOnly(t *testing.T) {
 	tmp := t.TempDir()
-	mustWrite := func(name, contents string) {
-		fullPath := filepath.Join(tmp, name)
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", name, err)
-		}
-		if err := os.WriteFile(fullPath, []byte(contents), 0644); err != nil {
-			t.Fatalf("write %s: %v", name, err)
-		}
-	}
-	mustWrite(filepath.Join("routes", "routes.passive"), "https://app.example.com/login\n")
+	writeArtifactsFile(t, tmp, []pipeline.Artifact{{Type: "route", Value: "https://app.example.com/login"}})
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
@@ -299,7 +326,7 @@ func TestHTTPXSkipsMissingLists(t *testing.T) {
 	}
 
 	outCh := make(chan string, 5)
-	if err := HTTPX(context.Background(), []string{"domains/domains.passive", "routes/routes.passive"}, tmp, outCh); err != nil {
+	if err := HTTPX(context.Background(), tmp, outCh); err != nil {
 		t.Fatalf("HTTPX returned error: %v", err)
 	}
 
@@ -318,20 +345,14 @@ func TestHTTPXSkipsMissingLists(t *testing.T) {
 	}
 	sort.Strings(meta)
 
-	wantMeta := []string{"active: meta: httpx skipped missing input domains/domains.passive"}
-	if diff := cmp.Diff(wantMeta, meta); diff != "" {
-		t.Fatalf("unexpected meta lines (-want +got):\n%s", diff)
+	if len(meta) != 0 {
+		t.Fatalf("expected no meta lines, got %v", meta)
 	}
 }
 
 func TestHTTPXNormalizesOutput(t *testing.T) {
 	inputDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(inputDir, "routes"), 0o755); err != nil {
-		t.Fatalf("mkdir routes: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(inputDir, "routes", "routes.passive"), []byte("https://app.example.com\n"), 0644); err != nil {
-		t.Fatalf("write routes list: %v", err)
-	}
+	writeArtifactsFile(t, inputDir, []pipeline.Artifact{{Type: "route", Value: "https://app.example.com"}})
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
@@ -351,7 +372,7 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 	}
 
 	outCh := make(chan string, 10)
-	if err := HTTPX(context.Background(), []string{"routes/routes.passive"}, inputDir, outCh); err != nil {
+	if err := HTTPX(context.Background(), inputDir, outCh); err != nil {
 		t.Fatalf("HTTPX returned error: %v", err)
 	}
 
@@ -426,12 +447,7 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 
 func TestHTTPXSkipsUnresponsiveResults(t *testing.T) {
 	inputDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(inputDir, "routes"), 0o755); err != nil {
-		t.Fatalf("mkdir routes: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(inputDir, "routes", "routes.passive"), []byte("https://app.example.com\n"), 0644); err != nil {
-		t.Fatalf("write routes list: %v", err)
-	}
+	writeArtifactsFile(t, inputDir, []pipeline.Artifact{{Type: "route", Value: "https://app.example.com"}})
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
@@ -449,7 +465,7 @@ func TestHTTPXSkipsUnresponsiveResults(t *testing.T) {
 	}
 
 	outCh := make(chan string, 10)
-	if err := HTTPX(context.Background(), []string{"routes/routes.passive"}, inputDir, outCh); err != nil {
+	if err := HTTPX(context.Background(), inputDir, outCh); err != nil {
 		t.Fatalf("HTTPX returned error: %v", err)
 	}
 
@@ -474,12 +490,7 @@ func TestHTTPXSkipsUnresponsiveResults(t *testing.T) {
 
 func TestHTTPXSkipsHTMLForErrorResponses(t *testing.T) {
 	inputDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(inputDir, "routes"), 0o755); err != nil {
-		t.Fatalf("mkdir routes: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(inputDir, "routes", "routes.passive"), []byte("https://missing.example.com\n"), 0o644); err != nil {
-		t.Fatalf("write routes list: %v", err)
-	}
+	writeArtifactsFile(t, inputDir, []pipeline.Artifact{{Type: "route", Value: "https://missing.example.com"}})
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
@@ -495,7 +506,7 @@ func TestHTTPXSkipsHTMLForErrorResponses(t *testing.T) {
 	}
 
 	outCh := make(chan string, 10)
-	if err := HTTPX(context.Background(), []string{"routes/routes.passive"}, inputDir, outCh); err != nil {
+	if err := HTTPX(context.Background(), inputDir, outCh); err != nil {
 		t.Fatalf("HTTPX returned error: %v", err)
 	}
 
@@ -518,12 +529,7 @@ func TestHTTPXSkipsHTMLForErrorResponses(t *testing.T) {
 
 func TestHTTPXIncludesRedirectDomains(t *testing.T) {
 	inputDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(inputDir, "routes"), 0o755); err != nil {
-		t.Fatalf("mkdir routes: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(inputDir, "routes", "routes.passive"), []byte("https://redirect.example.com\n"), 0o644); err != nil {
-		t.Fatalf("write routes list: %v", err)
-	}
+	writeArtifactsFile(t, inputDir, []pipeline.Artifact{{Type: "route", Value: "https://redirect.example.com"}})
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
@@ -540,7 +546,7 @@ func TestHTTPXIncludesRedirectDomains(t *testing.T) {
 	}
 
 	outCh := make(chan string, 10)
-	if err := HTTPX(context.Background(), []string{"routes/routes.passive"}, inputDir, outCh); err != nil {
+	if err := HTTPX(context.Background(), inputDir, outCh); err != nil {
 		t.Fatalf("HTTPX returned error: %v", err)
 	}
 
@@ -561,16 +567,11 @@ func TestHTTPXIncludesRedirectDomains(t *testing.T) {
 
 func TestHTTPXBatchesLargeInputs(t *testing.T) {
 	inputDir := t.TempDir()
-	var builder strings.Builder
+	var records []pipeline.Artifact
 	for i := 0; i < 5; i++ {
-		builder.WriteString(fmt.Sprintf("https://example.com/path-%d\n", i))
+		records = append(records, pipeline.Artifact{Type: "route", Value: fmt.Sprintf("https://example.com/path-%d", i)})
 	}
-	if err := os.MkdirAll(filepath.Join(inputDir, "routes"), 0o755); err != nil {
-		t.Fatalf("mkdir routes: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(inputDir, "routes", "routes.passive"), []byte(builder.String()), 0644); err != nil {
-		t.Fatalf("write routes list: %v", err)
-	}
+	writeArtifactsFile(t, inputDir, records)
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
@@ -612,7 +613,7 @@ func TestHTTPXBatchesLargeInputs(t *testing.T) {
 		return nil
 	}
 
-	if err := HTTPX(context.Background(), []string{"routes/routes.passive"}, inputDir, make(chan string, 10)); err != nil {
+	if err := HTTPX(context.Background(), inputDir, make(chan string, 10)); err != nil {
 		t.Fatalf("HTTPX returned error: %v", err)
 	}
 
@@ -641,7 +642,8 @@ func TestHTTPXBatchesLargeInputs(t *testing.T) {
 
 func TestHTTPXSkipsLowPriorityRoutes(t *testing.T) {
 	tmp := t.TempDir()
-	contents := strings.Join([]string{
+	var artifactsList []pipeline.Artifact
+	for _, value := range []string{
 		"https://app.example.com/login",
 		"https://app.example.com/favicon.ico",
 		"https://app.example.com/favicon.ico?version=2",
@@ -651,10 +653,10 @@ func TestHTTPXSkipsLowPriorityRoutes(t *testing.T) {
 		"https://app.example.com/img/banner.GIF",
 		"https://app.example.com/files/THUMBS.DB",
 		"https://app.example.com/assets/raw.pgm",
-	}, "\n") + "\n"
-	if err := os.WriteFile(filepath.Join(tmp, "routes.passive"), []byte(contents), 0644); err != nil {
-		t.Fatalf("write routes list: %v", err)
+	} {
+		artifactsList = append(artifactsList, pipeline.Artifact{Type: "route", Value: value})
 	}
+	writeArtifactsFile(t, tmp, artifactsList)
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
@@ -693,7 +695,7 @@ func TestHTTPXSkipsLowPriorityRoutes(t *testing.T) {
 		return nil
 	}
 
-	if err := HTTPX(context.Background(), []string{"routes.passive"}, tmp, make(chan string, 10)); err != nil {
+	if err := HTTPX(context.Background(), tmp, make(chan string, 10)); err != nil {
 		t.Fatalf("HTTPX returned error: %v", err)
 	}
 

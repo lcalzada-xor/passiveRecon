@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"passive-rec/internal/artifacts"
 	"passive-rec/internal/routes"
 	"passive-rec/internal/runner"
 )
@@ -144,13 +145,27 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 		return err
 	}
 
+	selectors := map[string]artifacts.ActiveState{
+		"html":  artifacts.ActiveOnly,
+		"js":    artifacts.ActiveOnly,
+		"crawl": artifacts.ActiveOnly,
+	}
+	valuesByType, err := artifacts.CollectValuesByType(outdir, selectors)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			out <- "active: meta: linkfinderevo skipped (missing artifacts.jsonl)"
+			return nil
+		}
+		return err
+	}
+
 	inputs := []struct {
-		label string
-		path  string
+		label  string
+		values []string
 	}{
-		{label: "html", path: filepath.Join("routes", "html", "html.active")},
-		{label: "js", path: filepath.Join("routes", "js", "js.active")},
-		{label: "crawl", path: filepath.Join("routes", "crawl", "crawl.active")},
+		{label: "html", values: valuesByType["html"]},
+		{label: "js", values: valuesByType["js"]},
+		{label: "crawl", values: valuesByType["crawl"]},
 	}
 
 	aggregate := newLinkfinderAggregate()
@@ -162,27 +177,13 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 	}
 
 	for _, input := range inputs {
-		absPath := filepath.Join(outdir, input.path)
-		absPath, err := filepath.Abs(absPath)
-		if err != nil {
-			recordLinkfinderError(&firstErr, err)
-			continue
-		}
-		data, err := os.ReadFile(absPath)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				out <- fmt.Sprintf("active: meta: linkfinderevo skipped missing input %s", input.path)
-				continue
-			}
-			recordLinkfinderError(&firstErr, err)
-			continue
-		}
+		data := encodeLinkfinderEntries(input.values)
 		if len(bytes.TrimSpace(data)) == 0 {
 			continue
 		}
 
 		if totalBudget <= 0 {
-			out <- fmt.Sprintf("active: meta: linkfinderevo skipped %s (time budget exhausted)", input.path)
+			out <- fmt.Sprintf("active: meta: linkfinderevo skipped %s (time budget exhausted)", input.label)
 			break
 		}
 
@@ -197,6 +198,15 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 			limit = totalBudget
 		}
 
+		inputPath, err := writeLinkfinderInput(tmpDir, input.label, data)
+		if err != nil {
+			recordLinkfinderError(&firstErr, err)
+			os.RemoveAll(tmpDir)
+			continue
+		}
+
+		absPath := inputPath
+
 		samplePath, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmpDir, input.label, data, limit)
 		if err != nil {
 			recordLinkfinderError(&firstErr, err)
@@ -205,10 +215,10 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 		}
 		if samplePath != "" {
 			absPath = samplePath
-			out <- fmt.Sprintf("active: meta: linkfinderevo sampling %d of %d entries from %s", sampledEntries, totalEntries, input.path)
+			out <- fmt.Sprintf("active: meta: linkfinderevo sampling %d of %d entries from %s", sampledEntries, totalEntries, input.label)
 		}
 		if sampledEntries == 0 {
-			out <- fmt.Sprintf("active: meta: linkfinderevo skipped %s (no entries within time budget)", input.path)
+			out <- fmt.Sprintf("active: meta: linkfinderevo skipped %s (no entries within time budget)", input.label)
 			os.RemoveAll(tmpDir)
 			continue
 		}
@@ -362,6 +372,29 @@ func linkfinderEntryBudget(ctx context.Context, maxTotal int) int {
 		return 0
 	}
 	return budget
+}
+
+func encodeLinkfinderEntries(entries []string) []byte {
+	var buf bytes.Buffer
+	for _, entry := range entries {
+		trimmed := strings.TrimSpace(entry)
+		if trimmed == "" {
+			continue
+		}
+		buf.WriteString(trimmed)
+		buf.WriteByte('\n')
+	}
+	return buf.Bytes()
+}
+
+func writeLinkfinderInput(tmpDir, label string, data []byte) (string, error) {
+	sanitized := sanitizeLinkfinderLabel(label)
+	name := fmt.Sprintf("input.%s", sanitized)
+	path := filepath.Join(tmpDir, name)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func maybeSampleLinkfinderInput(tmpDir, label string, data []byte, limit int) (string, int, int, error) {

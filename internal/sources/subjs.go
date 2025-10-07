@@ -2,19 +2,17 @@ package sources
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
-	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
+	"passive-rec/internal/artifacts"
 	"passive-rec/internal/config"
 	"passive-rec/internal/runner"
 )
@@ -41,17 +39,17 @@ var (
 // the discovered JavaScript URLs, validates that they respond with HTTP 200 and
 // writes the surviving URLs to the sink using the "active: js:" prefix so they
 // are tracked as active findings.
-func SubJS(ctx context.Context, routesFile string, outdir string, out chan<- string) error {
+func SubJS(ctx context.Context, outdir string, out chan<- string) error {
 	bin, ok := subjsFindBin("subjs")
 	if !ok {
 		out <- "active: meta: subjs not found in PATH"
 		return runner.ErrMissingBinary
 	}
 
-	inputs, err := loadSubJSInput(filepath.Join(outdir, routesFile))
+	inputs, err := loadSubJSInput(outdir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			out <- "active: meta: subjs skipped missing input " + routesFile
+			out <- "active: meta: subjs skipped (missing artifacts.jsonl)"
 			return nil
 		}
 		return err
@@ -107,18 +105,16 @@ func SubJS(ctx context.Context, routesFile string, outdir string, out chan<- str
 	return nil
 }
 
-func loadSubJSInput(path string) ([]string, error) {
-	data, err := os.ReadFile(path)
+func loadSubJSInput(outdir string) ([]string, error) {
+	values, err := artifacts.CollectValues(outdir, "route", artifacts.ActiveOnly)
 	if err != nil {
 		return nil, err
 	}
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
 	seen := make(map[string]struct{})
 	var inputs []string
-	for scanner.Scan() {
-		line := extractSubJSInput(scanner.Text())
+	for _, candidate := range values {
+		line := extractSubJSInput(candidate)
 		if line == "" {
 			continue
 		}
@@ -127,9 +123,6 @@ func loadSubJSInput(path string) ([]string, error) {
 		}
 		seen[line] = struct{}{}
 		inputs = append(inputs, line)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan %s: %w", path, err)
 	}
 	return inputs, nil
 }
