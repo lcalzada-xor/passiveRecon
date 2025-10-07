@@ -49,18 +49,18 @@ func TestGenerateCreatesHTMLReport(t *testing.T) {
 	}
 
 	writeArtifacts(t, dir, []pipeline.Artifact{
-		{Type: "domain", Value: "app.example.com", Active: false},
-		{Type: "domain", Value: "api.example.com", Active: false},
-		{Type: "domain", Value: "static.test.com", Active: false},
-		{Type: "domain", Value: "deep.a.b.example.com", Active: false},
-		{Type: "route", Value: "http://app.example.com/login", Active: false},
-		{Type: "route", Value: "https://app.example.com/dashboard", Active: false},
-		{Type: "route", Value: "https://static.example.com/assets/img/logo.png", Active: false},
-		{Type: "certificate", Value: certOne, Active: false, Tool: "crt.sh"},
-		{Type: "certificate", Value: certTwo, Active: false, Tool: "censys"},
-		{Type: "certificate", Value: certThree, Active: false, Tool: "crt.sh"},
-		{Type: "meta", Value: "subfinder: ok", Active: false},
-		{Type: "meta", Value: "httpx: skipped", Active: false},
+		{Type: "domain", Value: "app.example.com", Active: false, Valid: true},
+		{Type: "domain", Value: "api.example.com", Active: false, Valid: true},
+		{Type: "domain", Value: "static.test.com", Active: false, Valid: true},
+		{Type: "domain", Value: "deep.a.b.example.com", Active: false, Valid: true},
+		{Type: "route", Value: "http://app.example.com/login", Active: false, Valid: true},
+		{Type: "route", Value: "https://app.example.com/dashboard", Active: false, Valid: true},
+		{Type: "route", Value: "https://static.example.com/assets/img/logo.png", Active: false, Valid: true},
+		{Type: "certificate", Value: certOne, Active: false, Valid: true, Tool: "crt.sh"},
+		{Type: "certificate", Value: certTwo, Active: false, Valid: true, Tool: "censys"},
+		{Type: "certificate", Value: certThree, Active: false, Valid: true, Tool: "crt.sh"},
+		{Type: "meta", Value: "subfinder: ok", Active: false, Valid: true},
+		{Type: "meta", Value: "httpx: skipped", Active: false, Valid: true},
 	})
 
 	cfg := &config.Config{Target: "example.com", OutDir: dir}
@@ -139,16 +139,16 @@ func TestGenerateIncludesActiveData(t *testing.T) {
 	}
 
 	writeArtifacts(t, dir, []pipeline.Artifact{
-		{Type: "domain", Value: "example.com", Active: false},
-		{Type: "route", Value: "https://example.com", Active: false},
-		{Type: "meta", Value: "passive: ok", Active: false},
-		{Type: "domain", Value: activeDomain, Active: true},
-		{Type: "route", Value: "http://vpn-admin.example.com/login", Active: true, Metadata: map[string]any{
+		{Type: "domain", Value: "example.com", Active: false, Valid: true},
+		{Type: "route", Value: "https://example.com", Active: false, Valid: true},
+		{Type: "meta", Value: "passive: ok", Active: false, Valid: true},
+		{Type: "domain", Value: activeDomain, Active: true, Valid: true},
+		{Type: "route", Value: "http://vpn-admin.example.com/login", Active: true, Valid: true, Metadata: map[string]any{
 			"raw":    activeRoute,
 			"status": 200,
 		}},
-		{Type: "dns", Value: string(dnsJSON), Active: true},
-		{Type: "meta", Value: "httpx(active): 1/1 ok", Active: true},
+		{Type: "dns", Value: string(dnsJSON), Active: true, Valid: true},
+		{Type: "meta", Value: "httpx(active): 1/1 ok", Active: true, Valid: true},
 	})
 
 	cfg := &config.Config{Target: "example.com", OutDir: dir, Active: true}

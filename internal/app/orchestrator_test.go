@@ -262,7 +262,7 @@ func TestRunPipelineConcurrentSourcesDedupesSink(t *testing.T) {
 
 func TestStepDedupeRunsDNSXWhenActive(t *testing.T) {
 	dir := t.TempDir()
-	writeOrchestratorArtifacts(t, dir, []pipeline.Artifact{{Type: "domain", Value: "one.example.com"}})
+	writeOrchestratorArtifacts(t, dir, []pipeline.Artifact{{Type: "domain", Value: "one.example.com", Valid: true}})
 
 	originalDNSX := sourceDNSX
 	defer func() { sourceDNSX = originalDNSX }()
