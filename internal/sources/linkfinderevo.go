@@ -1,3 +1,6 @@
+// Package sources coordina la ejecución de GoLinkfinderEVO sobre artefactos activos,
+// agrega hallazgos, los persiste (raw/HTML/JSON), los clasifica por tipo/categoría
+// y reinyecta rutas al pipeline mediante listas *.active y emisiones por canal.
 package sources
 
 import (
@@ -23,6 +26,7 @@ import (
 )
 
 var (
+	// Permite inyección en tests.
 	linkfinderFindBin = runner.FindBin
 	linkfinderRunCmd  = runner.RunCommandWithDir
 )
@@ -30,6 +34,14 @@ var (
 const (
 	linkfinderMaxInputEntries  = 200
 	linkfinderEntriesPerSecond = 15
+
+	defaultFilePerm  = 0o644
+	defaultDirPerm   = 0o755
+	tmpPrefix        = "passive-rec-linkfinderevo-*"
+	findingsDirName  = "linkFindings"
+	globalFindings   = "findings"
+	gfPrefix         = "gf"
+	undetectedActive = "undetected.active"
 )
 
 type linkfinderEndpoint struct {
@@ -116,7 +128,10 @@ func (agg *linkfinderAggregate) add(resource string, endpoint linkfinderEndpoint
 
 	res, ok := agg.resources[resource]
 	if !ok {
-		res = &linkfinderAggregateResource{name: resource, endpoints: make(map[string]linkfinderEndpoint)}
+		res = &linkfinderAggregateResource{
+			name:      resource,
+			endpoints: make(map[string]linkfinderEndpoint),
+		}
 		agg.resources[resource] = res
 		agg.order = append(agg.order, resource)
 	}
@@ -254,19 +269,18 @@ func (agg *linkfinderGFAggregate) results() []linkfinderGFFindingResult {
 	return results
 }
 
-// LinkFinderEVO executes the GoLinkfinderEVO binary across the active HTML, JS and crawl lists.
-// It consolidates the resulting findings into the routes/linkFindings directory and streams normalized
-// endpoints to the sink for further categorisation.
+// LinkFinderEVO ejecuta el binario GoLinkfinderEVO sobre HTML/JS/crawl activos,
+// agrega resultados, persiste artefactos y emite rutas clasificadas al sink.
 func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<- string) error {
 	bin, ok := linkfinderFindBin("linkfinderevo", "GoLinkfinderEVO", "golinkfinder")
 	if !ok {
-		out <- "active: meta: linkfinderevo not found in PATH"
+		emit(out, "active: meta: linkfinderevo not found in PATH")
 		return runner.ErrMissingBinary
 	}
 
-	findingsDir := filepath.Join(outdir, "routes", "linkFindings")
-	if err := os.MkdirAll(findingsDir, 0o755); err != nil {
-		return err
+	findingsDir := filepath.Join(outdir, "routes", findingsDirName)
+	if err := os.MkdirAll(findingsDir, defaultDirPerm); err != nil {
+		return fmt.Errorf("mkdir findings dir: %w", err)
 	}
 
 	selectors := map[string]artifacts.ActiveState{
@@ -277,10 +291,10 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 	valuesByType, err := artifacts.CollectValuesByType(outdir, selectors)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			out <- "active: meta: linkfinderevo skipped (missing artifacts.jsonl)"
+			emit(out, "active: meta: linkfinderevo skipped (missing artifacts.jsonl)")
 			return nil
 		}
-		return err
+		return fmt.Errorf("collect artifacts: %w", err)
 	}
 
 	inputs := []struct {
@@ -295,26 +309,36 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 	aggregate := newLinkfinderAggregate()
 	gfAggregate := newLinkfinderGFAggregate()
 	var firstErr error
+
 	totalBudget := linkfinderEntryBudget(ctx, len(inputs)*linkfinderMaxInputEntries)
 	if totalBudget <= 0 {
-		out <- "active: meta: linkfinderevo skipped (insufficient time budget)"
+		emit(out, "active: meta: linkfinderevo skipped (insufficient time budget)")
 		return nil
 	}
 
+	// Semilla separada por ejecución para muestreos.
+	rand.Seed(time.Now().UnixNano())
+
 	for _, input := range inputs {
+		// Cancelación temprana por contexto.
+		if ctx.Err() != nil {
+			recordLinkfinderError(&firstErr, ctx.Err())
+			break
+		}
+
 		data := encodeLinkfinderEntries(input.values)
 		if len(bytes.TrimSpace(data)) == 0 {
 			continue
 		}
 
 		if totalBudget <= 0 {
-			out <- fmt.Sprintf("active: meta: linkfinderevo skipped %s (time budget exhausted)", input.label)
+			emit(out, fmt.Sprintf("active: meta: linkfinderevo skipped %s (time budget exhausted)", input.label))
 			break
 		}
 
-		tmpDir, err := os.MkdirTemp("", "passive-rec-linkfinderevo-*")
+		tmpDir, err := os.MkdirTemp("", tmpPrefix)
 		if err != nil {
-			recordLinkfinderError(&firstErr, err)
+			recordLinkfinderError(&firstErr, fmt.Errorf("mktemp: %w", err))
 			break
 		}
 
@@ -325,8 +349,8 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 
 		inputPath, err := writeLinkfinderInput(tmpDir, input.label, data)
 		if err != nil {
-			recordLinkfinderError(&firstErr, err)
-			os.RemoveAll(tmpDir)
+			recordLinkfinderError(&firstErr, fmt.Errorf("write input: %w", err))
+			_ = os.RemoveAll(tmpDir)
 			continue
 		}
 
@@ -334,17 +358,17 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 
 		samplePath, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmpDir, input.label, data, limit)
 		if err != nil {
-			recordLinkfinderError(&firstErr, err)
-			os.RemoveAll(tmpDir)
+			recordLinkfinderError(&firstErr, fmt.Errorf("sampling: %w", err))
+			_ = os.RemoveAll(tmpDir)
 			break
 		}
 		if samplePath != "" {
 			absPath = samplePath
-			out <- fmt.Sprintf("active: meta: linkfinderevo sampling %d of %d entries from %s", sampledEntries, totalEntries, input.label)
+			emit(out, fmt.Sprintf("active: meta: linkfinderevo sampling %d of %d entries from %s", sampledEntries, totalEntries, input.label))
 		}
 		if sampledEntries == 0 {
-			out <- fmt.Sprintf("active: meta: linkfinderevo skipped %s (no entries within time budget)", input.label)
-			os.RemoveAll(tmpDir)
+			emit(out, fmt.Sprintf("active: meta: linkfinderevo skipped %s (no entries within time budget)", input.label))
+			_ = os.RemoveAll(tmpDir)
 			continue
 		}
 
@@ -359,13 +383,13 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 
 		args := buildLinkfinderArgs(absPath, target, rawPath, htmlPath, jsonPath)
 
+		// Drenaje de salida CLI para evitar bloqueo.
 		intermediate := make(chan string)
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for range intermediate {
-				// Drain CLI output to avoid blocking. Parsed results come from JSON output.
 			}
 		}()
 
@@ -374,19 +398,19 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 		wg.Wait()
 
 		if err := accumulateLinkfinderResults(jsonPath, aggregate); err != nil {
-			recordLinkfinderError(&firstErr, err)
+			recordLinkfinderError(&firstErr, fmt.Errorf("accumulate results: %w", err))
 		}
 		if err := accumulateLinkfinderGFFindings(filepath.Join(tmpDir, "gf.json"), gfAggregate); err != nil {
-			recordLinkfinderError(&firstErr, err)
+			recordLinkfinderError(&firstErr, fmt.Errorf("accumulate gf: %w", err))
 		}
 
 		shouldPersist := runErr == nil || errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded)
 		if shouldPersist {
 			if err := persistLinkfinderArtifacts(findingsDir, input.label, rawPath, htmlPath, jsonPath); err != nil {
-				recordLinkfinderError(&firstErr, err)
+				recordLinkfinderError(&firstErr, fmt.Errorf("persist artifacts: %w", err))
 			}
 			if err := persistLinkfinderGFArtifacts(findingsDir, input.label, tmpDir); err != nil {
-				recordLinkfinderError(&firstErr, err)
+				recordLinkfinderError(&firstErr, fmt.Errorf("persist gf: %w", err))
 			}
 		}
 
@@ -394,20 +418,19 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 			recordLinkfinderError(&firstErr, runErr)
 		}
 
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 
 		if runErr != nil {
 			break
 		}
-
 		if totalBudget == 0 {
-			out <- "active: meta: linkfinderevo stopped (time budget consumed)"
+			emit(out, "active: meta: linkfinderevo stopped (time budget consumed)")
 			break
 		}
 	}
 
 	if err := writeLinkfinderOutputs(outdir, aggregate, gfAggregate, out); err != nil {
-		recordLinkfinderError(&firstErr, err)
+		recordLinkfinderError(&firstErr, fmt.Errorf("write outputs: %w", err))
 	}
 
 	return firstErr
@@ -423,9 +446,9 @@ func recordLinkfinderError(first *error, candidate error) {
 }
 
 func writeLinkfinderOutputs(outdir string, aggregate *linkfinderAggregate, gfAggregate *linkfinderGFAggregate, out chan<- string) error {
-	findingsDir := filepath.Join(outdir, "routes", "linkFindings")
-	if err := os.MkdirAll(findingsDir, 0o755); err != nil {
-		return err
+	findingsDir := filepath.Join(outdir, "routes", findingsDirName)
+	if err := os.MkdirAll(findingsDir, defaultDirPerm); err != nil {
+		return fmt.Errorf("mkdir findings dir: %w", err)
 	}
 
 	reports := aggregate.reports()
@@ -434,39 +457,40 @@ func writeLinkfinderOutputs(outdir string, aggregate *linkfinderAggregate, gfAgg
 		return nil
 	}
 
+	nowUTC := time.Now().UTC()
 	meta := linkfinderMetadata{
-		GeneratedAt:    time.Now().UTC(),
+		GeneratedAt:    nowUTC,
 		TotalResources: len(reports),
 		TotalEndpoints: aggregate.endpointCount(),
 	}
 
 	payload := linkfinderPayload{Meta: meta, Resources: reports}
 
-	if err := writeLinkfinderJSON(filepath.Join(findingsDir, "findings.json"), payload); err != nil {
-		return err
+	if err := writeLinkfinderJSON(filepath.Join(findingsDir, globalFindings+".json"), payload); err != nil {
+		return fmt.Errorf("write global json: %w", err)
 	}
-	if err := writeLinkfinderRaw(filepath.Join(findingsDir, "findings.raw"), payload); err != nil {
-		return err
+	if err := writeLinkfinderRaw(filepath.Join(findingsDir, globalFindings+".raw"), payload); err != nil {
+		return fmt.Errorf("write global raw: %w", err)
 	}
-	if err := writeLinkfinderHTML(filepath.Join(findingsDir, "findings.html"), payload); err != nil {
-		return err
+	if err := writeLinkfinderHTML(filepath.Join(findingsDir, globalFindings+".html"), payload); err != nil {
+		return fmt.Errorf("write global html: %w", err)
 	}
 
 	emission, err := emitLinkfinderFindings(reports, out)
 	if err != nil {
-		return err
+		return fmt.Errorf("emit findings: %w", err)
 	}
 
-	if err := writeLinkfinderUndetected(filepath.Join(findingsDir, "undetected.active"), emission.Undetected); err != nil {
-		return err
+	if err := writeLinkfinderUndetected(filepath.Join(findingsDir, undetectedActive), emission.Undetected); err != nil {
+		return fmt.Errorf("write undetected: %w", err)
 	}
 
 	if err := persistLinkfinderActiveOutputs(outdir, emission); err != nil {
-		return err
+		return fmt.Errorf("persist active outputs: %w", err)
 	}
 
 	if err := emitLinkfinderGFFindings(gfAggregate, out); err != nil {
-		return err
+		return fmt.Errorf("emit gf findings: %w", err)
 	}
 
 	return nil
@@ -474,8 +498,7 @@ func writeLinkfinderOutputs(outdir string, aggregate *linkfinderAggregate, gfAgg
 
 func buildLinkfinderArgs(inputPath, target, rawPath, htmlPath, jsonPath string) []string {
 	args := []string{"-i", inputPath, "-d", "-max-depth", "2", "--insecure"}
-	scope := normalizeScope(target)
-	if scope != "" {
+	if scope := normalizeScope(target); scope != "" {
 		args = append(args, "-scope", scope, "--scope-include-subdomains")
 	}
 	output := fmt.Sprintf("cli,raw=%s,html=%s,json=%s", rawPath, htmlPath, jsonPath)
@@ -495,7 +518,6 @@ func linkfinderEntryBudget(ctx context.Context, maxTotal int) int {
 	if remaining <= 0 {
 		return 0
 	}
-
 	budget := int(remaining.Seconds() * linkfinderEntriesPerSecond)
 	if budget > maxTotal {
 		budget = maxTotal
@@ -523,8 +545,8 @@ func writeLinkfinderInput(tmpDir, label string, data []byte) (string, error) {
 	sanitized := sanitizeLinkfinderLabel(label)
 	name := fmt.Sprintf("input.%s", sanitized)
 	path := filepath.Join(tmpDir, name)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return "", err
+	if err := os.WriteFile(path, data, defaultFilePerm); err != nil {
+		return "", fmt.Errorf("write input file: %w", err)
 	}
 	return path, nil
 }
@@ -552,8 +574,8 @@ func maybeSampleLinkfinderInput(tmpDir, label string, data []byte, limit int) (s
 
 	sampleName := fmt.Sprintf("input.%s.sample", sanitizeLinkfinderLabel(label))
 	samplePath := filepath.Join(tmpDir, sampleName)
-	if err := os.WriteFile(samplePath, buf.Bytes(), 0o644); err != nil {
-		return "", total, len(sampled), err
+	if err := os.WriteFile(samplePath, buf.Bytes(), defaultFilePerm); err != nil {
+		return "", total, len(sampled), fmt.Errorf("write sampled input: %w", err)
 	}
 
 	return samplePath, total, len(sampled), nil
@@ -567,7 +589,6 @@ func parseLinkfinderEntries(data []byte) [][]byte {
 		if len(trimmed) == 0 {
 			continue
 		}
-		// Copy to avoid retaining references to the original slice backing array.
 		entry := make([]byte, len(trimmed))
 		copy(entry, trimmed)
 		entries = append(entries, entry)
@@ -579,10 +600,8 @@ func sampleLinkfinderEntries(entries [][]byte, limit int) [][]byte {
 	if limit <= 0 || len(entries) <= limit {
 		return entries
 	}
-
 	idxs := rand.Perm(len(entries))[:limit]
 	sort.Ints(idxs)
-
 	sampled := make([][]byte, 0, limit)
 	for _, idx := range idxs {
 		sampled = append(sampled, entries[idx])
@@ -599,8 +618,9 @@ func sanitizeLinkfinderLabel(label string) string {
 		switch r {
 		case '/', '\\', ':':
 			return '_'
+		default:
+			return r
 		}
-		return r
 	}, trimmed)
 	if sanitized == "" {
 		return "input"
@@ -615,8 +635,7 @@ func normalizeScope(target string) string {
 	}
 	if strings.Contains(trimmed, "://") {
 		if u, err := url.Parse(trimmed); err == nil {
-			host := u.Hostname()
-			if host != "" {
+			if host := u.Hostname(); host != "" {
 				return host
 			}
 		}
@@ -630,7 +649,7 @@ func accumulateLinkfinderResults(jsonPath string, aggregate *linkfinderAggregate
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("read results json: %w", err)
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
 		return nil
@@ -638,7 +657,7 @@ func accumulateLinkfinderResults(jsonPath string, aggregate *linkfinderAggregate
 
 	var payload linkfinderPayload
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return err
+		return fmt.Errorf("unmarshal results: %w", err)
 	}
 
 	for _, report := range payload.Resources {
@@ -646,7 +665,6 @@ func accumulateLinkfinderResults(jsonPath string, aggregate *linkfinderAggregate
 			aggregate.add(report.Resource, ep)
 		}
 	}
-
 	return nil
 }
 
@@ -654,13 +672,12 @@ func accumulateLinkfinderGFFindings(jsonPath string, aggregate *linkfinderGFAggr
 	if aggregate == nil {
 		return nil
 	}
-
 	data, err := os.ReadFile(jsonPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("read gf json: %w", err)
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
 		return nil
@@ -678,13 +695,12 @@ func accumulateLinkfinderGFFindings(jsonPath string, aggregate *linkfinderGFAggr
 
 	var report gfReport
 	if err := json.Unmarshal(data, &report); err != nil {
-		return err
+		return fmt.Errorf("unmarshal gf: %w", err)
 	}
 
-	for _, finding := range report.Findings {
-		aggregate.add(finding.Resource, finding.Line, finding.Evidence, finding.Context, finding.Rules)
+	for _, f := range report.Findings {
+		aggregate.add(f.Resource, f.Line, f.Evidence, f.Context, f.Rules)
 	}
-
 	return nil
 }
 
@@ -721,17 +737,15 @@ func persistLinkfinderArtifacts(findingsDir, label, rawPath, htmlPath, jsonPath 
 		src  string
 		dest string
 	}{
-		{src: rawPath, dest: filepath.Join(findingsDir, fmt.Sprintf("findings.%s.raw", label))},
-		{src: htmlPath, dest: filepath.Join(findingsDir, fmt.Sprintf("findings.%s.html", label))},
-		{src: jsonPath, dest: filepath.Join(findingsDir, fmt.Sprintf("findings.%s.json", label))},
+		{src: rawPath, dest: filepath.Join(findingsDir, fmt.Sprintf("%s.%s.raw", globalFindings, label))},
+		{src: htmlPath, dest: filepath.Join(findingsDir, fmt.Sprintf("%s.%s.html", globalFindings, label))},
+		{src: jsonPath, dest: filepath.Join(findingsDir, fmt.Sprintf("%s.%s.json", globalFindings, label))},
 	}
-
-	for _, output := range outputs {
-		if err := copyLinkfinderArtifact(output.src, output.dest); err != nil {
-			return err
+	for _, o := range outputs {
+		if err := copyLinkfinderArtifact(o.src, o.dest); err != nil {
+			return fmt.Errorf("copy %s -> %s: %w", o.src, o.dest, err)
 		}
 	}
-
 	return nil
 }
 
@@ -740,17 +754,15 @@ func persistLinkfinderGFArtifacts(findingsDir, label, srcDir string) error {
 		name string
 		dest string
 	}{
-		{name: "gf.txt", dest: filepath.Join(findingsDir, fmt.Sprintf("gf.%s.txt", label))},
-		{name: "gf.json", dest: filepath.Join(findingsDir, fmt.Sprintf("gf.%s.json", label))},
+		{name: "gf.txt", dest: filepath.Join(findingsDir, fmt.Sprintf("%s.%s.txt", gfPrefix, label))},
+		{name: "gf.json", dest: filepath.Join(findingsDir, fmt.Sprintf("%s.%s.json", gfPrefix, label))},
 	}
-
-	for _, output := range outputs {
-		src := filepath.Join(srcDir, output.name)
-		if err := copyLinkfinderArtifact(src, output.dest); err != nil {
-			return err
+	for _, o := range outputs {
+		src := filepath.Join(srcDir, o.name)
+		if err := copyLinkfinderArtifact(src, o.dest); err != nil {
+			return fmt.Errorf("copy gf %s -> %s: %w", src, o.dest, err)
 		}
 	}
-
 	return nil
 }
 
@@ -758,68 +770,72 @@ func copyLinkfinderArtifact(src, dest string) error {
 	data, err := os.ReadFile(src)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			// si el src no existe, elimina destino previo si lo hubiera
 			if err := os.Remove(dest); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
+				return fmt.Errorf("remove stale dest: %w", err)
 			}
 			return nil
 		}
-		return err
+		return fmt.Errorf("read artifact: %w", err)
 	}
 
 	if len(bytes.TrimSpace(data)) == 0 {
 		if err := os.Remove(dest); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
+			return fmt.Errorf("remove empty dest: %w", err)
 		}
 		return nil
 	}
 
-	return os.WriteFile(dest, data, 0o644)
+	if err := os.WriteFile(dest, data, defaultFilePerm); err != nil {
+		return fmt.Errorf("write dest: %w", err)
+	}
+	return nil
 }
 
 func writeLinkfinderJSON(path string, payload linkfinderPayload) error {
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal json: %w", err)
 	}
-	return os.WriteFile(path, data, 0o644)
+	if err := os.WriteFile(path, data, defaultFilePerm); err != nil {
+		return fmt.Errorf("write json: %w", err)
+	}
+	return nil
 }
 
 func writeLinkfinderRaw(path string, payload linkfinderPayload) error {
 	var buf bytes.Buffer
+	bw := bufio.NewWriter(&buf)
 
-	buf.WriteString("# GoLinkfinderEVO raw results\n")
-	buf.WriteString(fmt.Sprintf("# Generated at: %s\n", payload.Meta.GeneratedAt.Format(time.RFC3339)))
-	buf.WriteString(fmt.Sprintf("# Resources scanned: %d\n", payload.Meta.TotalResources))
-	buf.WriteString(fmt.Sprintf("# Total endpoints: %d\n\n", payload.Meta.TotalEndpoints))
+	fmt.Fprintln(bw, "# GoLinkfinderEVO raw results")
+	fmt.Fprintf(bw, "# Generated at: %s\n", payload.Meta.GeneratedAt.Format(time.RFC3339))
+	fmt.Fprintf(bw, "# Resources scanned: %d\n", payload.Meta.TotalResources)
+	fmt.Fprintf(bw, "# Total endpoints: %d\n\n", payload.Meta.TotalEndpoints)
 
 	for _, report := range payload.Resources {
-		buf.WriteString("[Resource] ")
-		buf.WriteString(report.Resource)
-		buf.WriteByte('\n')
+		fmt.Fprintln(bw, "[Resource] "+report.Resource)
 
 		if len(report.Endpoints) == 0 {
-			buf.WriteString("#   No endpoints were found.\n\n")
+			fmt.Fprintln(bw, "#   No endpoints were found.\n")
 			continue
 		}
-
 		for _, ep := range report.Endpoints {
-			buf.WriteString(ep.Link)
-			buf.WriteByte('\n')
+			fmt.Fprintln(bw, ep.Link)
 
-			trimmed := strings.TrimSpace(ep.Context)
-			if trimmed != "" {
+			if trimmed := strings.TrimSpace(ep.Context); trimmed != "" {
 				for _, line := range strings.Split(trimmed, "\n") {
-					buf.WriteString("#   ")
-					buf.WriteString(line)
-					buf.WriteByte('\n')
+					fmt.Fprintln(bw, "#   "+line)
 				}
 			}
-
-			buf.WriteByte('\n')
+			bw.WriteByte('\n')
 		}
 	}
+	_ = bw.Flush()
 
-	return os.WriteFile(path, buf.Bytes(), 0o644)
+	if err := os.WriteFile(path, buf.Bytes(), defaultFilePerm); err != nil {
+		return fmt.Errorf("write raw: %w", err)
+	}
+	return nil
 }
 
 func writeLinkfinderHTML(path string, payload linkfinderPayload) error {
@@ -829,13 +845,11 @@ func writeLinkfinderHTML(path string, payload linkfinderPayload) error {
 		Line    int
 		Index   int
 	}
-
 	type resourceView struct {
 		Name      string
 		Count     int
 		Endpoints []endpointView
 	}
-
 	type pageData struct {
 		GeneratedAt    string
 		TotalResources int
@@ -877,10 +891,12 @@ func writeLinkfinderHTML(path string, payload linkfinderPayload) error {
 
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, data); err != nil {
-		return err
+		return fmt.Errorf("execute template: %w", err)
 	}
-
-	return os.WriteFile(path, buf.Bytes(), 0o644)
+	if err := os.WriteFile(path, buf.Bytes(), defaultFilePerm); err != nil {
+		return fmt.Errorf("write html: %w", err)
+	}
+	return nil
 }
 
 func emitLinkfinderFindings(reports []linkfinderReport, out chan<- string) (linkfinderEmissionResult, error) {
@@ -893,42 +909,42 @@ func emitLinkfinderFindings(reports []linkfinderReport, out chan<- string) (link
 	seenCategories := make(map[routes.Category]map[string]struct{})
 	undetectedSet := make(map[string]struct{})
 
+	addOnce := func(set map[string]struct{}, value string, emitPrefix string, bucket *[]string) {
+		if _, ok := set[value]; ok {
+			return
+		}
+		set[value] = struct{}{}
+		if emitPrefix != "" {
+			emit(out, emitPrefix+value)
+		}
+		if bucket != nil {
+			*bucket = append(*bucket, value)
+		}
+	}
+
 	for _, report := range reports {
 		for _, ep := range report.Endpoints {
 			link := strings.TrimSpace(ep.Link)
 			if link == "" {
 				continue
 			}
-			if _, ok := seenRoutes[link]; !ok {
-				out <- "active: " + link
-				seenRoutes[link] = struct{}{}
-				result.Routes = append(result.Routes, link)
+			// Emit ruta base siempre
+			if _, seen := seenRoutes[link]; !seen {
+				addOnce(seenRoutes, link, "active: ", &result.Routes)
 			}
 
 			classification := classifyLinkfinderEndpoint(link)
 			if classification.isJS {
-				if _, ok := seenJS[link]; !ok {
-					out <- "active: js: " + link
-					seenJS[link] = struct{}{}
-					result.JS = append(result.JS, link)
-				}
+				addOnce(seenJS, link, "active: js: ", &result.JS)
 			}
 			if classification.isHTML || classification.isImage {
-				if _, ok := seenHTML[link]; !ok {
-					out <- "active: html: " + link
-					seenHTML[link] = struct{}{}
-				}
+				// marca que es HTML para potenciales consumidores
+				addOnce(seenHTML, link, "active: html: ", nil)
 				if classification.isHTML {
-					if _, ok := seenHTMLTargets[link]; !ok {
-						seenHTMLTargets[link] = struct{}{}
-						result.HTML = append(result.HTML, link)
-					}
+					addOnce(seenHTMLTargets, link, "", &result.HTML)
 				}
 				if classification.isImage {
-					if _, ok := seenImages[link]; !ok {
-						seenImages[link] = struct{}{}
-						result.Images = append(result.Images, link)
-					}
+					addOnce(seenImages, link, "", &result.Images)
 				}
 			}
 			if len(classification.categories) > 0 {
@@ -946,7 +962,7 @@ func emitLinkfinderFindings(reports []linkfinderReport, out chan<- string) (link
 						continue
 					}
 					set[link] = struct{}{}
-					out <- "active: " + prefix + ": " + link
+					emit(out, "active: "+prefix+": "+link)
 					result.Categories[cat] = append(result.Categories[cat], link)
 				}
 			}
@@ -995,9 +1011,9 @@ func emitLinkfinderGFFindings(aggregate *linkfinderGFAggregate, out chan<- strin
 			Rules:    finding.Rules,
 		})
 		if err != nil {
-			return err
+			return fmt.Errorf("marshal gf payload: %w", err)
 		}
-		out <- "active: gffinding: " + string(data)
+		emit(out, "active: gffinding: "+string(data))
 	}
 
 	return nil
@@ -1071,7 +1087,7 @@ func hasCompleteURLPrefix(link string) bool {
 func writeLinkfinderUndetected(path string, entries []string) error {
 	if len(entries) == 0 {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
+			return fmt.Errorf("remove undetected: %w", err)
 		}
 		return nil
 	}
@@ -1082,7 +1098,10 @@ func writeLinkfinderUndetected(path string, entries []string) error {
 		buf.WriteByte('\n')
 	}
 
-	return os.WriteFile(path, buf.Bytes(), 0o644)
+	if err := os.WriteFile(path, buf.Bytes(), defaultFilePerm); err != nil {
+		return fmt.Errorf("write undetected: %w", err)
+	}
+	return nil
 }
 
 func persistLinkfinderActiveOutputs(outdir string, emission linkfinderEmissionResult) error {
@@ -1091,31 +1110,22 @@ func persistLinkfinderActiveOutputs(outdir string, emission linkfinderEmissionRe
 		entries []string
 	}
 
-	targets := []target{{
-		path:    filepath.Join(outdir, "routes", "routes.active"),
-		entries: emission.Routes,
-	}, {
-		path:    filepath.Join(outdir, "routes", "js", "js.active"),
-		entries: emission.JS,
-	}, {
-		path:    filepath.Join(outdir, "routes", "html", "html.active"),
-		entries: emission.HTML,
-	}, {
-		path:    filepath.Join(outdir, "routes", "images", "images.active"),
-		entries: emission.Images,
-	}}
+	targets := []target{
+		{path: filepath.Join(outdir, "routes", "routes.active"), entries: emission.Routes},
+		{path: filepath.Join(outdir, "routes", "js", "js.active"), entries: emission.JS},
+		{path: filepath.Join(outdir, "routes", "html", "html.active"), entries: emission.HTML},
+		{path: filepath.Join(outdir, "routes", "images", "images.active"), entries: emission.Images},
+	}
 
 	for cat, entries := range emission.Categories {
-		path := linkfinderCategoryActivePath(outdir, cat)
-		if path == "" {
-			continue
+		if p := linkfinderCategoryActivePath(outdir, cat); p != "" {
+			targets = append(targets, target{path: p, entries: entries})
 		}
-		targets = append(targets, target{path: path, entries: entries})
 	}
 
 	for _, t := range targets {
 		if err := mergeAndWriteLinkfinderEntries(t.path, t.entries); err != nil {
-			return err
+			return fmt.Errorf("merge/write %s: %w", t.path, err)
 		}
 	}
 	return nil
@@ -1148,31 +1158,28 @@ func mergeAndWriteLinkfinderEntries(path string, newEntries []string) error {
 	}
 
 	entriesSet := make(map[string]struct{})
-	data, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if err == nil {
+
+	// Carga previos si existen.
+	if data, err := os.ReadFile(path); err == nil {
 		scanner := bufio.NewScanner(bytes.NewReader(data))
 		for scanner.Scan() {
 			entry := strings.TrimSpace(scanner.Text())
-			if entry == "" {
-				continue
+			if entry != "" {
+				entriesSet[entry] = struct{}{}
 			}
-			entriesSet[entry] = struct{}{}
 		}
-		if err := scanner.Err(); err != nil {
-			return err
+		if scanErr := scanner.Err(); scanErr != nil {
+			return fmt.Errorf("scan existing: %w", scanErr)
 		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read existing: %w", err)
 	}
 
 	initialLen := len(entriesSet)
 	for _, entry := range newEntries {
-		trimmed := strings.TrimSpace(entry)
-		if trimmed == "" {
-			continue
+		if trimmed := strings.TrimSpace(entry); trimmed != "" {
+			entriesSet[trimmed] = struct{}{}
 		}
-		entriesSet[trimmed] = struct{}{}
 	}
 	if len(entriesSet) == initialLen {
 		return nil
@@ -1184,17 +1191,21 @@ func mergeAndWriteLinkfinderEntries(path string, newEntries []string) error {
 	}
 	sort.Strings(merged)
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+	if err := os.MkdirAll(filepath.Dir(path), defaultDirPerm); err != nil {
+		return fmt.Errorf("mkdir target dir: %w", err)
 	}
 
 	var buf bytes.Buffer
+	bw := bufio.NewWriter(&buf)
 	for _, entry := range merged {
-		buf.WriteString(entry)
-		buf.WriteByte('\n')
+		fmt.Fprintln(bw, entry)
 	}
+	_ = bw.Flush()
 
-	return os.WriteFile(path, buf.Bytes(), 0o644)
+	if err := os.WriteFile(path, buf.Bytes(), defaultFilePerm); err != nil {
+		return fmt.Errorf("write merged: %w", err)
+	}
+	return nil
 }
 
 func cleanLinkfinderEndpointLink(raw string) string {
@@ -1203,12 +1214,15 @@ func cleanLinkfinderEndpointLink(raw string) string {
 		return ""
 	}
 
+	// quita comillas envolventes comunes
 	trimmed = strings.Trim(trimmed, "\"'`")
 
+	// corta a primer separador extraño (espacios, brackets, etc.)
 	if idx := strings.IndexAny(trimmed, " \t\r\n\"'<>[]{}()"); idx != -1 {
 		trimmed = trimmed[:idx]
 	}
 
+	// quita puntuación final común
 	trimmed = strings.TrimRight(trimmed, ",.;")
 
 	return strings.TrimSpace(trimmed)
@@ -1272,3 +1286,11 @@ const linkfinderTemplate = `<!DOCTYPE html>
 </body>
 </html>
 `
+
+// emit envía al canal solo si existe; ayuda en tests y evita panics.
+func emit(out chan<- string, msg string) {
+	if out == nil || msg == "" {
+		return
+	}
+	out <- msg
+}
