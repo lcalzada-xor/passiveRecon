@@ -410,24 +410,24 @@ func (s *Sink) Start(workers int) {
 func (s *Sink) In() chan<- string { return s.lines }
 
 func (s *Sink) InWithTool(tool string) (chan<- string, func()) {
-        tool = strings.TrimSpace(tool)
-        if tool == "" || s == nil {
-                return s.In(), func() {}
-        }
-        ch := make(chan string)
-        var wg sync.WaitGroup
-        wg.Add(1)
-        go func() {
-                defer wg.Done()
-                for line := range ch {
-                        s.lines <- WrapWithTool(tool, line)
-                }
-        }()
-        cleanup := func() {
-                close(ch)
-                wg.Wait()
-        }
-        return ch, cleanup
+	tool = strings.TrimSpace(tool)
+	if tool == "" || s == nil {
+		return s.In(), func() {}
+	}
+	ch := make(chan string)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for line := range ch {
+			s.lines <- WrapWithTool(tool, line)
+		}
+	}()
+	cleanup := func() {
+		close(ch)
+		wg.Wait()
+	}
+	return ch, cleanup
 }
 
 func (s *Sink) beginLine() {
@@ -481,6 +481,7 @@ var prefixHandlers = []struct {
 	name    string
 	handler lineHandler
 }{
+	{prefix: "dns:", name: "handleDNS", handler: handleDNS},
 	{prefix: "meta:", name: "handleMeta", handler: handleMeta},
 	{prefix: "rdap:", name: "handleRDAP", handler: handleRDAP},
 	{prefix: "js:", name: "handleJS", handler: handleJS},
@@ -828,6 +829,58 @@ func handleMeta(s *Sink, line string, isActive bool, tool string) bool {
 	}
 
 	return false
+}
+
+type dnsArtifact struct {
+	Host  string   `json:"host,omitempty"`
+	Type  string   `json:"type,omitempty"`
+	Value string   `json:"value,omitempty"`
+	Raw   string   `json:"raw,omitempty"`
+	PTR   []string `json:"ptr,omitempty"`
+}
+
+func handleDNS(s *Sink, line string, isActive bool, tool string) bool {
+	payload := strings.TrimSpace(strings.TrimPrefix(line, "dns:"))
+	if payload == "" {
+		return true
+	}
+
+	metadata := make(map[string]any)
+	var record dnsArtifact
+	if err := json.Unmarshal([]byte(payload), &record); err == nil {
+		if host := strings.TrimSpace(record.Host); host != "" {
+			metadata["host"] = host
+		}
+		if recordType := strings.TrimSpace(record.Type); recordType != "" {
+			metadata["type"] = recordType
+		}
+		if value := strings.TrimSpace(record.Value); value != "" {
+			metadata["value"] = value
+		}
+		raw := strings.TrimSpace(record.Raw)
+		if raw == "" {
+			raw = payload
+		}
+		if raw != "" {
+			metadata["raw"] = raw
+		}
+		if len(record.PTR) > 0 {
+			metadata["ptr"] = record.PTR
+		}
+	} else {
+		metadata["raw"] = payload
+	}
+	if len(metadata) == 0 {
+		metadata = nil
+	}
+
+	s.recordArtifact(tool, Artifact{
+		Type:     "dns",
+		Value:    payload,
+		Active:   isActive,
+		Metadata: metadata,
+	})
+	return true
 }
 
 func handleRDAP(s *Sink, line string, isActive bool, tool string) bool {

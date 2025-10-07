@@ -41,6 +41,40 @@ func (s ActiveState) matches(active bool) bool {
 // actividad deseado como valor. Si el archivo no existe se retorna el error de
 // sistema correspondiente.
 func CollectValuesByType(outdir string, selectors map[string]ActiveState) (map[string][]string, error) {
+	artifactsByType, err := CollectArtifactsByType(outdir, selectors)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string][]string, len(selectors))
+	for typ := range selectors {
+		result[typ] = nil
+	}
+
+	for typ, artifacts := range artifactsByType {
+		if len(artifacts) == 0 {
+			continue
+		}
+		values := make([]string, 0, len(artifacts))
+		for _, artifact := range artifacts {
+			value := strings.TrimSpace(artifact.Value)
+			if value == "" {
+				continue
+			}
+			values = append(values, value)
+		}
+		if len(values) > 0 {
+			result[typ] = values
+		}
+	}
+
+	return result, nil
+}
+
+// CollectArtifactsByType lee artifacts.jsonl desde el directorio proporcionado y
+// devuelve los artefactos agrupados por tipo aplicando el filtro de actividad
+// indicado por selectors.
+func CollectArtifactsByType(outdir string, selectors map[string]ActiveState) (map[string][]pipeline.Artifact, error) {
 	path := filepath.Join(outdir, "artifacts.jsonl")
 	file, err := os.Open(path)
 	if err != nil {
@@ -51,7 +85,7 @@ func CollectValuesByType(outdir string, selectors map[string]ActiveState) (map[s
 	buf := bufio.NewScanner(file)
 	buf.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
 
-	result := make(map[string][]string, len(selectors))
+	result := make(map[string][]pipeline.Artifact, len(selectors))
 	for buf.Scan() {
 		line := strings.TrimSpace(buf.Text())
 		if line == "" {
@@ -71,24 +105,17 @@ func CollectValuesByType(outdir string, selectors map[string]ActiveState) (map[s
 			continue
 		}
 
-		value := strings.TrimSpace(artifact.Value)
-		if value == "" && artifact.Metadata != nil {
-			if raw, ok := artifact.Metadata["raw"].(string); ok {
-				value = strings.TrimSpace(raw)
-			}
-		}
-		if value == "" {
+		artifact.Value = strings.TrimSpace(artifact.Value)
+		if artifact.Value == "" {
 			continue
 		}
 
-		result[artifact.Type] = append(result[artifact.Type], value)
+		result[artifact.Type] = append(result[artifact.Type], artifact)
 	}
 	if err := buf.Err(); err != nil {
 		return nil, fmt.Errorf("scan artifacts: %w", err)
 	}
 
-	// Garantiza que los tipos solicitados estén presentes en el resultado
-	// aunque no existan entradas correspondientes.
 	for typ := range selectors {
 		if _, ok := result[typ]; !ok {
 			result[typ] = nil

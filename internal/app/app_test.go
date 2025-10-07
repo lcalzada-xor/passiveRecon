@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -419,11 +420,12 @@ func TestDedupeDomainListWriteError(t *testing.T) {
 }
 
 type testSink struct {
-	outdir  string
-	lines   chan string
-	pending []string
-	mu      sync.Mutex
-	onFlush func()
+	outdir    string
+	lines     chan string
+	pending   []string
+	artifacts []pipeline.Artifact
+	mu        sync.Mutex
+	onFlush   func()
 }
 
 func newTestSink(outdir string) (*testSink, error) {
@@ -487,30 +489,94 @@ drained:
 			targetFile = filepath.Join("domains", "domains.active")
 		}
 
+		lineData := trimmed
+		var artifacts []pipeline.Artifact
+
 		if strings.HasPrefix(trimmed, "meta: ") {
-			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "meta: "))
+			content := strings.TrimSpace(strings.TrimPrefix(trimmed, "meta: "))
+			if content == "" {
+				continue
+			}
+			lineData = content
 			if isActive {
 				targetFile = "meta.active"
 			} else {
 				targetFile = "meta.passive"
 			}
-		} else if strings.HasPrefix(trimmed, "js: ") {
-			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "js: "))
-			targetFile = filepath.Join("routes", "js", "js.passive")
-		} else if strings.Contains(trimmed, "://") || strings.Contains(trimmed, "/") {
+			artifacts = append(artifacts, pipeline.Artifact{Type: "meta", Value: content, Active: isActive})
+		} else if strings.Contains(trimmed, "://") {
 			if isActive {
 				targetFile = filepath.Join("routes", "routes.active")
 			} else {
 				targetFile = filepath.Join("routes", "routes.passive")
 			}
+			base := firstField(trimmed)
+			metadata := make(map[string]any)
+			if base != trimmed {
+				metadata["raw"] = trimmed
+			}
+			if len(metadata) == 0 {
+				metadata = nil
+			}
+			artifacts = append(artifacts, pipeline.Artifact{Type: "route", Value: base, Active: isActive, Metadata: metadata})
+			if host := extractHost(base); host != "" {
+				artifacts = append(artifacts, pipeline.Artifact{Type: "domain", Value: host, Active: isActive})
+			}
+		} else {
+			artifacts = append(artifacts, pipeline.Artifact{Type: "domain", Value: trimmed, Active: isActive})
 		}
-		appendLine(filepath.Join(s.outdir, targetFile), trimmed)
+
+		appendLine(filepath.Join(s.outdir, targetFile), lineData)
+		s.appendArtifacts(artifacts...)
 	}
 }
 
 func (s *testSink) Close() error {
 	close(s.lines)
 	return nil
+}
+
+func (s *testSink) appendArtifacts(artifacts ...pipeline.Artifact) {
+	if len(artifacts) == 0 {
+		return
+	}
+	s.mu.Lock()
+	s.artifacts = append(s.artifacts, artifacts...)
+	snapshot := append([]pipeline.Artifact(nil), s.artifacts...)
+	s.mu.Unlock()
+
+	var builder strings.Builder
+	for _, artifact := range snapshot {
+		data, err := json.Marshal(artifact)
+		if err != nil {
+			panic(err)
+		}
+		builder.Write(data)
+		builder.WriteByte('\n')
+	}
+	if err := os.WriteFile(filepath.Join(s.outdir, "artifacts.jsonl"), []byte(builder.String()), 0o644); err != nil {
+		panic(err)
+	}
+}
+
+func firstField(input string) string {
+	fields := strings.Fields(strings.TrimSpace(input))
+	if len(fields) == 0 {
+		return strings.TrimSpace(input)
+	}
+	return fields[0]
+}
+
+func extractHost(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.HasPrefix(raw, "/") {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(u.Hostname())
 }
 
 func appendLine(path, line string) {

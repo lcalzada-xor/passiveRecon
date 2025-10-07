@@ -2,6 +2,7 @@ package sources
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -116,9 +117,6 @@ func DNSX(ctx context.Context, domains []string, outDir string, out chan<- strin
 	records := 0
 	seenHosts := make(map[string]struct{})
 
-	encoder := json.NewEncoder(writer)
-	encoder.SetEscapeHTML(false)
-
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -151,9 +149,28 @@ func DNSX(ctx context.Context, domains []string, outDir string, out chan<- strin
 			if writeErr != nil {
 				continue
 			}
-			if err := encoder.Encode(record); err != nil {
+
+			var buf bytes.Buffer
+			enc := json.NewEncoder(&buf)
+			enc.SetEscapeHTML(false)
+			if err := enc.Encode(record); err != nil {
 				writeErr = err
 				continue
+			}
+			serialized := strings.TrimSpace(buf.String())
+			if serialized == "" {
+				continue
+			}
+			if _, err := writer.WriteString(serialized); err != nil {
+				writeErr = err
+				continue
+			}
+			if err := writer.WriteByte('\n'); err != nil {
+				writeErr = err
+				continue
+			}
+			if out != nil {
+				out <- "active: dns:" + serialized
 			}
 		}
 	}()

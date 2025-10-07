@@ -11,23 +11,13 @@ import (
 
 	"passive-rec/internal/certs"
 	"passive-rec/internal/config"
+	"passive-rec/internal/pipeline"
 )
 
 func TestGenerateCreatesHTMLReport(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	writeFixture(t, filepath.Join(dir, "domains", "domains.passive"), strings.Join([]string{
-		"app.example.com",
-		"api.example.com",
-		"static.test.com",
-		"deep.a.b.example.com",
-	}, "\n"))
-	writeFixture(t, filepath.Join(dir, "routes", "routes.passive"), strings.Join([]string{
-		"http://app.example.com/login",
-		"https://app.example.com/dashboard",
-		"https://static.example.com/assets/img/logo.png",
-	}, "\n"))
 	certOne, err := (certs.Record{
 		Source:     "crt.sh",
 		CommonName: "alt1.example.com",
@@ -57,11 +47,21 @@ func TestGenerateCreatesHTMLReport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal certThree: %v", err)
 	}
-	writeFixture(t, filepath.Join(dir, "certs", "certs.passive"), strings.Join([]string{certOne, certTwo, certThree}, "\n"))
-	writeFixture(t, filepath.Join(dir, "meta.passive"), strings.Join([]string{
-		"subfinder: ok",
-		"httpx: skipped",
-	}, "\n"))
+
+	writeArtifacts(t, dir, []pipeline.Artifact{
+		{Type: "domain", Value: "app.example.com", Active: false},
+		{Type: "domain", Value: "api.example.com", Active: false},
+		{Type: "domain", Value: "static.test.com", Active: false},
+		{Type: "domain", Value: "deep.a.b.example.com", Active: false},
+		{Type: "route", Value: "http://app.example.com/login", Active: false},
+		{Type: "route", Value: "https://app.example.com/dashboard", Active: false},
+		{Type: "route", Value: "https://static.example.com/assets/img/logo.png", Active: false},
+		{Type: "certificate", Value: certOne, Active: false, Tool: "crt.sh"},
+		{Type: "certificate", Value: certTwo, Active: false, Tool: "censys"},
+		{Type: "certificate", Value: certThree, Active: false, Tool: "crt.sh"},
+		{Type: "meta", Value: "subfinder: ok", Active: false},
+		{Type: "meta", Value: "httpx: skipped", Active: false},
+	})
 
 	cfg := &config.Config{Target: "example.com", OutDir: dir}
 	if err := Generate(context.Background(), cfg, DefaultSinkFiles(dir)); err != nil {
@@ -125,15 +125,8 @@ func TestGenerateIncludesActiveData(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	writeFixture(t, filepath.Join(dir, "domains", "domains.passive"), "example.com\n")
-	writeFixture(t, filepath.Join(dir, "routes", "routes.passive"), "https://example.com\n")
-	writeFixture(t, filepath.Join(dir, "certs", "certs.passive"), "")
-	writeFixture(t, filepath.Join(dir, "meta.passive"), "passive: ok\n")
-
 	activeDomain := "vpn-admin.example.com"
 	activeRoute := "http://vpn-admin.example.com/login [200]"
-	writeFixture(t, filepath.Join(dir, "domains", "domains.active"), activeDomain)
-	writeFixture(t, filepath.Join(dir, "routes", "routes.active"), activeRoute)
 	dnsJSON, err := json.Marshal(dnsRecord{
 		Host:  "vpn-admin.example.com",
 		Type:  "A",
@@ -144,8 +137,19 @@ func TestGenerateIncludesActiveData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal dns record: %v", err)
 	}
-	writeFixture(t, filepath.Join(dir, "dns", "dns.active"), string(dnsJSON)+"\n")
-	writeFixture(t, filepath.Join(dir, "meta.active"), "httpx(active): 1/1 ok\n")
+
+	writeArtifacts(t, dir, []pipeline.Artifact{
+		{Type: "domain", Value: "example.com", Active: false},
+		{Type: "route", Value: "https://example.com", Active: false},
+		{Type: "meta", Value: "passive: ok", Active: false},
+		{Type: "domain", Value: activeDomain, Active: true},
+		{Type: "route", Value: "http://vpn-admin.example.com/login", Active: true, Metadata: map[string]any{
+			"raw":    activeRoute,
+			"status": 200,
+		}},
+		{Type: "dns", Value: string(dnsJSON), Active: true},
+		{Type: "meta", Value: "httpx(active): 1/1 ok", Active: true},
+	})
 
 	cfg := &config.Config{Target: "example.com", OutDir: dir, Active: true}
 	files := DefaultSinkFiles(dir)
@@ -179,8 +183,7 @@ func TestGenerateHandlesMissingFiles(t *testing.T) {
 
 	dir := t.TempDir()
 	cfg := &config.Config{Target: "example.com", OutDir: dir}
-	files := SinkFiles{Meta: filepath.Join(dir, "meta.passive")}
-	if err := Generate(context.Background(), cfg, files); err != nil {
+	if err := Generate(context.Background(), cfg, SinkFiles{}); err != nil {
 		t.Fatalf("Generate with missing files: %v", err)
 	}
 
@@ -363,6 +366,20 @@ func TestBuildCertStatsGroupsMultiLevelTLDs(t *testing.T) {
 	if counts["example.com"] != 1 {
 		t.Fatalf("example.com count = %d, want 1", counts["example.com"])
 	}
+}
+
+func writeArtifacts(t *testing.T, dir string, artifacts []pipeline.Artifact) {
+	t.Helper()
+	var builder strings.Builder
+	for _, artifact := range artifacts {
+		data, err := json.Marshal(artifact)
+		if err != nil {
+			t.Fatalf("marshal artifact: %v", err)
+		}
+		builder.Write(data)
+		builder.WriteByte('\n')
+	}
+	writeFixture(t, filepath.Join(dir, "artifacts.jsonl"), builder.String())
 }
 
 func writeFixture(t *testing.T, path, contents string) {
