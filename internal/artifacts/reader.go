@@ -97,20 +97,33 @@ func CollectArtifactsByType(outdir string, selectors map[string]ActiveState) (ma
 			return nil, fmt.Errorf("unmarshal artifact: %w", err)
 		}
 
-		state, ok := selectors[artifact.Type]
-		if !ok {
-			continue
-		}
-		if !state.matches(artifact.Active) {
-			continue
-		}
-
 		artifact.Value = strings.TrimSpace(artifact.Value)
 		if artifact.Value == "" {
 			continue
 		}
 
-		result[artifact.Type] = append(result[artifact.Type], artifact)
+		types := artifact.Types
+		if len(types) == 0 {
+			if artifact.Type != "" {
+				types = []string{artifact.Type}
+			}
+		}
+		for _, typ := range types {
+			typ = strings.TrimSpace(typ)
+			if typ == "" {
+				continue
+			}
+			state, ok := selectors[typ]
+			if !ok {
+				continue
+			}
+			if !state.matches(artifact.Active) {
+				continue
+			}
+			artifactCopy := artifact
+			artifactCopy.Type = typ
+			result[typ] = append(result[typ], artifactCopy)
+		}
 	}
 	if err := buf.Err(); err != nil {
 		return nil, fmt.Errorf("scan artifacts: %w", err)
