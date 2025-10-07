@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"passive-rec/internal/config"
 	"passive-rec/internal/logx"
+	"passive-rec/internal/pipeline"
 	"passive-rec/internal/report"
 	"passive-rec/internal/runner"
 )
@@ -48,6 +50,35 @@ type pipelineState struct {
 	DomainListFile string
 	DedupedDomains []string
 	DomainsDirty   bool
+}
+
+func toolInputChannel(s sink, tool string) (chan<- string, func()) {
+	type toolAware interface {
+		InWithTool(string) (chan<- string, func())
+	}
+	if aware, ok := s.(toolAware); ok {
+		return aware.InWithTool(tool)
+	}
+
+	base := s.In()
+	tool = strings.TrimSpace(tool)
+	if tool == "" {
+		return base, func() {}
+	}
+	ch := make(chan string)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for line := range ch {
+			base <- line
+		}
+	}()
+	cleanup := func() {
+		close(ch)
+		wg.Wait()
+	}
+	return ch, cleanup
 }
 
 var defaultPipeline = []toolStep{
@@ -293,27 +324,39 @@ func requireDedupedDomains(message string) preconditionFunc {
 }
 
 func stepAmass(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	return sourceAmass(ctx, opts.cfg.Target, opts.sink.In(), opts.cfg.Active)
+	input, done := toolInputChannel(opts.sink, "amass")
+	defer done()
+	return sourceAmass(ctx, opts.cfg.Target, input, opts.cfg.Active)
 }
 
 func stepSubfinder(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	return sourceSubfinder(ctx, opts.cfg.Target, opts.sink.In())
+	input, done := toolInputChannel(opts.sink, "subfinder")
+	defer done()
+	return sourceSubfinder(ctx, opts.cfg.Target, input)
 }
 
 func stepAssetfinder(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	return sourceAssetfinder(ctx, opts.cfg.Target, opts.sink.In())
+	input, done := toolInputChannel(opts.sink, "assetfinder")
+	defer done()
+	return sourceAssetfinder(ctx, opts.cfg.Target, input)
 }
 
 func stepRDAP(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	return sourceRDAP(ctx, opts.cfg.Target, opts.sink.In())
+	input, done := toolInputChannel(opts.sink, "rdap")
+	defer done()
+	return sourceRDAP(ctx, opts.cfg.Target, input)
 }
 
 func stepCRTSh(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	return sourceCRTSh(ctx, opts.cfg.Target, opts.sink.In())
+	input, done := toolInputChannel(opts.sink, "crtsh")
+	defer done()
+	return sourceCRTSh(ctx, opts.cfg.Target, input)
 }
 
 func stepCensys(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	return sourceCensys(ctx, opts.cfg.Target, opts.cfg.CensysAPIID, opts.cfg.CensysAPISecret, opts.sink.In())
+	input, done := toolInputChannel(opts.sink, "censys")
+	defer done()
+	return sourceCensys(ctx, opts.cfg.Target, opts.cfg.CensysAPIID, opts.cfg.CensysAPISecret, input)
 }
 
 func stepDedupe(ctx context.Context, state *pipelineState, opts orchestratorOptions) error {
@@ -324,12 +367,14 @@ func stepDedupe(ctx context.Context, state *pipelineState, opts orchestratorOpti
 	}
 	state.DedupedDomains = domains
 	state.DomainListFile = filepath.Join("domains", "domains.dedupe")
-	opts.sink.In() <- fmt.Sprintf("meta: dedupe retained %d domains", len(domains))
+	opts.sink.In() <- pipeline.WrapWithTool("dedupe", fmt.Sprintf("meta: dedupe retained %d domains", len(domains)))
 	if len(domains) == 0 {
-		opts.sink.In() <- "meta: dedupe produced no domains"
+		opts.sink.In() <- pipeline.WrapWithTool("dedupe", "meta: dedupe produced no domains")
 	}
 	if opts.cfg.Active {
-		if err := sourceDNSX(ctx, domains, opts.cfg.OutDir, opts.sink.In()); err != nil {
+		input, done := toolInputChannel(opts.sink, "dnsx")
+		defer done()
+		if err := sourceDNSX(ctx, domains, opts.cfg.OutDir, input); err != nil {
 			return err
 		}
 	}
@@ -337,17 +382,23 @@ func stepDedupe(ctx context.Context, state *pipelineState, opts orchestratorOpti
 }
 
 func stepWayback(ctx context.Context, state *pipelineState, opts orchestratorOptions) error {
-	return sourceWayback(ctx, state.DedupedDomains, opts.sink.In())
+	input, done := toolInputChannel(opts.sink, "waybackurls")
+	defer done()
+	return sourceWayback(ctx, state.DedupedDomains, input)
 }
 
 func stepGAU(ctx context.Context, state *pipelineState, opts orchestratorOptions) error {
-	return sourceGAU(ctx, state.DedupedDomains, opts.sink.In())
+	input, done := toolInputChannel(opts.sink, "gau")
+	defer done()
+	return sourceGAU(ctx, state.DedupedDomains, input)
 }
 
 func stepHTTPX(ctx context.Context, state *pipelineState, opts orchestratorOptions) error {
 	opts.sink.Flush()
 	inputs := []string{state.DomainListFile, filepath.Join("routes", "routes.passive")}
-	err := sourceHTTPX(ctx, inputs, opts.cfg.OutDir, opts.sink.In())
+	input, done := toolInputChannel(opts.sink, "httpx")
+	defer done()
+	err := sourceHTTPX(ctx, inputs, opts.cfg.OutDir, input)
 	opts.sink.Flush()
 	return err
 }
@@ -396,11 +447,15 @@ func timeoutHTTPX(state *pipelineState, opts orchestratorOptions) int {
 }
 
 func stepSubJS(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	return sourceSubJS(ctx, filepath.Join("routes", "routes.active"), opts.cfg.OutDir, opts.sink.In())
+	input, done := toolInputChannel(opts.sink, "subjs")
+	defer done()
+	return sourceSubJS(ctx, filepath.Join("routes", "routes.active"), opts.cfg.OutDir, input)
 }
 
 func stepLinkFinderEVO(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	return sourceLinkFinderEVO(ctx, opts.cfg.Target, opts.cfg.OutDir, opts.sink.In())
+	input, done := toolInputChannel(opts.sink, "linkfinderevo")
+	defer done()
+	return sourceLinkFinderEVO(ctx, opts.cfg.Target, opts.cfg.OutDir, input)
 }
 
 func executePostProcessing(ctx context.Context, cfg *config.Config, sink sink, bar *progressBar, unknown []string) {
@@ -431,7 +486,7 @@ func executePostProcessing(ctx context.Context, cfg *config.Config, sink sink, b
 
 func notifyUnknownTools(sink sink, bar *progressBar, unknown []string) {
 	for _, tool := range unknown {
-		sink.In() <- fmt.Sprintf("meta: unknown tool: %s", tool)
+		sink.In() <- pipeline.WrapWithTool("unknown", fmt.Sprintf("meta: unknown tool: %s", tool))
 		if bar != nil {
 			bar.StepDone(tool, "desconocido")
 		}
@@ -440,7 +495,7 @@ func notifyUnknownTools(sink sink, bar *progressBar, unknown []string) {
 
 func announceCacheReuse(step toolStep, opts orchestratorOptions, completedAt time.Time) {
 	if opts.sink != nil {
-		opts.sink.In() <- fmt.Sprintf("meta: %s reutilizado desde cache%s", step.Name, cacheAgeSuffix(completedAt))
+		opts.sink.In() <- pipeline.WrapWithTool(step.Name, fmt.Sprintf("meta: %s reutilizado desde cache%s", step.Name, cacheAgeSuffix(completedAt)))
 	}
 	if opts.bar != nil {
 		opts.bar.StepDone(step.Name, "cache")
