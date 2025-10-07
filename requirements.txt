@@ -10,3 +10,4 @@ waybackurls github.com/tomnomnom/waybackurls@latest
 dnsx github.com/projectdiscovery/dnsx/cmd/dnsx@latest
 subjs github.com/lc/subjs@latest
 GoLinkfinderEVO git+https://github.com/lcalzada-xor/GoLinkfinderEVO.git
+rdap github.com/openrdap/rdap/cmd/rdap@master
