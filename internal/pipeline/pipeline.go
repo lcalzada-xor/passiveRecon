@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -521,6 +522,9 @@ func (s *Sink) processLine(ln string) {
 		}
 	}
 
+	if s.timedHandle("handleRelation", handleRelation, l, isActive, tool) {
+		return
+	}
 	if s.timedHandle("handleMeta", handleMeta, l, isActive, tool) {
 		return
 	}
@@ -901,25 +905,16 @@ func handleMeta(s *Sink, line string, isActive bool, tool string) bool {
 		if content == "" {
 			return true
 		}
-		_ = target.WriteRaw(content)
+		normalized := normalizeMetaContent(content)
+		if normalized == "" {
+			return true
+		}
+		_ = target.WriteRaw(normalized)
 		s.recordArtifact(tool, Artifact{
 			Type:   "meta",
-			Value:  content,
+			Value:  normalized,
 			Active: isActive,
-			Tool:   inferToolFromMessage(content),
-			Metadata: map[string]any{
-				"raw": trimmed,
-			},
-		})
-		return true
-	}
-
-	if strings.Contains(trimmed, "-->") || strings.Contains(trimmed, " (") {
-		_ = target.WriteRaw(trimmed)
-		s.recordArtifact(tool, Artifact{
-			Type:   "meta",
-			Value:  trimmed,
-			Active: isActive,
+			Tool:   inferToolFromMessage(normalized),
 			Metadata: map[string]any{
 				"raw": trimmed,
 			},
@@ -928,6 +923,153 @@ func handleMeta(s *Sink, line string, isActive bool, tool string) bool {
 	}
 
 	return false
+}
+
+func handleRelation(s *Sink, line string, isActive bool, tool string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || !strings.Contains(trimmed, "-->") {
+		return false
+	}
+
+	leftRaw, relationRaw, rightRaw := splitRelation(trimmed)
+	if leftRaw == "" || relationRaw == "" || rightRaw == "" {
+		return false
+	}
+
+	leftValue, leftKind := parseRelationNode(leftRaw)
+	rightValue, rightKind := parseRelationNode(rightRaw)
+	if leftValue == "" || rightValue == "" {
+		return false
+	}
+
+	relation := strings.TrimSpace(relationRaw)
+	recordType := normalizeRelationType(relation)
+
+	record := dnsArtifact{Host: leftValue, Value: rightValue, Raw: trimmed}
+	if recordType != "" {
+		record.Type = recordType
+	}
+	payload, err := json.Marshal(record)
+	if err != nil {
+		return false
+	}
+
+	metadata := map[string]any{"raw": trimmed, "relationship": relation}
+	if leftValue != "" {
+		metadata["host"] = leftValue
+	}
+	if rightValue != "" {
+		metadata["value"] = rightValue
+	}
+	if recordType != "" {
+		metadata["type"] = recordType
+	}
+	if leftKind != "" {
+		metadata["source_kind"] = leftKind
+	}
+	if rightKind != "" {
+		metadata["target_kind"] = rightKind
+	}
+
+	s.recordArtifact(tool, Artifact{
+		Type:     "dns",
+		Value:    string(payload),
+		Active:   isActive,
+		Metadata: metadata,
+	})
+	return true
+}
+
+func normalizeMetaContent(content string) string {
+	cleaned := strings.TrimSpace(stripANSI(content))
+	if cleaned == "" {
+		return ""
+	}
+	if cleaned == "[" || cleaned == "]" {
+		return ""
+	}
+
+	startsWithBracket := strings.HasPrefix(content, "[")
+	endsWithBracket := strings.HasSuffix(content, "]")
+
+	if startsWithBracket && !strings.HasPrefix(cleaned, "[") {
+		cleaned = strings.TrimLeft(cleaned, "[")
+		cleaned = "[" + strings.TrimSpace(cleaned)
+	}
+
+	if endsWithBracket && !strings.HasSuffix(cleaned, "]") {
+		cleaned = strings.TrimRight(cleaned, "]")
+		cleaned = strings.TrimSpace(cleaned) + "]"
+	} else if startsWithBracket && !strings.HasSuffix(cleaned, "]") {
+		cleaned = strings.TrimSpace(cleaned) + "]"
+	}
+
+	cleaned = strings.TrimSpace(cleaned)
+	if cleaned == "[]" {
+		return ""
+	}
+	return cleaned
+}
+
+var (
+	ansiEscapeSequence = regexp.MustCompile("\\x1b\\[[0-9;]*[A-Za-z]")
+	ansiColorCode      = regexp.MustCompile("\\[[0-9;]*m")
+	ansiOSCSequence    = regexp.MustCompile("\\x1b\\][^\\x07]*\\x07")
+)
+
+func stripANSI(input string) string {
+	withoutOSC := ansiOSCSequence.ReplaceAllString(input, "")
+	withoutEsc := ansiEscapeSequence.ReplaceAllString(withoutOSC, "")
+	withoutCodes := ansiColorCode.ReplaceAllString(withoutEsc, "")
+	return strings.ReplaceAll(withoutCodes, "\x1b", "")
+}
+
+func splitRelation(line string) (string, string, string) {
+	parts := strings.Split(line, "-->")
+	if len(parts) != 3 {
+		return "", "", ""
+	}
+	left := strings.TrimSpace(parts[0])
+	relation := strings.TrimSpace(parts[1])
+	right := strings.TrimSpace(parts[2])
+	if left == "" || relation == "" || right == "" {
+		return "", "", ""
+	}
+	return left, relation, right
+}
+
+func parseRelationNode(node string) (value, kind string) {
+	trimmed := strings.TrimSpace(node)
+	if trimmed == "" {
+		return "", ""
+	}
+	if strings.HasSuffix(trimmed, ")") {
+		if idx := strings.LastIndex(trimmed, "("); idx >= 0 {
+			value = strings.TrimSpace(trimmed[:idx])
+			kind = strings.TrimSpace(strings.TrimSuffix(trimmed[idx+1:], ")"))
+			if value == "" {
+				value = trimmed
+			}
+			return value, kind
+		}
+	}
+	return trimmed, ""
+}
+
+func normalizeRelationType(raw string) string {
+	cleaned := strings.TrimSpace(raw)
+	if cleaned == "" {
+		return ""
+	}
+	cleaned = strings.TrimSuffix(cleaned, "_record")
+	cleaned = strings.TrimSuffix(cleaned, " record")
+	cleaned = strings.TrimSpace(cleaned)
+	if cleaned == "" {
+		return ""
+	}
+	cleaned = strings.ReplaceAll(cleaned, "_", "")
+	cleaned = strings.ToUpper(cleaned)
+	return cleaned
 }
 
 type dnsArtifact struct {

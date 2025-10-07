@@ -1060,6 +1060,122 @@ func TestRouteCategorizationDeduplicatesCategoryOutputs(t *testing.T) {
 	}
 }
 
+func TestHandleMetaStripsANSISequences(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "meta: [\u001b[32m200\u001b[0m]"
+	sink.In() <- "meta: [\u001b[35mtext/html\u001b[0m]"
+	sink.In() <- "meta: [\u001b"
+	sink.In() <- "meta: [31m404\u001b"
+	sink.In() <- "meta: [0m]"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	metaLines := readLines(t, filepath.Join(dir, "meta.passive"))
+	wantMeta := []string{"[200]", "[text/html]", "[404]"}
+	if diff := cmp.Diff(wantMeta, metaLines); diff != "" {
+		t.Fatalf("unexpected meta.passive contents (-want +got):\n%s", diff)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	requireArtifact(t, artifacts, "meta", "[200]", false)
+	requireArtifact(t, artifacts, "meta", "[404]", false)
+	requireArtifact(t, artifacts, "meta", "[text/html]", false)
+}
+
+func TestHandleRelationParsesDNSRecords(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "chapela.es (FQDN) --> ns_record --> leonidas.ns.cloudflare.com (FQDN)"
+	sink.In() <- "chapela.es (FQDN) --> mx_record --> mx.buzondecorreo.com (FQDN)"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+
+	nsArtifact, ok := findDNSArtifact(artifacts, "NS", "leonidas.ns.cloudflare.com")
+	if !ok {
+		t.Fatalf("expected NS artifact not found")
+	}
+	if got := nsArtifact.Metadata["relationship"]; got != "ns_record" {
+		t.Fatalf("unexpected NS relationship metadata: %#v", got)
+	}
+
+	var nsRecord dnsArtifact
+	if err := json.Unmarshal([]byte(nsArtifact.Value), &nsRecord); err != nil {
+		t.Fatalf("unmarshal NS artifact value: %v", err)
+	}
+	if nsRecord.Host != "chapela.es" || nsRecord.Type != "NS" || nsRecord.Value != "leonidas.ns.cloudflare.com" {
+		t.Fatalf("unexpected NS record: %#v", nsRecord)
+	}
+
+	mxArtifact, ok := findDNSArtifact(artifacts, "MX", "mx.buzondecorreo.com")
+	if !ok {
+		t.Fatalf("expected MX artifact not found")
+	}
+	if got := mxArtifact.Metadata["relationship"]; got != "mx_record" {
+		t.Fatalf("unexpected MX relationship metadata: %#v", got)
+	}
+	if got := mxArtifact.Metadata["source_kind"]; got != "FQDN" {
+		t.Fatalf("unexpected MX source kind: %#v", got)
+	}
+	if got := mxArtifact.Metadata["target_kind"]; got != "FQDN" {
+		t.Fatalf("unexpected MX target kind: %#v", got)
+	}
+
+	var mxRecord dnsArtifact
+	if err := json.Unmarshal([]byte(mxArtifact.Value), &mxRecord); err != nil {
+		t.Fatalf("unmarshal MX artifact value: %v", err)
+	}
+	if mxRecord.Host != "chapela.es" || mxRecord.Type != "MX" || mxRecord.Value != "mx.buzondecorreo.com" {
+		t.Fatalf("unexpected MX record: %#v", mxRecord)
+	}
+
+	if metaLines := readLines(t, filepath.Join(dir, "meta.passive")); metaLines != nil {
+		t.Fatalf("expected meta.passive to be empty, got %v", metaLines)
+	}
+}
+
+func findDNSArtifact(artifacts []Artifact, recordType, value string) (Artifact, bool) {
+	for _, art := range artifacts {
+		if art.Type != "dns" || art.Active {
+			continue
+		}
+		if art.Metadata == nil {
+			continue
+		}
+		if art.Metadata["type"] != recordType {
+			continue
+		}
+		if art.Metadata["value"] != value {
+			continue
+		}
+		if art.Metadata["host"] != "chapela.es" {
+			continue
+		}
+		return art, true
+	}
+	return Artifact{}, false
+}
+
 func readLines(t *testing.T, path string) []string {
 	t.Helper()
 
