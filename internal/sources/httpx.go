@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -36,6 +37,8 @@ var (
 		".pgm": {},
 		".pnm": {},
 	}
+
+	ansiEscapeSequences = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 )
 
 func HTTPX(ctx context.Context, outdir string, out chan<- string) error {
@@ -253,6 +256,7 @@ func writeHTTPXInput(lines []string) (string, func(), error) {
 }
 
 func normalizeHTTPXLine(line string) []string {
+	line = stripANSIEscapeSequences(line)
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return nil
@@ -497,6 +501,7 @@ func extractHTTPXDomain(rawURL string) string {
 }
 
 func splitHTTPXMeta(meta string) []string {
+	meta = stripANSIEscapeSequences(meta)
 	meta = strings.TrimSpace(meta)
 	if meta == "" {
 		return nil
@@ -542,4 +547,14 @@ func splitHTTPXMeta(meta string) []string {
 	}
 
 	return parts
+}
+
+func stripANSIEscapeSequences(s string) string {
+	if s == "" {
+		return s
+	}
+
+	cleaned := ansiEscapeSequences.ReplaceAllString(s, "")
+	cleaned = strings.ReplaceAll(cleaned, "\x1b", "")
+	return cleaned
 }
