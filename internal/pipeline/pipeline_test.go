@@ -698,6 +698,42 @@ func TestHTMLActiveSkipsErrorResponses(t *testing.T) {
 	}
 }
 
+func TestArtifactsMergeTypes(t *testing.T) {
+	t.Parallel()
+
+	sink, dir := newTestSink(t, false)
+	sink.Start(1)
+
+	sink.In() <- "https://app.example.com/login"
+	sink.In() <- "html: https://app.example.com/login"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	var matches []Artifact
+	for _, art := range artifacts {
+		if art.Value == "https://app.example.com/login" && !art.Active {
+			matches = append(matches, art)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected single artifact for route/html, got %d", len(matches))
+	}
+
+	combined := matches[0]
+	if combined.Type != "route" && combined.Type != "html" {
+		t.Fatalf("unexpected primary type: %q", combined.Type)
+	}
+	if len(combined.Types) < 2 {
+		t.Fatalf("expected combined types, got %v", combined.Types)
+	}
+	if !containsType(combined.Types, "route") || !containsType(combined.Types, "html") {
+		t.Fatalf("expected artifact types to include route and html, got %v", combined.Types)
+	}
+}
+
 func TestNewSinkDoesNotTruncateExistingFiles(t *testing.T) {
 	t.Parallel()
 
@@ -1098,6 +1134,19 @@ func metadataStringSlice(t *testing.T, metadata map[string]any, key string) []st
 		out = append(out, str)
 	}
 	return out
+}
+
+func containsType(types []string, typ string) bool {
+	typ = strings.TrimSpace(typ)
+	if typ == "" {
+		return false
+	}
+	for _, candidate := range types {
+		if strings.TrimSpace(candidate) == typ {
+			return true
+		}
+	}
+	return false
 }
 
 func metadataInt(t *testing.T, metadata map[string]any, key string) int {

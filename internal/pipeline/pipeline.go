@@ -160,6 +160,7 @@ type HandlerMetric struct {
 // manifiesto JSONL.
 type Artifact struct {
 	Type        string         `json:"type"`
+	Types       []string       `json:"types,omitempty"`
 	Value       string         `json:"value"`
 	Active      bool           `json:"active"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
@@ -169,7 +170,6 @@ type Artifact struct {
 }
 
 type artifactKey struct {
-	Type   string
 	Value  string
 	Active bool
 }
@@ -588,7 +588,7 @@ func (s *Sink) recordArtifact(tool string, artifact Artifact) {
 		return
 	}
 
-	key := artifactKey{Type: normalized.Type, Value: normalized.Value, Active: normalized.Active}
+	key := artifactKey{Value: normalized.Value, Active: normalized.Active}
 
 	s.artifactMu.Lock()
 	defer s.artifactMu.Unlock()
@@ -600,6 +600,7 @@ func (s *Sink) recordArtifact(tool string, artifact Artifact) {
 		s.artifactOrder = append(s.artifactOrder, key)
 	} else {
 		mergeArtifactMetadata(&rec.Artifact, normalized.Metadata)
+		mergeArtifactTypes(&rec.Artifact, normalized.Types)
 	}
 
 	if normalized.Tool != "" {
@@ -628,9 +629,50 @@ func (s *Sink) recordArtifact(tool string, artifact Artifact) {
 func normalizeArtifact(tool string, artifact Artifact) (Artifact, bool) {
 	artifact.Type = strings.TrimSpace(artifact.Type)
 	artifact.Value = strings.TrimSpace(artifact.Value)
-	if artifact.Type == "" || artifact.Value == "" {
+	if artifact.Value == "" {
 		return Artifact{}, false
 	}
+
+	typeSet := make(map[string]struct{})
+	if artifact.Type != "" {
+		typeSet[artifact.Type] = struct{}{}
+	}
+	for _, typ := range artifact.Types {
+		typ = strings.TrimSpace(typ)
+		if typ == "" {
+			continue
+		}
+		typeSet[typ] = struct{}{}
+	}
+	if len(typeSet) == 0 {
+		return Artifact{}, false
+	}
+	ordered := make([]string, 0, len(typeSet))
+	for typ := range typeSet {
+		ordered = append(ordered, typ)
+	}
+	sort.Strings(ordered)
+	primary := artifact.Type
+	if primary == "" {
+		primary = ordered[0]
+	} else if _, ok := typeSet[primary]; !ok {
+		primary = ordered[0]
+	}
+	artifact.Type = primary
+	types := make([]string, 0, len(ordered))
+	types = append(types, primary)
+	for _, typ := range ordered {
+		if typ == primary {
+			continue
+		}
+		types = append(types, typ)
+	}
+	if len(types) <= 1 {
+		artifact.Types = nil
+	} else {
+		artifact.Types = types
+	}
+
 	if artifact.Metadata != nil {
 		cleaned := make(map[string]any)
 		for key, value := range artifact.Metadata {
@@ -669,6 +711,60 @@ func mergeArtifactMetadata(dst *Artifact, metadata map[string]any) {
 		if _, exists := dst.Metadata[key]; !exists {
 			dst.Metadata[key] = value
 		}
+	}
+}
+
+func mergeArtifactTypes(dst *Artifact, types []string) {
+	if dst == nil {
+		return
+	}
+	typeSet := make(map[string]struct{})
+	primary := strings.TrimSpace(dst.Type)
+	if primary != "" {
+		typeSet[primary] = struct{}{}
+	}
+	for _, typ := range dst.Types {
+		typ = strings.TrimSpace(typ)
+		if typ == "" {
+			continue
+		}
+		typeSet[typ] = struct{}{}
+	}
+	for _, typ := range types {
+		typ = strings.TrimSpace(typ)
+		if typ == "" {
+			continue
+		}
+		typeSet[typ] = struct{}{}
+	}
+	if len(typeSet) == 0 {
+		dst.Type = ""
+		dst.Types = nil
+		return
+	}
+	ordered := make([]string, 0, len(typeSet))
+	for typ := range typeSet {
+		ordered = append(ordered, typ)
+	}
+	sort.Strings(ordered)
+	if primary == "" {
+		primary = ordered[0]
+	} else if _, ok := typeSet[primary]; !ok {
+		primary = ordered[0]
+	}
+	dst.Type = primary
+	merged := make([]string, 0, len(ordered))
+	merged = append(merged, primary)
+	for _, typ := range ordered {
+		if typ == primary {
+			continue
+		}
+		merged = append(merged, typ)
+	}
+	if len(merged) <= 1 {
+		dst.Types = nil
+	} else {
+		dst.Types = merged
 	}
 }
 
@@ -925,8 +1021,13 @@ func handleJS(s *Sink, line string, isActive bool, tool string) bool {
 		if status, ok := parseActiveRouteStatus(js, base); ok {
 			metadata["status"] = status
 			if status <= 0 || status >= 400 {
+				types := []string{"js"}
+				if base != "" {
+					types = append(types, "route")
+				}
 				s.recordArtifact(tool, Artifact{
 					Type:     "js",
+					Types:    types,
 					Value:    value,
 					Active:   true,
 					Metadata: metadata,
@@ -937,8 +1038,13 @@ func handleJS(s *Sink, line string, isActive bool, tool string) bool {
 		if s.RoutesJS.active != nil {
 			_ = s.RoutesJS.active.WriteRaw(js)
 		}
+		types := []string{"js"}
+		if base != "" {
+			types = append(types, "route")
+		}
 		s.recordArtifact(tool, Artifact{
 			Type:     "js",
+			Types:    types,
 			Value:    value,
 			Active:   true,
 			Metadata: metadata,
@@ -947,8 +1053,13 @@ func handleJS(s *Sink, line string, isActive bool, tool string) bool {
 	}
 	if s.RoutesJS.passive != nil {
 		_ = s.RoutesJS.passive.WriteURL(js)
+		types := []string{"js"}
+		if base != "" {
+			types = append(types, "route")
+		}
 		s.recordArtifact(tool, Artifact{
 			Type:     "js",
+			Types:    types,
 			Value:    value,
 			Active:   false,
 			Metadata: metadata,
@@ -981,6 +1092,13 @@ func handleHTML(s *Sink, line string, isActive bool, tool string) bool {
 	if value == "" {
 		value = html
 	}
+	buildTypes := func(primary string) []string {
+		types := []string{primary}
+		if base != "" {
+			types = append(types, "route")
+		}
+		return types
+	}
 	metadata := make(map[string]any)
 	if strings.TrimSpace(html) != value {
 		metadata["raw"] = html
@@ -995,6 +1113,7 @@ func handleHTML(s *Sink, line string, isActive bool, tool string) bool {
 				}
 				s.recordArtifact(tool, Artifact{
 					Type:     artifactType,
+					Types:    buildTypes(artifactType),
 					Value:    value,
 					Active:   true,
 					Metadata: metadata,
@@ -1017,6 +1136,7 @@ func handleHTML(s *Sink, line string, isActive bool, tool string) bool {
 		if seen != nil && s.markSeen(seen, html) {
 			s.recordArtifact(tool, Artifact{
 				Type:     "image",
+				Types:    buildTypes("image"),
 				Value:    value,
 				Active:   isActive,
 				Metadata: metadata,
@@ -1027,6 +1147,7 @@ func handleHTML(s *Sink, line string, isActive bool, tool string) bool {
 			_ = writer.WriteRaw(html)
 			s.recordArtifact(tool, Artifact{
 				Type:     "image",
+				Types:    buildTypes("image"),
 				Value:    value,
 				Active:   true,
 				Metadata: metadata,
@@ -1036,6 +1157,7 @@ func handleHTML(s *Sink, line string, isActive bool, tool string) bool {
 		_ = writer.WriteURL(html)
 		s.recordArtifact(tool, Artifact{
 			Type:     "image",
+			Types:    buildTypes("image"),
 			Value:    value,
 			Active:   false,
 			Metadata: metadata,
@@ -1055,6 +1177,7 @@ func handleHTML(s *Sink, line string, isActive bool, tool string) bool {
 	if seen != nil && s.markSeen(seen, html) {
 		s.recordArtifact(tool, Artifact{
 			Type:     "html",
+			Types:    buildTypes("html"),
 			Value:    value,
 			Active:   isActive,
 			Metadata: metadata,
@@ -1065,6 +1188,7 @@ func handleHTML(s *Sink, line string, isActive bool, tool string) bool {
 		_ = writer.WriteRaw(html)
 		s.recordArtifact(tool, Artifact{
 			Type:     "html",
+			Types:    buildTypes("html"),
 			Value:    value,
 			Active:   true,
 			Metadata: metadata,
@@ -1074,6 +1198,7 @@ func handleHTML(s *Sink, line string, isActive bool, tool string) bool {
 	_ = writer.WriteURL(html)
 	s.recordArtifact(tool, Artifact{
 		Type:     "html",
+		Types:    buildTypes("html"),
 		Value:    value,
 		Active:   false,
 		Metadata: metadata,
@@ -1121,6 +1246,13 @@ func handleCategorizedRoute(s *Sink, line string, isActive bool, tool string, pr
 	if artifactValue == "" {
 		artifactValue = value
 	}
+	buildTypes := func() []string {
+		types := []string{artifactType}
+		if base != "" {
+			types = append(types, "route")
+		}
+		return types
+	}
 	metadata := make(map[string]any)
 	if artifactValue != value {
 		metadata["raw"] = value
@@ -1131,6 +1263,7 @@ func handleCategorizedRoute(s *Sink, line string, isActive bool, tool string, pr
 			if status <= 0 || status >= 400 {
 				s.recordArtifact(tool, Artifact{
 					Type:     artifactType,
+					Types:    buildTypes(),
 					Value:    artifactValue,
 					Active:   true,
 					Metadata: metadata,
@@ -1148,6 +1281,7 @@ func handleCategorizedRoute(s *Sink, line string, isActive bool, tool string, pr
 		if s.markSeen(seen, key) {
 			s.recordArtifact(tool, Artifact{
 				Type:     artifactType,
+				Types:    buildTypes(),
 				Value:    artifactValue,
 				Active:   isActive,
 				Metadata: metadata,
@@ -1168,6 +1302,7 @@ func handleCategorizedRoute(s *Sink, line string, isActive bool, tool string, pr
 		_ = target.WriteRaw(value)
 		s.recordArtifact(tool, Artifact{
 			Type:     artifactType,
+			Types:    buildTypes(),
 			Value:    artifactValue,
 			Active:   isActive,
 			Metadata: metadata,
@@ -1178,6 +1313,7 @@ func handleCategorizedRoute(s *Sink, line string, isActive bool, tool string, pr
 	_ = target.WriteURL(value)
 	s.recordArtifact(tool, Artifact{
 		Type:     artifactType,
+		Types:    buildTypes(),
 		Value:    artifactValue,
 		Active:   false,
 		Metadata: metadata,
