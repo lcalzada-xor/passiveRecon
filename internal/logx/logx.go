@@ -1,14 +1,18 @@
 package logx
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
 
-type Level int
+type Level uint8
 
 const (
 	LevelError Level = iota
@@ -23,62 +27,157 @@ type levelInfo struct {
 	color string
 }
 
-var (
-	mu           sync.RWMutex
-	verbosity              = 0
-	output       io.Writer = os.Stderr
-	colorEnabled           = true
-	levels                 = map[Level]levelInfo{
-		LevelError: {label: "[ERROR]", color: "\x1b[31m"},
-		LevelWarn:  {label: "[WARN]", color: "\x1b[33m"},
-		LevelInfo:  {label: "[INFO]", color: "\x1b[36m"},
-		LevelDebug: {label: "[DEBUG]", color: "\x1b[35m"},
-		LevelTrace: {label: "[TRACE]", color: "\x1b[90m"},
-	}
-)
+var levelMeta = map[Level]levelInfo{
+	LevelError: {label: "[ERROR]", color: "\x1b[31m"},
+	LevelWarn:  {label: "[WARN]", color: "\x1b[33m"},
+	LevelInfo:  {label: "[INFO]", color: "\x1b[36m"},
+	LevelDebug: {label: "[DEBUG]", color: "\x1b[35m"},
+	LevelTrace: {label: "[TRACE]", color: "\x1b[90m"},
+}
 
-// SetVerbosity configura el nivel máximo de detalle a imprimir (0=errores, 1=info, 2=debug, 3=trace).
+// Config runtime segura con RWMutex
+type Config struct {
+	mu         sync.RWMutex
+	level      Level
+	out        io.Writer
+	color      bool
+	jsonMode   bool
+	withCaller bool
+	timeFormat string
+	withTime   bool
+	useUTC     bool
+	prefix     string
+}
+
+var cfg = &Config{
+	level:      LevelInfo,
+	out:        os.Stderr,
+	color:      true,
+	jsonMode:   false,
+	withCaller: false,
+	timeFormat: time.RFC3339,
+	withTime:   true,
+	useUTC:     false,
+	prefix:     "",
+}
+
+// SetVerbosity mantiene compat con tu API anterior: 0=errores, 1=info, 2=debug, 3=trace
 func SetVerbosity(v int) {
-	mu.Lock()
-	verbosity = v
-	mu.Unlock()
-}
-
-// SetOutput permite redirigir la salida del log. Si w es nil se usa stderr.
-func SetOutput(w io.Writer) {
-	mu.Lock()
-	if w == nil {
-		output = os.Stderr
-	} else {
-		output = w
+	switch {
+	case v <= 0:
+		SetLevel(LevelError)
+	case v == 1:
+		SetLevel(LevelInfo)
+	case v == 2:
+		SetLevel(LevelDebug)
+	default:
+		SetLevel(LevelTrace)
 	}
-	mu.Unlock()
 }
 
-// EnableColors permite activar o desactivar colores ANSI en la salida.
+// SetLevel cambia el nivel mínimo visible
+func SetLevel(l Level) {
+	cfg.mu.Lock()
+	cfg.level = l
+	cfg.mu.Unlock()
+}
+
+// ParseLevel permite setear por string: "error", "warn", "info", "debug", "trace"
+func ParseLevel(s string) (Level, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "error", "err":
+		return LevelError, nil
+	case "warn", "warning":
+		return LevelWarn, nil
+	case "info":
+		return LevelInfo, nil
+	case "debug":
+		return LevelDebug, nil
+	case "trace":
+		return LevelTrace, nil
+	default:
+		return 0, fmt.Errorf("logx: nivel desconocido %q", s)
+	}
+}
+
+// SetOutput redirige la salida (nil usa stderr)
+func SetOutput(w io.Writer) {
+	cfg.mu.Lock()
+	if w == nil {
+		cfg.out = os.Stderr
+	} else {
+		cfg.out = w
+	}
+	cfg.mu.Unlock()
+}
+
+// AddOutput envía el log a otro writer además del actual
+func AddOutput(w io.Writer) {
+	if w == nil {
+		return
+	}
+	cfg.mu.Lock()
+	cfg.out = io.MultiWriter(cfg.out, w)
+	cfg.mu.Unlock()
+}
+
+// EnableColors activa o desactiva colores ANSI
 func EnableColors(enabled bool) {
-	mu.Lock()
-	colorEnabled = enabled
-	mu.Unlock()
+	cfg.mu.Lock()
+	cfg.color = enabled
+	cfg.mu.Unlock()
 }
 
-// Errorf imprime siempre, independiente de la verbosidad configurada.
+// SetJSON habilita salida JSON estructurada
+func SetJSON(enabled bool) {
+	cfg.mu.Lock()
+	cfg.jsonMode = enabled
+	cfg.mu.Unlock()
+}
+
+// SetCaller muestra archivo:línea
+func SetCaller(enabled bool) {
+	cfg.mu.Lock()
+	cfg.withCaller = enabled
+	cfg.mu.Unlock()
+}
+
+// SetTimeFormat cambia el formato de tiempo (ej: time.DateTime)
+func SetTimeFormat(tf string) {
+	cfg.mu.Lock()
+	cfg.timeFormat = tf
+	cfg.mu.Unlock()
+}
+
+// SetTimestamps muestra u oculta timestamp
+func SetTimestamps(enabled bool) {
+	cfg.mu.Lock()
+	cfg.withTime = enabled
+	cfg.mu.Unlock()
+}
+
+// SetUTC fuerza timestamps en UTC
+func SetUTC(enabled bool) {
+	cfg.mu.Lock()
+	cfg.useUTC = enabled
+	cfg.mu.Unlock()
+}
+
+// SetPrefix añade un prefijo al comienzo del mensaje
+func SetPrefix(p string) {
+	cfg.mu.Lock()
+	cfg.prefix = p
+	cfg.mu.Unlock()
+}
+
+// Atajos de nivel
 func Errorf(format string, a ...interface{}) { logf(LevelError, format, a...) }
-
-// Warnf respeta verbosidad >=0 (por defecto visible salvo modo silencioso estricto).
-func Warnf(format string, a ...interface{}) { logf(LevelWarn, format, a...) }
-
-// Infof requiere verbosidad >=1.
-func Infof(format string, a ...interface{}) { logf(LevelInfo, format, a...) }
-
-// Debugf requiere verbosidad >=2.
+func Warnf(format string, a ...interface{})  { logf(LevelWarn, format, a...) }
+func Infof(format string, a ...interface{})  { logf(LevelInfo, format, a...) }
 func Debugf(format string, a ...interface{}) { logf(LevelDebug, format, a...) }
-
-// Tracef requiere verbosidad >=3.
 func Tracef(format string, a ...interface{}) { logf(LevelTrace, format, a...) }
 
-// V mantiene compatibilidad con la API anterior.
-// level>=1 equivale a Info, >=2 a Debug, >=3 a Trace. Valores <=0 se consideran advertencias.
+// Compat con API anterior V
 func V(level int, format string, a ...interface{}) {
 	switch {
 	case level <= 0:
@@ -92,52 +191,98 @@ func V(level int, format string, a ...interface{}) {
 	}
 }
 
-func logf(level Level, format string, a ...interface{}) {
-	if !shouldLog(level) {
+func logf(lvl Level, format string, a ...interface{}) {
+	// snapshot de config con RLock mínimo
+	cfg.mu.RLock()
+	min := cfg.level
+	if lvl > min && lvl != LevelError { // Error siempre imprime
+		cfg.mu.RUnlock()
 		return
 	}
-	msg := fmt.Sprintf(format, a...)
-	stamp := time.Now().Format(time.RFC3339)
-	label := formatLabel(level)
+	out := cfg.out
+	color := cfg.color
+	jsonMode := cfg.jsonMode
+	withCaller := cfg.withCaller
+	tf := cfg.timeFormat
+	withTime := cfg.withTime
+	useUTC := cfg.useUTC
+	prefix := cfg.prefix
+	cfg.mu.RUnlock()
 
-	mu.RLock()
-	out := output
-	mu.RUnlock()
-
-	fmt.Fprintf(out, "%s %s %s\n", stamp, label, msg)
-}
-
-func shouldLog(level Level) bool {
-	mu.RLock()
-	v := verbosity
-	mu.RUnlock()
-
-	switch level {
-	case LevelError:
-		return true
-	case LevelWarn:
-		return v >= 0
-	case LevelInfo:
-		return v >= 1
-	case LevelDebug:
-		return v >= 2
-	case LevelTrace:
-		return v >= 3
-	default:
-		return false
+	now := time.Now()
+	if useUTC {
+		now = now.UTC()
 	}
+
+	msg := fmt.Sprintf(format, a...)
+
+	if jsonMode {
+		payload := map[string]any{
+			"level": levelMeta[lvl].label[1 : len(levelMeta[lvl].label)-1], // sin corchetes
+			"msg":   msg,
+		}
+		if withTime {
+			payload["time"] = now.Format(tf)
+		}
+		if prefix != "" {
+			payload["prefix"] = prefix
+		}
+		if withCaller {
+			if file, line, ok := caller(3); ok {
+				payload["file"] = file
+				payload["line"] = line
+			}
+		}
+		enc := json.NewEncoder(out)
+		_ = enc.Encode(payload)
+		return
+	}
+
+	var b bytes.Buffer
+	if withTime {
+		b.WriteString(now.Format(tf))
+		b.WriteByte(' ')
+	}
+	if prefix != "" {
+		b.WriteString(prefix)
+		b.WriteByte(' ')
+	}
+	label := labelFor(lvl, color)
+	b.WriteString(label)
+	b.WriteByte(' ')
+	if withCaller {
+		if file, line, ok := caller(3); ok {
+			fmt.Fprintf(&b, "(%s:%d) ", file, line)
+		}
+	}
+	b.WriteString(msg)
+	b.WriteByte('\n')
+	_, _ = out.Write(b.Bytes())
 }
 
-func formatLabel(level Level) string {
-	info, ok := levels[level]
+func labelFor(lvl Level, withColor bool) string {
+	info, ok := levelMeta[lvl]
 	if !ok {
 		return "[LOG]"
 	}
-	mu.RLock()
-	useColors := colorEnabled
-	mu.RUnlock()
-	if !useColors {
+	if !withColor {
 		return info.label
 	}
-	return fmt.Sprintf("%s%s\x1b[0m", info.color, info.label)
+	return info.color + info.label + "\x1b[0m"
+}
+
+func caller(skip int) (file string, line int, ok bool) {
+	// runtime.Caller devuelve ruta completa; nos quedamos con el tail
+	_, f, ln, ok := runtime.Caller(skip)
+	if !ok {
+		return "", 0, false
+	}
+	// tail
+	for i := len(f) - 1; i >= 0; i-- {
+		if f[i] == '/' || f[i] == '\\' {
+			f = f[i+1:]
+			break
+		}
+	}
+	return f, ln, true
 }
