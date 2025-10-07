@@ -37,9 +37,9 @@ func writeArtifactsFile(t *testing.T, outdir string, artifacts []pipeline.Artifa
 func TestHTTPXCombinesAllLists(t *testing.T) {
 	tmp := t.TempDir()
 	writeArtifactsFile(t, tmp, []pipeline.Artifact{
-		{Type: "domain", Value: "example.com"},
-		{Type: "domain", Value: "sub.example.com"},
-		{Type: "route", Value: "https://app.example.com/login"},
+		{Type: "domain", Value: "example.com", Valid: true},
+		{Type: "domain", Value: "sub.example.com", Valid: true},
+		{Type: "route", Value: "https://app.example.com/login", Valid: true},
 	})
 
 	originalBinFinder := httpxBinFinder
@@ -108,12 +108,12 @@ func TestHTTPXCombinesAllLists(t *testing.T) {
 func TestCollectHTTPXInputsDedupesAndReportsMissing(t *testing.T) {
 	tmp := t.TempDir()
 	writeArtifactsFile(t, tmp, []pipeline.Artifact{
-		{Type: "domain", Value: "example.com"},
-		{Type: "domain", Value: "# comment"},
-		{Type: "route", Value: "https://assets.example.com/favicon.ico"},
-		{Type: "domain", Value: "example.com"},
-		{Type: "route", Value: "https://valid.example.com/path"},
-		{Type: "route", Value: ""},
+		{Type: "domain", Value: "example.com", Valid: true},
+		{Type: "domain", Value: "# comment", Valid: true},
+		{Type: "route", Value: "https://assets.example.com/favicon.ico", Valid: true},
+		{Type: "domain", Value: "example.com", Valid: true},
+		{Type: "route", Value: "https://valid.example.com/path", Valid: true},
+		{Type: "route", Value: "", Valid: true},
 	})
 
 	originalMeta := httpxMetaEmit
@@ -311,7 +311,7 @@ func TestRunHTTPXWorkersCancellation(t *testing.T) {
 
 func TestHTTPXProcessesRouteArtifactsOnly(t *testing.T) {
 	tmp := t.TempDir()
-	writeArtifactsFile(t, tmp, []pipeline.Artifact{{Type: "route", Value: "https://app.example.com/login"}})
+	writeArtifactsFile(t, tmp, []pipeline.Artifact{{Type: "route", Value: "https://app.example.com/login", Valid: true}})
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
@@ -377,7 +377,7 @@ func TestHTTPXProcessesRouteArtifactsOnly(t *testing.T) {
 
 func TestHTTPXNormalizesOutput(t *testing.T) {
 	inputDir := t.TempDir()
-	writeArtifactsFile(t, inputDir, []pipeline.Artifact{{Type: "route", Value: "https://app.example.com"}})
+	writeArtifactsFile(t, inputDir, []pipeline.Artifact{{Type: "route", Value: "https://app.example.com", Valid: true}})
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
@@ -472,7 +472,7 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 
 func TestHTTPXSkipsUnresponsiveResults(t *testing.T) {
 	inputDir := t.TempDir()
-	writeArtifactsFile(t, inputDir, []pipeline.Artifact{{Type: "route", Value: "https://app.example.com"}})
+	writeArtifactsFile(t, inputDir, []pipeline.Artifact{{Type: "route", Value: "https://app.example.com", Valid: true}})
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
@@ -515,7 +515,7 @@ func TestHTTPXSkipsUnresponsiveResults(t *testing.T) {
 
 func TestHTTPXSkipsHTMLForErrorResponses(t *testing.T) {
 	inputDir := t.TempDir()
-	writeArtifactsFile(t, inputDir, []pipeline.Artifact{{Type: "route", Value: "https://missing.example.com"}})
+	writeArtifactsFile(t, inputDir, []pipeline.Artifact{{Type: "route", Value: "https://missing.example.com", Valid: true}})
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
@@ -554,7 +554,7 @@ func TestHTTPXSkipsHTMLForErrorResponses(t *testing.T) {
 
 func TestHTTPXIncludesRedirectDomains(t *testing.T) {
 	inputDir := t.TempDir()
-	writeArtifactsFile(t, inputDir, []pipeline.Artifact{{Type: "route", Value: "https://redirect.example.com"}})
+	writeArtifactsFile(t, inputDir, []pipeline.Artifact{{Type: "route", Value: "https://redirect.example.com", Valid: true}})
 
 	originalBinFinder := httpxBinFinder
 	originalRunCmd := httpxRunCmd
@@ -594,7 +594,7 @@ func TestHTTPXBatchesLargeInputs(t *testing.T) {
 	inputDir := t.TempDir()
 	var records []pipeline.Artifact
 	for i := 0; i < 5; i++ {
-		records = append(records, pipeline.Artifact{Type: "route", Value: fmt.Sprintf("https://example.com/path-%d", i)})
+		records = append(records, pipeline.Artifact{Type: "route", Value: fmt.Sprintf("https://example.com/path-%d", i), Valid: true})
 	}
 	writeArtifactsFile(t, inputDir, records)
 
@@ -679,7 +679,7 @@ func TestHTTPXSkipsLowPriorityRoutes(t *testing.T) {
 		"https://app.example.com/files/THUMBS.DB",
 		"https://app.example.com/assets/raw.pgm",
 	} {
-		artifactsList = append(artifactsList, pipeline.Artifact{Type: "route", Value: value})
+		artifactsList = append(artifactsList, pipeline.Artifact{Type: "route", Value: value, Valid: true})
 	}
 	writeArtifactsFile(t, tmp, artifactsList)
 

@@ -588,6 +588,16 @@ func TestActiveRoutesSkip404(t *testing.T) {
 	if diff := cmp.Diff([]string{"https://app.example.com/dashboard [200]"}, active); diff != "" {
 		t.Fatalf("unexpected routes.active contents (-want +got):\n%s", diff)
 	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	dashboard := requireArtifact(t, artifacts, "route", "https://app.example.com/dashboard", true)
+	if !dashboard.Valid {
+		t.Fatalf("expected successful dashboard route to be valid")
+	}
+	login := requireArtifact(t, artifacts, "route", "https://app.example.com/login", true)
+	if login.Valid {
+		t.Fatalf("expected 404 login route to be invalid")
+	}
 }
 
 func TestJSLinesAreWrittenToFile(t *testing.T) {
@@ -618,6 +628,16 @@ func TestJSLinesAreWrittenToFile(t *testing.T) {
 	if diff := cmp.Diff([]string{"https://static.example.com/app.js"}, activeLines); diff != "" {
 		t.Fatalf("unexpected js.active contents (-want +got):\n%s", diff)
 	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	passiveJS := requireArtifact(t, artifacts, "js", "https://static.example.com/app.js", false)
+	if !passiveJS.Valid {
+		t.Fatalf("expected passive js artifact to be valid")
+	}
+	activeJS := requireArtifact(t, artifacts, "js", "https://static.example.com/app.js", true)
+	if !activeJS.Valid {
+		t.Fatalf("expected active js artifact to be valid")
+	}
 }
 
 func TestActiveJSExcludes404(t *testing.T) {
@@ -641,6 +661,16 @@ func TestActiveJSExcludes404(t *testing.T) {
 	activeLines := readLines(t, activePath)
 	if diff := cmp.Diff([]string{"https://static.example.com/app.js [200]"}, activeLines); diff != "" {
 		t.Fatalf("unexpected js.active contents (-want +got):\n%s", diff)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	validJS := requireArtifact(t, artifacts, "js", "https://static.example.com/app.js", true)
+	if !validJS.Valid {
+		t.Fatalf("expected 200 js artifact to be valid")
+	}
+	missingJS := requireArtifact(t, artifacts, "js", "https://static.example.com/missing.js", true)
+	if missingJS.Valid {
+		t.Fatalf("expected 404 js artifact to be invalid")
 	}
 }
 
@@ -690,6 +720,9 @@ func TestHTMLActiveSkipsErrorResponses(t *testing.T) {
 
 	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
 	htmlArtifact := requireArtifact(t, artifacts, "html", "https://app.example.com", true)
+	if htmlArtifact.Valid {
+		t.Fatalf("expected html artifact to be invalid for 404 response")
+	}
 	if status := metadataInt(t, htmlArtifact.Metadata, "status"); status != 404 {
 		t.Fatalf("unexpected html artifact status: %v", status)
 	}
@@ -758,6 +791,9 @@ func TestRouteArtifactsMergeSchemes(t *testing.T) {
 	if activeRoute.Occurrences != 2 {
 		t.Fatalf("expected 2 occurrences for active route, got %d", activeRoute.Occurrences)
 	}
+	if !activeRoute.Valid {
+		t.Fatalf("expected active route to be marked valid")
+	}
 	rawEntries := rawMetadataValues(activeRoute.Metadata)
 	if len(rawEntries) != 2 {
 		t.Fatalf("expected 2 raw entries, got %d (%v)", len(rawEntries), rawEntries)
@@ -775,6 +811,9 @@ func TestRouteArtifactsMergeSchemes(t *testing.T) {
 	passiveRoute := findRouteArtifactByCanonical(t, artifacts, "https://app.example.com/login", false)
 	if passiveRoute.Occurrences != 2 {
 		t.Fatalf("expected 2 occurrences for passive route, got %d", passiveRoute.Occurrences)
+	}
+	if !passiveRoute.Valid {
+		t.Fatalf("expected passive route to be marked valid")
 	}
 	if values := rawMetadataValues(passiveRoute.Metadata); len(values) != 0 {
 		t.Fatalf("expected no raw metadata for passive route, got %v", values)
@@ -1167,6 +1206,9 @@ func TestHandleGFFindingRecordsArtifact(t *testing.T) {
 	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
 	value := buildGFFindingValue("https://example.com/app.js", 99, "fetch('/api')")
 	art := requireArtifact(t, artifacts, "gfFinding", value, true)
+	if !art.Valid {
+		t.Fatalf("expected gfFinding artifact to be valid")
+	}
 
 	if diff := cmp.Diff([]string{"sqli", "xss"}, art.Types); diff != "" {
 		t.Fatalf("unexpected gfFinding types (-want +got):\n%s", diff)

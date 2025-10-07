@@ -93,8 +93,8 @@ func TestSubJSMissingInputFile(t *testing.T) {
 func TestSubJSSuccess(t *testing.T) {
 	dir := t.TempDir()
 	writeSubJSArtifacts(t, dir, []pipeline.Artifact{
-		{Type: "route", Value: "https://app.example.com/login [200]", Active: true},
-		{Type: "route", Value: "https://app.example.com/login", Active: true},
+		{Type: "route", Value: "https://app.example.com/login [200]", Active: true, Valid: true},
+		{Type: "route", Value: "https://app.example.com/login", Active: true, Valid: true},
 	})
 
 	var (
@@ -173,7 +173,7 @@ func TestSubJSSuccess(t *testing.T) {
 
 func TestSubJSAcceptsNonErrorStatuses(t *testing.T) {
 	dir := t.TempDir()
-	writeSubJSArtifacts(t, dir, []pipeline.Artifact{{Type: "route", Value: "https://app.example.com/login", Active: true}})
+	writeSubJSArtifacts(t, dir, []pipeline.Artifact{{Type: "route", Value: "https://app.example.com/login", Active: true, Valid: true}})
 
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
