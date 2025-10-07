@@ -493,15 +493,7 @@ func executePostProcessing(ctx context.Context, cfg *config.Config, sink sink, b
 	notifyUnknownTools(sink, bar, unknown)
 
 	if cfg.Report {
-		sinkFiles := report.DefaultSinkFiles(cfg.OutDir)
-		if cfg.Active {
-			sinkFiles.ActiveDomains = filepath.Join(cfg.OutDir, "domains", "domains.active")
-			sinkFiles.ActiveRoutes = filepath.Join(cfg.OutDir, "routes", "routes.active")
-			sinkFiles.ActiveCerts = filepath.Join(cfg.OutDir, "certs", "certs.active")
-			sinkFiles.ActiveDNS = filepath.Join(cfg.OutDir, "dns", "dns.active")
-			sinkFiles.ActiveMeta = filepath.Join(cfg.OutDir, "meta.active")
-		}
-		if err := report.Generate(ctx, cfg, sinkFiles); err != nil {
+		if err := report.Generate(ctx, cfg); err != nil {
 			logx.Warnf("no se pudo generar report.html: %v", err)
 		} else {
 			logx.Infof("Informe HTML generado en %s", filepath.Join(cfg.OutDir, "report.html"))
