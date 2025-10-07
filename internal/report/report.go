@@ -322,20 +322,31 @@ func artifactRawValues(artifacts []pipeline.Artifact) []string {
 	}
 	values := make([]string, 0, len(artifacts))
 	for _, artifact := range artifacts {
-		var candidate string
+		candidates := make([]string, 0, 1)
 		if artifact.Metadata != nil {
-			if raw, ok := artifact.Metadata["raw"].(string); ok {
-				candidate = raw
+			switch raw := artifact.Metadata["raw"].(type) {
+			case string:
+				candidates = append(candidates, raw)
+			case []string:
+				candidates = append(candidates, raw...)
+			case []any:
+				for _, entry := range raw {
+					if s, ok := entry.(string); ok {
+						candidates = append(candidates, s)
+					}
+				}
 			}
 		}
-		if candidate == "" {
-			candidate = artifact.Value
+		if len(candidates) == 0 {
+			candidates = append(candidates, artifact.Value)
 		}
-		candidate = cleanReportText(candidate)
-		if candidate == "" {
-			continue
+		for _, candidate := range candidates {
+			candidate = cleanReportText(candidate)
+			if candidate == "" {
+				continue
+			}
+			values = append(values, candidate)
 		}
-		values = append(values, candidate)
 	}
 	if len(values) == 0 {
 		return nil

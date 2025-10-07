@@ -737,6 +737,50 @@ func TestArtifactsMergeTypes(t *testing.T) {
 	}
 }
 
+func TestRouteArtifactsMergeSchemes(t *testing.T) {
+	t.Parallel()
+
+	sink, dir := newTestSink(t, false)
+	sink.Start(1)
+
+	sink.In() <- "active: https://app.example.com/login [200] [OK]"
+	sink.In() <- "active: http://app.example.com/login [301] [Moved Permanently]"
+	sink.In() <- "https://app.example.com/login"
+	sink.In() <- "http://app.example.com/login"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+
+	activeRoute := findRouteArtifactByCanonical(t, artifacts, "https://app.example.com/login", true)
+	if activeRoute.Occurrences != 2 {
+		t.Fatalf("expected 2 occurrences for active route, got %d", activeRoute.Occurrences)
+	}
+	rawEntries := rawMetadataValues(activeRoute.Metadata)
+	if len(rawEntries) != 2 {
+		t.Fatalf("expected 2 raw entries, got %d (%v)", len(rawEntries), rawEntries)
+	}
+	if !containsString(rawEntries, "https://app.example.com/login [200] [OK]") {
+		t.Fatalf("active route missing https raw entry: %v", rawEntries)
+	}
+	if !containsString(rawEntries, "http://app.example.com/login [301] [Moved Permanently]") {
+		t.Fatalf("active route missing http raw entry: %v", rawEntries)
+	}
+	if status := metadataInt(t, activeRoute.Metadata, "status"); status != 200 {
+		t.Fatalf("unexpected active route status: %d", status)
+	}
+
+	passiveRoute := findRouteArtifactByCanonical(t, artifacts, "https://app.example.com/login", false)
+	if passiveRoute.Occurrences != 2 {
+		t.Fatalf("expected 2 occurrences for passive route, got %d", passiveRoute.Occurrences)
+	}
+	if values := rawMetadataValues(passiveRoute.Metadata); len(values) != 0 {
+		t.Fatalf("expected no raw metadata for passive route, got %v", values)
+	}
+}
+
 func TestNewSinkDoesNotTruncateExistingFiles(t *testing.T) {
 	t.Parallel()
 
@@ -1326,6 +1370,76 @@ func containsType(types []string, typ string) bool {
 	}
 	for _, candidate := range types {
 		if strings.TrimSpace(candidate) == typ {
+			return true
+		}
+	}
+	return false
+}
+
+func findRouteArtifactByCanonical(t *testing.T, artifacts []Artifact, value string, active bool) Artifact {
+	t.Helper()
+	canonical := canonicalRouteKey(value)
+	for _, art := range artifacts {
+		if strings.TrimSpace(art.Type) != "route" {
+			continue
+		}
+		if art.Active != active {
+			continue
+		}
+		if canonicalRouteKey(art.Value) == canonical {
+			return art
+		}
+	}
+	t.Fatalf("route artifact %q (active=%v) not found", value, active)
+	return Artifact{}
+}
+
+func rawMetadataValues(metadata map[string]any) []string {
+	if metadata == nil {
+		return nil
+	}
+	raw, ok := metadata["raw"]
+	if !ok || raw == nil {
+		return nil
+	}
+	switch v := raw.(type) {
+	case string:
+		candidate := strings.TrimSpace(v)
+		if candidate == "" {
+			return nil
+		}
+		return []string{candidate}
+	case []string:
+		var out []string
+		for _, candidate := range v {
+			candidate = strings.TrimSpace(candidate)
+			if candidate == "" {
+				continue
+			}
+			out = append(out, candidate)
+		}
+		return out
+	case []any:
+		var out []string
+		for _, candidate := range v {
+			if s, ok := candidate.(string); ok {
+				s = strings.TrimSpace(s)
+				if s == "" {
+					continue
+				}
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func containsString(values []string, target string) bool {
+	target = strings.TrimSpace(target)
+	for _, value := range values {
+		if strings.TrimSpace(value) == target {
 			return true
 		}
 	}

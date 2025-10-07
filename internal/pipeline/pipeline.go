@@ -172,6 +172,7 @@ type Artifact struct {
 }
 
 type artifactKey struct {
+	Type   string
 	Value  string
 	Active bool
 }
@@ -594,7 +595,7 @@ func (s *Sink) recordArtifact(tool string, artifact Artifact) {
 		return
 	}
 
-	key := artifactKey{Value: normalized.Value, Active: normalized.Active}
+	key := artifactKeyFor(normalized)
 
 	s.artifactMu.Lock()
 	defer s.artifactMu.Unlock()
@@ -702,6 +703,97 @@ func normalizeArtifact(tool string, artifact Artifact) (Artifact, bool) {
 	return artifact, true
 }
 
+func canonicalRouteKey(value string) string {
+	base := extractRouteBase(value)
+	if base == "" {
+		return ""
+	}
+
+	parsed, err := url.Parse(base)
+	if err != nil || parsed == nil {
+		trimmed := strings.TrimSpace(base)
+		trimmed = strings.TrimPrefix(trimmed, "http://")
+		trimmed = strings.TrimPrefix(trimmed, "https://")
+		return trimmed
+	}
+
+	host := parsed.Hostname()
+	if host == "" {
+		trimmed := strings.TrimSpace(base)
+		trimmed = strings.TrimPrefix(trimmed, "http://")
+		trimmed = strings.TrimPrefix(trimmed, "https://")
+		return trimmed
+	}
+
+	hostname := strings.ToLower(host)
+	port := parsed.Port()
+	if (parsed.Scheme == "http" && port == "80") || (parsed.Scheme == "https" && port == "443") {
+		port = ""
+	}
+
+	normalizedHost := hostname
+	if port != "" {
+		normalizedHost = net.JoinHostPort(hostname, port)
+	}
+	if parsed.User != nil {
+		normalizedHost = parsed.User.String() + "@" + normalizedHost
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(normalizedHost) + len(base))
+	builder.WriteString(normalizedHost)
+
+	path := parsed.EscapedPath()
+	if path != "" && path != "/" {
+		builder.WriteString(path)
+	} else if path == "/" {
+		builder.WriteString("/")
+	}
+
+	if parsed.RawQuery != "" {
+		builder.WriteByte('?')
+		builder.WriteString(parsed.RawQuery)
+	}
+
+	if parsed.Fragment != "" {
+		builder.WriteByte('#')
+		builder.WriteString(parsed.Fragment)
+	}
+
+	result := strings.TrimSpace(builder.String())
+	if result == "" {
+		return base
+	}
+	return result
+}
+
+func artifactKeyFor(artifact Artifact) artifactKey {
+	category := artifactKeyCategory(artifact.Type)
+	key := artifactKey{
+		Type:   category,
+		Value:  strings.TrimSpace(artifact.Value),
+		Active: artifact.Active,
+	}
+	if key.Type == "route" {
+		if canonical := canonicalRouteKey(key.Value); canonical != "" {
+			key.Value = canonical
+		}
+	}
+	if key.Type == "" {
+		key.Type = "?"
+	}
+	return key
+}
+
+func artifactKeyCategory(typ string) string {
+	switch strings.TrimSpace(typ) {
+	case "", "route", "html", "js", "image", "maps", "json", "api", "wasm", "svg", "crawl", "meta-route":
+		return "route"
+	default:
+		return strings.TrimSpace(typ)
+	}
+}
+
 func mergeArtifactMetadata(dst *Artifact, metadata map[string]any) {
 	if dst == nil || metadata == nil {
 		return
@@ -713,8 +805,115 @@ func mergeArtifactMetadata(dst *Artifact, metadata map[string]any) {
 		if key == "" || value == nil {
 			continue
 		}
+		if key == "raw" {
+			mergeArtifactRawMetadata(dst.Metadata, value)
+			continue
+		}
 		if _, exists := dst.Metadata[key]; !exists {
 			dst.Metadata[key] = value
+		}
+	}
+}
+
+func mergeArtifactRawMetadata(target map[string]any, incoming any) {
+	if target == nil || incoming == nil {
+		return
+	}
+
+	addRaw := func(list []string, candidate string) []string {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			return list
+		}
+		for _, existing := range list {
+			if existing == candidate {
+				return list
+			}
+		}
+		return append(list, candidate)
+	}
+
+	switch src := incoming.(type) {
+	case string:
+		if existing, ok := target["raw"]; ok {
+			switch current := existing.(type) {
+			case string:
+				if strings.TrimSpace(current) == strings.TrimSpace(src) || strings.TrimSpace(src) == "" {
+					return
+				}
+				target["raw"] = []string{strings.TrimSpace(current), strings.TrimSpace(src)}
+			case []string:
+				target["raw"] = addRaw(current, src)
+			case []any:
+				var list []string
+				for _, candidate := range current {
+					if s, ok := candidate.(string); ok {
+						list = addRaw(list, s)
+					}
+				}
+				target["raw"] = addRaw(list, src)
+			default:
+				target["raw"] = strings.TrimSpace(src)
+			}
+			return
+		}
+		trimmed := strings.TrimSpace(src)
+		if trimmed != "" {
+			target["raw"] = trimmed
+		}
+	case []string:
+		var list []string
+		if existing, ok := target["raw"]; ok {
+			switch current := existing.(type) {
+			case string:
+				list = addRaw(list, current)
+			case []string:
+				list = append(list, current...)
+			case []any:
+				for _, candidate := range current {
+					if s, ok := candidate.(string); ok {
+						list = addRaw(list, s)
+					}
+				}
+			}
+		}
+		for _, candidate := range src {
+			list = addRaw(list, candidate)
+		}
+		if len(list) == 1 {
+			target["raw"] = list[0]
+		} else if len(list) > 1 {
+			target["raw"] = list
+		}
+	case []any:
+		var list []string
+		if existing, ok := target["raw"]; ok {
+			switch current := existing.(type) {
+			case string:
+				list = addRaw(list, current)
+			case []string:
+				list = append(list, current...)
+			case []any:
+				for _, candidate := range current {
+					if s, ok := candidate.(string); ok {
+						list = addRaw(list, s)
+					}
+				}
+			}
+		}
+		for _, candidate := range src {
+			if s, ok := candidate.(string); ok {
+				list = addRaw(list, s)
+			}
+		}
+		if len(list) == 1 {
+			target["raw"] = list[0]
+		} else if len(list) > 1 {
+			target["raw"] = list
+		}
+	default:
+		if _, ok := target["raw"]; !ok {
+			target["raw"] = src
 		}
 	}
 }
