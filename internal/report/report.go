@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -280,6 +281,8 @@ var certTimeLayouts = []string{
 	"2006-01-02",
 }
 
+var ansiSequence = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+
 var reportTmpl = template.Must(template.New("report").Funcs(template.FuncMap{
 	"hasData":    func(items []countItem) bool { return len(items) > 0 },
 	"hasStrings": func(items []string) bool { return len(items) > 0 },
@@ -301,7 +304,7 @@ func artifactValues(artifacts []pipeline.Artifact) []string {
 	}
 	values := make([]string, 0, len(artifacts))
 	for _, artifact := range artifacts {
-		value := strings.TrimSpace(artifact.Value)
+		value := cleanReportText(artifact.Value)
 		if value == "" {
 			continue
 		}
@@ -328,7 +331,7 @@ func artifactRawValues(artifacts []pipeline.Artifact) []string {
 		if candidate == "" {
 			candidate = artifact.Value
 		}
-		candidate = strings.TrimSpace(candidate)
+		candidate = cleanReportText(candidate)
 		if candidate == "" {
 			continue
 		}
@@ -376,22 +379,91 @@ func formatDNSRecords(records []dnsRecord) []string {
 		value := strings.TrimSpace(record.Value)
 		raw := strings.TrimSpace(record.Raw)
 		var display string
+		var extra string
+		if recordType == "" {
+			extra = summarizeDNSRaw(raw)
+		}
 		if host != "" && recordType != "" {
 			display = fmt.Sprintf("%s [%s]", host, recordType)
 			if value != "" {
 				display += " " + value
 			}
+		} else if host != "" {
+			display = host
+			if value != "" {
+				display = fmt.Sprintf("%s %s", display, value)
+			}
+			if extra != "" {
+				display = fmt.Sprintf("%s %s", display, extra)
+			}
 		} else if raw != "" {
-			display = raw
+			if extra != "" {
+				display = extra
+			} else {
+				display = raw
+			}
 		} else {
 			continue
 		}
 		if len(record.PTR) > 0 {
 			display = fmt.Sprintf("%s (PTR: %s)", display, strings.Join(record.PTR, ", "))
 		}
-		formatted = append(formatted, display)
+		cleaned := cleanReportText(display)
+		if cleaned == "" {
+			continue
+		}
+		formatted = append(formatted, cleaned)
 	}
 	return formatted
+}
+
+func summarizeDNSRaw(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || !strings.HasPrefix(raw, "{") {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return ""
+	}
+	type entry struct {
+		key   string
+		label string
+	}
+	var parts []string
+	collect := func(values any) []string {
+		switch v := values.(type) {
+		case string:
+			if s := strings.TrimSpace(v); s != "" {
+				return []string{s}
+			}
+		case []any:
+			items := make([]string, 0, len(v))
+			for _, item := range v {
+				s := strings.TrimSpace(fmt.Sprint(item))
+				if s != "" {
+					items = append(items, s)
+				}
+			}
+			if len(items) > 0 {
+				return items
+			}
+		}
+		return nil
+	}
+	for _, item := range []entry{{"a", "A"}, {"aaaa", "AAAA"}, {"cname", "CNAME"}, {"mx", "MX"}, {"ns", "NS"}, {"txt", "TXT"}, {"ptr", "PTR"}, {"srv", "SRV"}, {"caa", "CAA"}} {
+		if values, ok := payload[item.key]; ok {
+			entries := collect(values)
+			if len(entries) == 0 {
+				continue
+			}
+			parts = append(parts, fmt.Sprintf("[%s] %s", item.label, strings.Join(entries, ", ")))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "; ")
 }
 
 func buildDomainStats(domains []string) domainStats {
@@ -481,6 +553,19 @@ func buildDNSStats(records []dnsRecord) dnsStats {
 		}
 		recordType := strings.TrimSpace(record.Type)
 		if recordType == "" && trimmedRaw != "" {
+			if strings.HasPrefix(trimmedRaw, "{") {
+				if summary := summarizeDNSRaw(trimmedRaw); summary != "" {
+					for _, part := range strings.Split(summary, "; ") {
+						if idx := strings.Index(part, "]"); idx > 0 {
+							label := strings.Trim(part[1:idx], " ")
+							if label != "" {
+								typeCounts[label]++
+							}
+						}
+					}
+				}
+				continue
+			}
 			if start := strings.Index(trimmedRaw, "["); start >= 0 {
 				if end := strings.Index(trimmedRaw[start+1:], "]"); end >= 0 {
 					end += start + 1
@@ -495,6 +580,24 @@ func buildDNSStats(records []dnsRecord) dnsStats {
 	stats.UniqueHosts = len(seenHosts)
 	stats.RecordTypes = topItems(typeCounts, topN)
 	return stats
+}
+
+func cleanReportText(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	value = ansiSequence.ReplaceAllString(value, "")
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	if strings.Contains(value, "\n") {
+		value = strings.ReplaceAll(value, "\n", " ")
+	}
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.Join(fields, " ")
 }
 
 func buildCertStats(certsLines []string) certStats {
