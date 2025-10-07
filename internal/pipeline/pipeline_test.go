@@ -1,6 +1,8 @@
 package pipeline
 
 import (
+	"bufio"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -164,6 +166,23 @@ func TestSinkClassification(t *testing.T) {
 	if activeMeta := readLines(t, filepath.Join(dir, "meta.active")); activeMeta != nil {
 		t.Fatalf("expected empty meta.active, got %v", activeMeta)
 	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	requireArtifact(t, artifacts, "domain", "example.com", false)
+	requireArtifact(t, artifacts, "route", "https://app.example.com/login", false)
+	metaArtifact := requireArtifact(t, artifacts, "meta", "run started", false)
+	if raw, ok := metaArtifact.Metadata["raw"].(string); !ok || raw != "meta: run started" {
+		t.Fatalf("unexpected meta raw metadata: %#v", metaArtifact.Metadata["raw"])
+	}
+	certArtifact := requireArtifact(t, artifacts, "certificate", certOne, false)
+	if certArtifact.Tool != "test" {
+		t.Fatalf("unexpected certificate tool: %q", certArtifact.Tool)
+	}
+	names := metadataStringSlice(t, certArtifact.Metadata, "names")
+	sort.Strings(names)
+	if diff := cmp.Diff([]string{"alt1.example.com", "alt2.example.com", "direct-cert.example.com"}, names); diff != "" {
+		t.Fatalf("unexpected certificate names metadata (-want +got):\n%s", diff)
+	}
 }
 
 func TestSinkFiltersOutOfScope(t *testing.T) {
@@ -321,6 +340,10 @@ func TestActiveCertLines(t *testing.T) {
 	if diff := cmp.Diff(wantPassiveDomains, activeDomains); diff != "" {
 		t.Fatalf("unexpected domains.active contents (-want +got):\n%s", diff)
 	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	requireArtifact(t, artifacts, "certificate", passiveRecord, false)
+	requireArtifact(t, artifacts, "certificate", activeRecord, true)
 }
 
 func TestSinkFlush(t *testing.T) {
@@ -630,6 +653,15 @@ func TestHTMLActiveSkipsErrorResponses(t *testing.T) {
 	htmlPath := filepath.Join(dir, "routes", "html", "html.active")
 	if lines := readLines(t, htmlPath); len(lines) != 0 {
 		t.Fatalf("expected html.active to be empty, got %v", lines)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	htmlArtifact := requireArtifact(t, artifacts, "html", "https://app.example.com", true)
+	if status := metadataInt(t, htmlArtifact.Metadata, "status"); status != 404 {
+		t.Fatalf("unexpected html artifact status: %v", status)
+	}
+	if raw, ok := htmlArtifact.Metadata["raw"].(string); !ok || !strings.Contains(raw, "[404]") {
+		t.Fatalf("unexpected html artifact raw metadata: %#v", htmlArtifact.Metadata["raw"])
 	}
 }
 
@@ -968,6 +1000,91 @@ func readLines(t *testing.T, path string) []string {
 		return nil
 	}
 	return strings.Split(contents, "\n")
+}
+
+func readArtifactsFile(t *testing.T, path string) []Artifact {
+	t.Helper()
+
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open artifacts %q: %v", path, err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
+
+	var artifacts []Artifact
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var artifact Artifact
+		if err := json.Unmarshal([]byte(line), &artifact); err != nil {
+			t.Fatalf("unmarshal artifact %q: %v", line, err)
+		}
+		artifacts = append(artifacts, artifact)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan artifacts: %v", err)
+	}
+	return artifacts
+}
+
+func requireArtifact(t *testing.T, artifacts []Artifact, typ, value string, active bool) Artifact {
+	t.Helper()
+	for _, a := range artifacts {
+		if a.Type == typ && a.Value == value && a.Active == active {
+			return a
+		}
+	}
+	t.Fatalf("artifact not found type=%q value=%q active=%v", typ, value, active)
+	return Artifact{}
+}
+
+func metadataStringSlice(t *testing.T, metadata map[string]any, key string) []string {
+	t.Helper()
+	if metadata == nil {
+		t.Fatalf("metadata nil when looking for %q", key)
+	}
+	raw, ok := metadata[key]
+	if !ok {
+		t.Fatalf("metadata missing key %q", key)
+	}
+	values, ok := raw.([]any)
+	if !ok {
+		t.Fatalf("metadata %q is not an array: %#v", key, raw)
+	}
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		str, ok := v.(string)
+		if !ok {
+			t.Fatalf("metadata %q contains non-string: %#v", key, v)
+		}
+		out = append(out, str)
+	}
+	return out
+}
+
+func metadataInt(t *testing.T, metadata map[string]any, key string) int {
+	t.Helper()
+	if metadata == nil {
+		t.Fatalf("metadata nil when looking for %q", key)
+	}
+	raw, ok := metadata[key]
+	if !ok {
+		t.Fatalf("metadata missing key %q", key)
+	}
+	switch v := raw.(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	default:
+		t.Fatalf("metadata %q has unexpected type %T", key, raw)
+	}
+	return 0
 }
 
 func countOpenFDs(t *testing.T, path string) int {

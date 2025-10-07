@@ -49,6 +49,32 @@ For reference, the raw GoLinkfinderEVO outputs from each input list are also pre
 
 The passive stage now queries the public RDAP directory for the target domain. Its summaries are appended to `meta.passive` while a copy of the raw metadata lives under `rdap/rdap.passive`, making it easier to review registrar, status and nameserver details alongside the rest of the reconnaissance output.
 
+### Artifact manifest
+
+Each execution now emits a consolidated manifest as `artifacts.jsonl` at the root of the output directory. Every line is a JSON
+object with the following shape:
+
+```json
+{
+  "type": "domain | route | js | html | image | maps | json | api | wasm | svg | crawl | meta-route | meta | rdap | certificate",
+  "value": "canonical artifact value",
+  "active": false,
+  "tool": "optional source name",
+  "metadata": {
+    "raw": "original line before normalisation",
+    "status": 200,
+    "names": ["alt1.example.com"],
+    "key": "sha256:..."
+  }
+}
+```
+
+`type` denotes the sink that received the artifact and `value` stores the normalised representation that was written to the
+traditional `.passive`/`.active` files. The optional `metadata` object captures additional context such as HTTP status codes for
+active routes, the unmodified line seen on the pipeline, deduplication keys and certificate SAN lists. When available the
+`tool` attribute indicates the originating tool (for example `rdap`, `httpx` or `censys`). Consumers can iterate over the JSONL
+stream instead of reopening and parsing multiple `.passive` files when producing reports or dashboards.
+
 ### Configuration file
 
 You can pre-populate the CLI flags with a YAML or JSON configuration file by passing its path through `--config`:
