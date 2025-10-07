@@ -66,7 +66,20 @@ func TestDNSXInvokesBinaryAndWritesOutput(t *testing.T) {
 	close(metaCh)
 
 	meta := collect(metaCh)
-	if len(meta) == 0 || !strings.Contains(meta[0], "dnsx resolvió 3 registros (2 dominios)") {
+	if len(meta) != 4 {
+		t.Fatalf("unexpected meta output count: got %d (%v)", len(meta), meta)
+	}
+	for i, entry := range meta[:3] {
+		if !strings.HasPrefix(entry, "active: dns:") {
+			t.Fatalf("expected dns artifact entry, got %q", entry)
+		}
+		payload := strings.TrimPrefix(entry, "active: dns:")
+		var rec dnsxRecord
+		if err := json.Unmarshal([]byte(payload), &rec); err != nil {
+			t.Fatalf("invalid dns artifact %d: %v", i, err)
+		}
+	}
+	if !strings.Contains(meta[3], "dnsx resolvió 3 registros (2 dominios)") {
 		t.Fatalf("unexpected meta output: %v", meta)
 	}
 
