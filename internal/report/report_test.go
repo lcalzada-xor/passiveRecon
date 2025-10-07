@@ -64,7 +64,7 @@ func TestGenerateCreatesHTMLReport(t *testing.T) {
 	})
 
 	cfg := &config.Config{Target: "example.com", OutDir: dir}
-	if err := Generate(context.Background(), cfg, DefaultSinkFiles(dir)); err != nil {
+	if err := Generate(context.Background(), cfg); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -152,13 +152,7 @@ func TestGenerateIncludesActiveData(t *testing.T) {
 	})
 
 	cfg := &config.Config{Target: "example.com", OutDir: dir, Active: true}
-	files := DefaultSinkFiles(dir)
-	files.ActiveDomains = filepath.Join(dir, "domains", "domains.active")
-	files.ActiveRoutes = filepath.Join(dir, "routes", "routes.active")
-	files.ActiveDNS = filepath.Join(dir, "dns", "dns.active")
-	files.ActiveMeta = filepath.Join(dir, "meta.active")
-
-	if err := Generate(context.Background(), cfg, files); err != nil {
+	if err := Generate(context.Background(), cfg); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -183,7 +177,7 @@ func TestGenerateHandlesMissingFiles(t *testing.T) {
 
 	dir := t.TempDir()
 	cfg := &config.Config{Target: "example.com", OutDir: dir}
-	if err := Generate(context.Background(), cfg, SinkFiles{}); err != nil {
+	if err := Generate(context.Background(), cfg); err != nil {
 		t.Fatalf("Generate with missing files: %v", err)
 	}
 

@@ -21,7 +21,7 @@ Generate the passive reconnaissance dataset with:
 go run ./cmd/passive-rec -target example.com -outdir out
 ```
 
-To render an HTML summary with totals, top domains and histograms alongside the `.passive` files, add the `-report` flag:
+To render an HTML summary with totals, top domains and histograms sourced from the consolidated `artifacts.jsonl` manifest, add the `-report` flag:
 
 ```
 go run ./cmd/passive-rec -target example.com -outdir out -report
@@ -73,7 +73,8 @@ object with the following shape:
 traditional `.passive`/`.active` files. The optional `metadata` object captures additional context such as HTTP status codes for
 active routes, the unmodified line seen on the pipeline, deduplication keys and certificate SAN lists. When available the
 `tool` attribute indicates the originating tool (for example `rdap`, `httpx` or `censys`). Consumers can iterate over the JSONL
-stream instead of reopening and parsing multiple `.passive` files when producing reports or dashboards.
+stream instead of reopening and parsing multiple `.passive` files when producing reports or dashboards. The HTML report also
+reads from this manifest directly, so the legacy `.active`/`.passive` lists are no longer required to render it.
 
 ### Configuration file
 
