@@ -17,7 +17,7 @@ func TestCollectArtifactsByTypeMultiTypeRecords(t *testing.T) {
 	dir := t.TempDir()
 	artifact := pipeline.Artifact{
 		Type:   "route",
-		Types:  []string{"route", "html"},
+		Types:  []string{"html"},
 		Value:  "https://app.example.com/login",
 		Active: false,
 	}
@@ -50,13 +50,13 @@ func TestCollectArtifactsByTypeMultiTypeRecords(t *testing.T) {
 		t.Fatalf("expected html artifact type 'html', got %q", htmlArtifacts[0].Type)
 	}
 
-	for _, art := range []*pipeline.Artifact{&routeArtifacts[0], &htmlArtifacts[0]} {
-		if len(art.Types) != 2 {
-			t.Fatalf("expected two types, got %v", art.Types)
-		}
-		if !hasType(art.Types, "route") || !hasType(art.Types, "html") {
-			t.Fatalf("expected artifact types to include route and html, got %v", art.Types)
-		}
+	routeTypes := routeArtifacts[0].Types
+	if len(routeTypes) != 1 || routeTypes[0] != "html" {
+		t.Fatalf("expected route artifact types to equal [html], got %v", routeTypes)
+	}
+	htmlTypes := htmlArtifacts[0].Types
+	if len(htmlTypes) != 1 || htmlTypes[0] != "route" {
+		t.Fatalf("expected html artifact types to equal [route], got %v", htmlTypes)
 	}
 
 	values, err := CollectValuesByType(dir, selectors)
@@ -87,16 +87,4 @@ func writeArtifactsFile(t *testing.T, path string, artifacts []pipeline.Artifact
 			t.Fatalf("Encode artifact: %v", err)
 		}
 	}
-}
-
-func hasType(types []string, typ string) bool {
-	if typ == "" {
-		return false
-	}
-	for _, candidate := range types {
-		if candidate == typ {
-			return true
-		}
-	}
-	return false
 }
