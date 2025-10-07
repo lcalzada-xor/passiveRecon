@@ -60,6 +60,33 @@ type linkfinderAggregate struct {
 	resources map[string]*linkfinderAggregateResource
 }
 
+type linkfinderGFAggregate struct {
+	mu       sync.Mutex
+	findings map[linkfinderGFFindingKey]*linkfinderGFFinding
+}
+
+type linkfinderGFFindingKey struct {
+	Resource string
+	Line     int
+	Evidence string
+}
+
+type linkfinderGFFinding struct {
+	Resource string
+	Line     int
+	Evidence string
+	Context  string
+	Rules    map[string]struct{}
+}
+
+type linkfinderGFFindingResult struct {
+	Resource string
+	Line     int
+	Evidence string
+	Context  string
+	Rules    []string
+}
+
 type linkfinderAggregateResource struct {
 	name      string
 	order     []string
@@ -68,6 +95,10 @@ type linkfinderAggregateResource struct {
 
 func newLinkfinderAggregate() *linkfinderAggregate {
 	return &linkfinderAggregate{resources: make(map[string]*linkfinderAggregateResource)}
+}
+
+func newLinkfinderGFAggregate() *linkfinderGFAggregate {
+	return &linkfinderGFAggregate{findings: make(map[linkfinderGFFindingKey]*linkfinderGFFinding)}
 }
 
 func (agg *linkfinderAggregate) add(resource string, endpoint linkfinderEndpoint) {
@@ -130,6 +161,99 @@ func (agg *linkfinderAggregate) endpointCount() int {
 	return total
 }
 
+func (agg *linkfinderGFAggregate) add(resource string, line int, evidence string, context string, rules []string) {
+	if agg == nil {
+		return
+	}
+	resource = strings.TrimSpace(resource)
+	evidence = strings.TrimSpace(evidence)
+	if evidence == "" {
+		return
+	}
+
+	key := linkfinderGFFindingKey{Resource: resource, Line: line, Evidence: evidence}
+
+	agg.mu.Lock()
+	defer agg.mu.Unlock()
+
+	entry, ok := agg.findings[key]
+	if !ok {
+		entry = &linkfinderGFFinding{
+			Resource: resource,
+			Line:     line,
+			Evidence: evidence,
+			Context:  strings.TrimSpace(context),
+			Rules:    make(map[string]struct{}),
+		}
+		agg.findings[key] = entry
+	} else if entry.Context == "" {
+		entry.Context = strings.TrimSpace(context)
+	}
+
+	for _, rule := range rules {
+		rule = strings.TrimSpace(rule)
+		if rule == "" {
+			continue
+		}
+		if entry.Rules == nil {
+			entry.Rules = make(map[string]struct{})
+		}
+		entry.Rules[rule] = struct{}{}
+	}
+}
+
+func (agg *linkfinderGFAggregate) results() []linkfinderGFFindingResult {
+	if agg == nil {
+		return nil
+	}
+
+	agg.mu.Lock()
+	defer agg.mu.Unlock()
+
+	if len(agg.findings) == 0 {
+		return nil
+	}
+
+	keys := make([]linkfinderGFFindingKey, 0, len(agg.findings))
+	for key := range agg.findings {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].Resource != keys[j].Resource {
+			return keys[i].Resource < keys[j].Resource
+		}
+		if keys[i].Line != keys[j].Line {
+			return keys[i].Line < keys[j].Line
+		}
+		return keys[i].Evidence < keys[j].Evidence
+	})
+
+	results := make([]linkfinderGFFindingResult, 0, len(keys))
+	for _, key := range keys {
+		entry := agg.findings[key]
+		if entry == nil {
+			continue
+		}
+		rules := make([]string, 0, len(entry.Rules))
+		for rule := range entry.Rules {
+			if rule == "" {
+				continue
+			}
+			rules = append(rules, rule)
+		}
+		sort.Strings(rules)
+		results = append(results, linkfinderGFFindingResult{
+			Resource: entry.Resource,
+			Line:     entry.Line,
+			Evidence: entry.Evidence,
+			Context:  entry.Context,
+			Rules:    rules,
+		})
+	}
+
+	return results
+}
+
 // LinkFinderEVO executes the GoLinkfinderEVO binary across the active HTML, JS and crawl lists.
 // It consolidates the resulting findings into the routes/linkFindings directory and streams normalized
 // endpoints to the sink for further categorisation.
@@ -169,6 +293,7 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 	}
 
 	aggregate := newLinkfinderAggregate()
+	gfAggregate := newLinkfinderGFAggregate()
 	var firstErr error
 	totalBudget := linkfinderEntryBudget(ctx, len(inputs)*linkfinderMaxInputEntries)
 	if totalBudget <= 0 {
@@ -251,6 +376,9 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 		if err := accumulateLinkfinderResults(jsonPath, aggregate); err != nil {
 			recordLinkfinderError(&firstErr, err)
 		}
+		if err := accumulateLinkfinderGFFindings(filepath.Join(tmpDir, "gf.json"), gfAggregate); err != nil {
+			recordLinkfinderError(&firstErr, err)
+		}
 
 		shouldPersist := runErr == nil || errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded)
 		if shouldPersist {
@@ -278,7 +406,7 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 		}
 	}
 
-	if err := writeLinkfinderOutputs(outdir, aggregate, out); err != nil {
+	if err := writeLinkfinderOutputs(outdir, aggregate, gfAggregate, out); err != nil {
 		recordLinkfinderError(&firstErr, err)
 	}
 
@@ -294,7 +422,7 @@ func recordLinkfinderError(first *error, candidate error) {
 	}
 }
 
-func writeLinkfinderOutputs(outdir string, aggregate *linkfinderAggregate, out chan<- string) error {
+func writeLinkfinderOutputs(outdir string, aggregate *linkfinderAggregate, gfAggregate *linkfinderGFAggregate, out chan<- string) error {
 	findingsDir := filepath.Join(outdir, "routes", "linkFindings")
 	if err := os.MkdirAll(findingsDir, 0o755); err != nil {
 		return err
@@ -334,6 +462,10 @@ func writeLinkfinderOutputs(outdir string, aggregate *linkfinderAggregate, out c
 	}
 
 	if err := persistLinkfinderActiveOutputs(outdir, emission); err != nil {
+		return err
+	}
+
+	if err := emitLinkfinderGFFindings(gfAggregate, out); err != nil {
 		return err
 	}
 
@@ -513,6 +645,44 @@ func accumulateLinkfinderResults(jsonPath string, aggregate *linkfinderAggregate
 		for _, ep := range report.Endpoints {
 			aggregate.add(report.Resource, ep)
 		}
+	}
+
+	return nil
+}
+
+func accumulateLinkfinderGFFindings(jsonPath string, aggregate *linkfinderGFAggregate) error {
+	if aggregate == nil {
+		return nil
+	}
+
+	data, err := os.ReadFile(jsonPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil
+	}
+
+	type gfReport struct {
+		Findings []struct {
+			Resource string   `json:"resource"`
+			Line     int      `json:"line"`
+			Evidence string   `json:"evidence"`
+			Context  string   `json:"context"`
+			Rules    []string `json:"rules"`
+		} `json:"findings"`
+	}
+
+	var report gfReport
+	if err := json.Unmarshal(data, &report); err != nil {
+		return err
+	}
+
+	for _, finding := range report.Findings {
+		aggregate.add(finding.Resource, finding.Line, finding.Evidence, finding.Context, finding.Rules)
 	}
 
 	return nil
@@ -796,6 +966,41 @@ func emitLinkfinderFindings(reports []linkfinderReport, out chan<- string) (link
 	}
 
 	return result, nil
+}
+
+func emitLinkfinderGFFindings(aggregate *linkfinderGFAggregate, out chan<- string) error {
+	if aggregate == nil {
+		return nil
+	}
+
+	findings := aggregate.results()
+	if len(findings) == 0 {
+		return nil
+	}
+
+	type payload struct {
+		Resource string   `json:"resource,omitempty"`
+		Line     int      `json:"line,omitempty"`
+		Evidence string   `json:"evidence"`
+		Context  string   `json:"context,omitempty"`
+		Rules    []string `json:"rules,omitempty"`
+	}
+
+	for _, finding := range findings {
+		data, err := json.Marshal(payload{
+			Resource: finding.Resource,
+			Line:     finding.Line,
+			Evidence: finding.Evidence,
+			Context:  finding.Context,
+			Rules:    finding.Rules,
+		})
+		if err != nil {
+			return err
+		}
+		out <- "active: gffinding: " + string(data)
+	}
+
+	return nil
 }
 
 type linkfinderClassification struct {
