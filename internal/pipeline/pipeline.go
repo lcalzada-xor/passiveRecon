@@ -54,6 +54,19 @@ func newLazyWriter(outdir, subdir, name string) *lazyWriter {
 	return &lazyWriter{outdir: outdir, subdir: subdir, name: name}
 }
 
+func makeLazyWriterPair(outdir, subdir, passiveName, activeName string) writerPair {
+	newWriter := func(name string) sinkWriter {
+		if name == "" {
+			return nil
+		}
+		return newLazyWriter(outdir, subdir, name)
+	}
+	return writerPair{
+		passive: newWriter(passiveName),
+		active:  newWriter(activeName),
+	}
+}
+
 func (lw *lazyWriter) ensure() (*out.Writer, error) {
 	lw.mu.RLock()
 	if lw.initErr != nil {
@@ -89,46 +102,42 @@ func (lw *lazyWriter) ensure() (*out.Writer, error) {
 	return lw.writer, nil
 }
 
-func (lw *lazyWriter) WriteURL(u string) error {
+func (lw *lazyWriter) withWriter(action func(*out.Writer) error) error {
 	if lw == nil {
 		return nil
 	}
+	w, err := lw.ensure()
+	if err != nil {
+		return err
+	}
+	return action(w)
+}
+
+func (lw *lazyWriter) WriteURL(u string) error {
 	if u == "" {
 		return nil
 	}
-	w, err := lw.ensure()
-	if err != nil {
-		return err
-	}
-	return w.WriteURL(u)
+	return lw.withWriter(func(w *out.Writer) error {
+		return w.WriteURL(u)
+	})
 }
 
 func (lw *lazyWriter) WriteRaw(line string) error {
-	if lw == nil {
-		return nil
-	}
 	if line == "" {
 		return nil
 	}
-	w, err := lw.ensure()
-	if err != nil {
-		return err
-	}
-	return w.WriteRaw(line)
+	return lw.withWriter(func(w *out.Writer) error {
+		return w.WriteRaw(line)
+	})
 }
 
 func (lw *lazyWriter) WriteDomain(domain string) error {
-	if lw == nil {
-		return nil
-	}
 	if domain == "" {
 		return nil
 	}
-	w, err := lw.ensure()
-	if err != nil {
-		return err
-	}
-	return w.WriteDomain(domain)
+	return lw.withWriter(func(w *out.Writer) error {
+		return w.WriteDomain(domain)
+	})
 }
 
 func (lw *lazyWriter) Close() error {
@@ -182,6 +191,23 @@ type artifactRecord struct {
 	Artifact    Artifact
 	Tools       map[string]struct{}
 	Occurrences int
+}
+
+func (rec *artifactRecord) addTool(tool string) {
+	if rec == nil {
+		return
+	}
+	tool = strings.TrimSpace(tool)
+	if tool == "" {
+		return
+	}
+	if rec.Artifact.Tool == "" {
+		rec.Artifact.Tool = tool
+	}
+	if rec.Tools == nil {
+		rec.Tools = make(map[string]struct{})
+	}
+	rec.Tools[tool] = struct{}{}
 }
 
 // LineBufferSize calcula un tamaño de búfer recomendado para el canal de líneas
@@ -283,63 +309,58 @@ func NewSink(outdir string, active bool, target string, lineBuffer int) (*Sink, 
 		return newLazyWriter(outdir, subdir, name), nil
 	}
 
+	createPair := func(subdir, passiveName, activeName string) (writerPair, error) {
+		var pair writerPair
+		if passiveName != "" {
+			writer, err := newWriter(subdir, passiveName)
+			if err != nil {
+				return writerPair{}, err
+			}
+			pair.passive = writer
+		}
+		if activeName != "" {
+			writer, err := newWriter(subdir, activeName)
+			if err != nil {
+				return writerPair{}, err
+			}
+			pair.active = writer
+		}
+		return pair, nil
+	}
+
 	if err := os.MkdirAll(filepath.Join(outdir, "dns"), 0o755); err != nil {
 		return nil, err
 	}
 
-	dPassive, err := newWriter("domains", "domains.passive")
+	domainsPair, err := createPair("domains", "domains.passive", "domains.active")
 	if err != nil {
 		return nil, err
 	}
-	dActive, err := newWriter("domains", "domains.active")
+	routesPair, err := createPair("routes", "routes.passive", "routes.active")
 	if err != nil {
 		return nil, err
 	}
-	rPassive, err := newWriter("routes", "routes.passive")
+	rdapPair, err := createPair("rdap", "rdap.passive", "")
 	if err != nil {
 		return nil, err
 	}
-	rActive, err := newWriter("routes", "routes.active")
+	routesJSPair, err := createPair(filepath.Join("routes", "js"), "js.passive", "js.active")
 	if err != nil {
 		return nil, err
 	}
-	rdapPassive, err := newWriter("rdap", "rdap.passive")
+	routesHTMLPair, err := createPair(filepath.Join("routes", "html"), "html.passive", "html.active")
 	if err != nil {
 		return nil, err
 	}
-	jsPassive, err := newWriter(filepath.Join("routes", "js"), "js.passive")
+	routesImagesPair, err := createPair(filepath.Join("routes", "images"), "", "images.active")
 	if err != nil {
 		return nil, err
 	}
-	jsActive, err := newWriter(filepath.Join("routes", "js"), "js.active")
+	certsPair, err := createPair("certs", "certs.passive", "certs.active")
 	if err != nil {
 		return nil, err
 	}
-	htmlPassive, err := newWriter(filepath.Join("routes", "html"), "html.passive")
-	if err != nil {
-		return nil, err
-	}
-	htmlActive, err := newWriter(filepath.Join("routes", "html"), "html.active")
-	if err != nil {
-		return nil, err
-	}
-	imagesActive, err := newWriter(filepath.Join("routes", "images"), "images.active")
-	if err != nil {
-		return nil, err
-	}
-	cPassive, err := newWriter("certs", "certs.passive")
-	if err != nil {
-		return nil, err
-	}
-	cActive, err := newWriter("certs", "certs.active")
-	if err != nil {
-		return nil, err
-	}
-	mPassive, err := newWriter("", "meta.passive")
-	if err != nil {
-		return nil, err
-	}
-	mActive, err := newWriter("", "meta.active")
+	metaPair, err := createPair("", "meta.passive", "meta.active")
 	if err != nil {
 		return nil, err
 	}
@@ -350,21 +371,21 @@ func NewSink(outdir string, active bool, target string, lineBuffer int) (*Sink, 
 	artifactsPath := filepath.Join(outdir, "artifacts.jsonl")
 
 	s := &Sink{
-		Domains:               writerPair{passive: dPassive, active: dActive},
-		Routes:                writerPair{passive: rPassive, active: rActive},
-		RoutesJS:              writerPair{passive: jsPassive, active: jsActive},
-		RoutesHTML:            writerPair{passive: htmlPassive, active: htmlActive},
-		RoutesImages:          writerPair{active: imagesActive},
-		RDAP:                  writerPair{passive: rdapPassive},
-		RoutesMaps:            writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "maps"), "maps.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "maps"), "maps.active")},
-		RoutesJSON:            writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "json"), "json.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "json"), "json.active")},
-		RoutesAPI:             writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "api"), "api.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "api"), "api.active")},
-		RoutesWASM:            writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "wasm"), "wasm.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "wasm"), "wasm.active")},
-		RoutesSVG:             writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "svg"), "svg.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "svg"), "svg.active")},
-		RoutesCrawl:           writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "crawl"), "crawl.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "crawl"), "crawl.active")},
-		RoutesMetaFindings:    writerPair{passive: newLazyWriter(outdir, filepath.Join("routes", "meta"), "meta.passive"), active: newLazyWriter(outdir, filepath.Join("routes", "meta"), "meta.active")},
-		Certs:                 writerPair{passive: cPassive, active: cActive},
-		Meta:                  writerPair{passive: mPassive, active: mActive},
+		Domains:               domainsPair,
+		Routes:                routesPair,
+		RoutesJS:              routesJSPair,
+		RoutesHTML:            routesHTMLPair,
+		RoutesImages:          routesImagesPair,
+		RDAP:                  rdapPair,
+		RoutesMaps:            makeLazyWriterPair(outdir, filepath.Join("routes", "maps"), "maps.passive", "maps.active"),
+		RoutesJSON:            makeLazyWriterPair(outdir, filepath.Join("routes", "json"), "json.passive", "json.active"),
+		RoutesAPI:             makeLazyWriterPair(outdir, filepath.Join("routes", "api"), "api.passive", "api.active"),
+		RoutesWASM:            makeLazyWriterPair(outdir, filepath.Join("routes", "wasm"), "wasm.passive", "wasm.active"),
+		RoutesSVG:             makeLazyWriterPair(outdir, filepath.Join("routes", "svg"), "svg.passive", "svg.active"),
+		RoutesCrawl:           makeLazyWriterPair(outdir, filepath.Join("routes", "crawl"), "crawl.passive", "crawl.active"),
+		RoutesMetaFindings:    makeLazyWriterPair(outdir, filepath.Join("routes", "meta"), "meta.passive", "meta.active"),
+		Certs:                 certsPair,
+		Meta:                  metaPair,
 		Artifacts:             newLazyWriter(outdir, "", "artifacts.jsonl"),
 		lines:                 make(chan string, lineBuffer),
 		handlerMetrics:        make(map[string]*handlerStats),
@@ -612,27 +633,70 @@ func (s *Sink) recordArtifact(tool string, artifact Artifact) {
 		rec.Artifact.Valid = rec.Artifact.Valid && normalized.Valid
 	}
 
-	if normalized.Tool != "" {
-		if rec.Artifact.Tool == "" {
-			rec.Artifact.Tool = normalized.Tool
-		}
-		if rec.Tools == nil {
-			rec.Tools = make(map[string]struct{})
-		}
-		rec.Tools[normalized.Tool] = struct{}{}
-	}
-	contextTool := strings.TrimSpace(tool)
-	if contextTool != "" {
-		if rec.Artifact.Tool == "" {
-			rec.Artifact.Tool = contextTool
-		}
-		if rec.Tools == nil {
-			rec.Tools = make(map[string]struct{})
-		}
-		rec.Tools[contextTool] = struct{}{}
-	}
+	rec.addTool(normalized.Tool)
+	rec.addTool(tool)
 	rec.Occurrences++
 	s.artifactsDirty = true
+}
+
+func normalizeMetadata(metadata map[string]any) map[string]any {
+	if len(metadata) == 0 {
+		return nil
+	}
+	cleaned := make(map[string]any)
+	for key, value := range metadata {
+		key = strings.TrimSpace(key)
+		if key == "" || value == nil {
+			continue
+		}
+		cleaned[key] = value
+	}
+	if len(cleaned) == 0 {
+		return nil
+	}
+	return cleaned
+}
+
+func consolidateTypes(primary string, extras ...string) (string, []string, bool) {
+	typeSet := make(map[string]struct{})
+	addType := func(value string) {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			typeSet[value] = struct{}{}
+		}
+	}
+	addType(primary)
+	for _, value := range extras {
+		addType(value)
+	}
+	if len(typeSet) == 0 {
+		return "", nil, false
+	}
+
+	ordered := make([]string, 0, len(typeSet))
+	for typ := range typeSet {
+		ordered = append(ordered, typ)
+	}
+	sort.Strings(ordered)
+
+	normalizedPrimary := strings.TrimSpace(primary)
+	if normalizedPrimary == "" {
+		normalizedPrimary = ordered[0]
+	} else if _, ok := typeSet[normalizedPrimary]; !ok {
+		normalizedPrimary = ordered[0]
+	}
+
+	extrasList := make([]string, 0, len(ordered)-1)
+	for _, typ := range ordered {
+		if typ == normalizedPrimary {
+			continue
+		}
+		extrasList = append(extrasList, typ)
+	}
+	if len(extrasList) == 0 {
+		extrasList = nil
+	}
+	return normalizedPrimary, extrasList, true
 }
 
 func normalizeArtifact(tool string, artifact Artifact) (Artifact, bool) {
@@ -642,60 +706,14 @@ func normalizeArtifact(tool string, artifact Artifact) (Artifact, bool) {
 		return Artifact{}, false
 	}
 
-	typeSet := make(map[string]struct{})
-	if artifact.Type != "" {
-		typeSet[artifact.Type] = struct{}{}
-	}
-	for _, typ := range artifact.Types {
-		typ = strings.TrimSpace(typ)
-		if typ == "" {
-			continue
-		}
-		typeSet[typ] = struct{}{}
-	}
-	if len(typeSet) == 0 {
+	primary, extras, ok := consolidateTypes(artifact.Type, artifact.Types...)
+	if !ok {
 		return Artifact{}, false
 	}
-	ordered := make([]string, 0, len(typeSet))
-	for typ := range typeSet {
-		ordered = append(ordered, typ)
-	}
-	sort.Strings(ordered)
-	primary := artifact.Type
-	if primary == "" {
-		primary = ordered[0]
-	} else if _, ok := typeSet[primary]; !ok {
-		primary = ordered[0]
-	}
 	artifact.Type = primary
-	extras := make([]string, 0, len(ordered))
-	for _, typ := range ordered {
-		if typ == primary {
-			continue
-		}
-		extras = append(extras, typ)
-	}
-	if len(extras) == 0 {
-		artifact.Types = nil
-	} else {
-		artifact.Types = extras
-	}
+	artifact.Types = extras
 
-	if artifact.Metadata != nil {
-		cleaned := make(map[string]any)
-		for key, value := range artifact.Metadata {
-			key = strings.TrimSpace(key)
-			if key == "" || value == nil {
-				continue
-			}
-			cleaned[key] = value
-		}
-		if len(cleaned) == 0 {
-			artifact.Metadata = nil
-		} else {
-			artifact.Metadata = cleaned
-		}
-	}
+	artifact.Metadata = normalizeMetadata(artifact.Metadata)
 	artifact.Tool = strings.TrimSpace(artifact.Tool)
 	if artifact.Tool == "" {
 		artifact.Tool = strings.TrimSpace(tool)
@@ -924,57 +942,17 @@ func mergeArtifactTypes(dst *Artifact, primary string, types []string) {
 	if dst == nil {
 		return
 	}
-	typeSet := make(map[string]struct{})
-	currentPrimary := strings.TrimSpace(dst.Type)
-	if currentPrimary != "" {
-		typeSet[currentPrimary] = struct{}{}
-	}
-	for _, typ := range dst.Types {
-		typ = strings.TrimSpace(typ)
-		if typ == "" {
-			continue
-		}
-		typeSet[typ] = struct{}{}
-	}
-	normalizedPrimary := strings.TrimSpace(primary)
-	if normalizedPrimary != "" {
-		typeSet[normalizedPrimary] = struct{}{}
-	}
-	for _, typ := range types {
-		typ = strings.TrimSpace(typ)
-		if typ == "" {
-			continue
-		}
-		typeSet[typ] = struct{}{}
-	}
-	if len(typeSet) == 0 {
+	extras := append([]string{}, dst.Types...)
+	extras = append(extras, primary)
+	extras = append(extras, types...)
+	normalizedPrimary, merged, ok := consolidateTypes(dst.Type, extras...)
+	if !ok {
 		dst.Type = ""
 		dst.Types = nil
 		return
 	}
-	ordered := make([]string, 0, len(typeSet))
-	for typ := range typeSet {
-		ordered = append(ordered, typ)
-	}
-	sort.Strings(ordered)
-	if currentPrimary == "" {
-		currentPrimary = ordered[0]
-	} else if _, ok := typeSet[currentPrimary]; !ok {
-		currentPrimary = ordered[0]
-	}
-	dst.Type = currentPrimary
-	merged := make([]string, 0, len(ordered))
-	for _, typ := range ordered {
-		if typ == currentPrimary {
-			continue
-		}
-		merged = append(merged, typ)
-	}
-	if len(merged) == 0 {
-		dst.Types = nil
-	} else {
-		dst.Types = merged
-	}
+	dst.Type = normalizedPrimary
+	dst.Types = merged
 }
 
 func (s *Sink) flushArtifacts() {
