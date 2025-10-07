@@ -158,34 +158,14 @@ func runPipeline(ctx context.Context, steps []toolStep, opts orchestratorOptions
 }
 
 func executeStep(ctx context.Context, step toolStep, state *pipelineState, opts orchestratorOptions) (func() error, bool) {
-	if !opts.requested[step.Name] {
-		if opts.metrics != nil {
-			opts.metrics.RecordSkip(step.Name, "no solicitado")
-		}
+	if !isStepRequested(step, opts) {
 		return nil, false
 	}
 
-	if opts.cache != nil && opts.runHash != "" {
-		if step.Name == "dedupe" && state.DomainsDirty {
-			// Nuevos dominios detectados en esta ejecución: no reutilizamos cache.
-		} else if ok, completedAt := opts.cache.ShouldSkip(step.Name, opts.runHash, cacheMaxAge); ok {
-			if step.Name == "dedupe" {
-				if !loadCachedDedupe(state, opts) {
-					logx.Warnf("cache dedupe inválido, se vuelve a ejecutar paso")
-					if err := opts.cache.Invalidate(step.Name); err != nil {
-						logx.Warnf("no se pudo invalidar cache de %s: %v", step.Name, err)
-					}
-				} else {
-					state.DomainsDirty = false
-					announceCacheReuse(step, opts, completedAt)
-					return nil, false
-				}
-			} else {
-				announceCacheReuse(step, opts, completedAt)
-				return nil, false
-			}
-		}
+	if skip := maybeSkipByCache(step, state, opts); skip {
+		return nil, false
 	}
+
 	if !shouldRunStep(step, state, opts) {
 		return nil, false
 	}
@@ -195,9 +175,62 @@ func executeStep(ctx context.Context, step toolStep, state *pipelineState, opts 
 	}
 
 	timeout := computeStepTimeout(step, state, opts)
+	task := prepareStepTask(ctx, step, state, opts, timeout)
+
+	return task, true
+}
+
+func isStepRequested(step toolStep, opts orchestratorOptions) bool {
+	if opts.requested[step.Name] {
+		return true
+	}
+
+	if opts.metrics != nil {
+		opts.metrics.RecordSkip(step.Name, "no solicitado")
+	}
+
+	return false
+}
+
+func maybeSkipByCache(step toolStep, state *pipelineState, opts orchestratorOptions) bool {
+	if opts.cache == nil || opts.runHash == "" {
+		return false
+	}
+
+	if step.Name == "dedupe" && state.DomainsDirty {
+		// Nuevos dominios detectados en esta ejecución: no reutilizamos cache.
+		return false
+	}
+
+	ok, completedAt := opts.cache.ShouldSkip(step.Name, opts.runHash, cacheMaxAge)
+	if !ok {
+		return false
+	}
+
+	if step.Name != "dedupe" {
+		announceCacheReuse(step, opts, completedAt)
+		return true
+	}
+
+	if loadCachedDedupe(state, opts) {
+		state.DomainsDirty = false
+		announceCacheReuse(step, opts, completedAt)
+		return true
+	}
+
+	logx.Warnf("cache dedupe inválido, se vuelve a ejecutar paso")
+	if err := opts.cache.Invalidate(step.Name); err != nil {
+		logx.Warnf("no se pudo invalidar cache de %s: %v", step.Name, err)
+	}
+
+	return false
+}
+
+func prepareStepTask(ctx context.Context, step toolStep, state *pipelineState, opts orchestratorOptions, timeout int) func() error {
 	task := runWithTimeout(ctx, timeout, func(c context.Context) error {
 		return step.Run(c, state, opts)
 	})
+
 	if opts.bar != nil {
 		task = opts.bar.Wrap(step.Name, task)
 	}
@@ -205,7 +238,7 @@ func executeStep(ctx context.Context, step toolStep, state *pipelineState, opts 
 		task = opts.metrics.Wrap(step.Name, timeout, task)
 	}
 
-	wrapped := func() error {
+	return func() error {
 		err := task()
 		if err != nil {
 			if errors.Is(err, runner.ErrMissingBinary) {
@@ -214,6 +247,7 @@ func executeStep(ctx context.Context, step toolStep, state *pipelineState, opts 
 			logx.Warnf("source error: %v", err)
 			return nil
 		}
+
 		if opts.cache != nil && opts.runHash != "" {
 			if markErr := opts.cache.MarkComplete(step.Name, opts.runHash); markErr != nil {
 				logx.Warnf("no se pudo actualizar cache para %s: %v", step.Name, markErr)
@@ -224,8 +258,6 @@ func executeStep(ctx context.Context, step toolStep, state *pipelineState, opts 
 		}
 		return nil
 	}
-
-	return wrapped, true
 }
 
 func runSingleStep(ctx context.Context, step toolStep, state *pipelineState, opts orchestratorOptions) {
