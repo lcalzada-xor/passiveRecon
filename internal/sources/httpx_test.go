@@ -200,6 +200,31 @@ func TestForwardHTTPXOutputNormalizes(t *testing.T) {
 	}
 }
 
+func TestForwardHTTPXOutputStripsANSISequences(t *testing.T) {
+	outCh := make(chan string, 10)
+	intermediate, cleanup := forwardHTTPXOutput(outCh)
+
+	intermediate <- "https://app.example.com [\x1b[32m200\x1b[0m] [\x1b[35mtext/html\x1b[0m]"
+
+	cleanup()
+
+	var forwarded []string
+	for len(outCh) > 0 {
+		forwarded = append(forwarded, <-outCh)
+	}
+
+	want := []string{
+		"active: https://app.example.com [200] [text/html]",
+		"active: app.example.com [200] [text/html]",
+		"active: html: https://app.example.com",
+		"active: meta: [200]",
+		"active: meta: [text/html]",
+	}
+	if diff := cmp.Diff(want, forwarded); diff != "" {
+		t.Fatalf("unexpected forwarded lines (-want +got):\n%s", diff)
+	}
+}
+
 func TestRunHTTPXWorkersRespectsBatchSize(t *testing.T) {
 	originalBatch := httpxBatchSize
 	originalWorkers := httpxWorkerCount
