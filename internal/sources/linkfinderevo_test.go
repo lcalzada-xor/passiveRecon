@@ -191,7 +191,7 @@ func TestWriteLinkfinderOutputsCreatesAllFormats(t *testing.T) {
 	tmp := t.TempDir()
 
 	out := make(chan string, 10)
-	if err := writeLinkfinderOutputs(tmp, agg, out); err != nil {
+	if err := writeLinkfinderOutputs(tmp, agg, nil, out); err != nil {
 		t.Fatalf("writeLinkfinderOutputs returned error: %v", err)
 	}
 
@@ -202,6 +202,60 @@ func TestWriteLinkfinderOutputsCreatesAllFormats(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected %s to be created: %v", name, err)
 		}
+	}
+}
+
+func TestEmitLinkfinderGFFindings(t *testing.T) {
+	agg := newLinkfinderGFAggregate()
+	agg.add("https://example.com/app.js", 42, "fetch('/api')", "const data = fetch('/api')", []string{"xss"})
+	agg.add("https://example.com/app.js", 42, "fetch('/api')", "", []string{"sqli", "xss"})
+
+	out := make(chan string, 1)
+	if err := emitLinkfinderGFFindings(agg, out); err != nil {
+		t.Fatalf("emitLinkfinderGFFindings returned error: %v", err)
+	}
+	close(out)
+
+	var lines []string
+	for line := range out {
+		lines = append(lines, line)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("expected single gf finding line, got %d", len(lines))
+	}
+
+	line := lines[0]
+	const prefix = "active: gffinding: "
+	if !strings.HasPrefix(line, prefix) {
+		t.Fatalf("unexpected line prefix: %q", line)
+	}
+
+	payload := strings.TrimPrefix(line, prefix)
+	var data struct {
+		Resource string   `json:"resource"`
+		Line     int      `json:"line"`
+		Evidence string   `json:"evidence"`
+		Context  string   `json:"context"`
+		Rules    []string `json:"rules"`
+	}
+	if err := json.Unmarshal([]byte(payload), &data); err != nil {
+		t.Fatalf("failed to unmarshal payload: %v", err)
+	}
+
+	if data.Resource != "https://example.com/app.js" {
+		t.Fatalf("unexpected resource: %q", data.Resource)
+	}
+	if data.Line != 42 {
+		t.Fatalf("unexpected line: %d", data.Line)
+	}
+	if data.Evidence != "fetch('/api')" {
+		t.Fatalf("unexpected evidence: %q", data.Evidence)
+	}
+	if want := []string{"sqli", "xss"}; !cmp.Equal(want, data.Rules) {
+		t.Fatalf("unexpected rules (-want +got):\n%s", cmp.Diff(want, data.Rules))
+	}
+	if data.Context == "" {
+		t.Fatalf("expected context to be preserved")
 	}
 }
 

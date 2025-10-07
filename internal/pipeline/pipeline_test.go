@@ -1092,6 +1092,70 @@ func TestHandleMetaStripsANSISequences(t *testing.T) {
 	requireArtifact(t, artifacts, "meta", "[text/html]", false)
 }
 
+func TestHandleGFFindingRecordsArtifact(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, true, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	payload := map[string]any{
+		"resource": "https://example.com/app.js",
+		"line":     99,
+		"evidence": "fetch('/api')",
+		"context":  "const data = fetch('/api')",
+		"rules":    []string{"xss", "sqli", "xss"},
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	sink.In() <- "active: gffinding: " + string(data)
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	value := buildGFFindingValue("https://example.com/app.js", 99, "fetch('/api')")
+	art := requireArtifact(t, artifacts, "gfFinding", value, true)
+
+	if diff := cmp.Diff([]string{"sqli", "xss"}, art.Types); diff != "" {
+		t.Fatalf("unexpected gfFinding types (-want +got):\n%s", diff)
+	}
+
+	if got := art.Metadata["resource"]; got != "https://example.com/app.js" {
+		t.Fatalf("unexpected resource metadata: %#v", got)
+	}
+	if got, ok := art.Metadata["line"].(float64); !ok || got != 99 {
+		t.Fatalf("unexpected line metadata: %#v", art.Metadata["line"])
+	}
+	if got := art.Metadata["context"]; got != "const data = fetch('/api')" {
+		t.Fatalf("unexpected context metadata: %#v", got)
+	}
+	if got := art.Metadata["evidence"]; got != "fetch('/api')" {
+		t.Fatalf("unexpected evidence metadata: %#v", got)
+	}
+	if rules, ok := art.Metadata["rules"].([]any); ok {
+		have := make([]string, 0, len(rules))
+		for _, rule := range rules {
+			if str, ok := rule.(string); ok {
+				have = append(have, str)
+			}
+		}
+		sort.Strings(have)
+		if diff := cmp.Diff([]string{"sqli", "xss"}, have); diff != "" {
+			t.Fatalf("unexpected metadata rules (-want +got):\n%s", diff)
+		}
+	} else {
+		t.Fatalf("expected rules metadata to be a slice, got %#v", art.Metadata["rules"])
+	}
+}
+
 func TestHandleRelationParsesDNSRecords(t *testing.T) {
 	t.Parallel()
 

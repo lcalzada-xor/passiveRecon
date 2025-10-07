@@ -485,6 +485,7 @@ var prefixHandlers = []struct {
 }{
 	{prefix: "dns:", name: "handleDNS", handler: handleDNS},
 	{prefix: "meta:", name: "handleMeta", handler: handleMeta},
+	{prefix: "gffinding:", name: "handleGFFinding", handler: handleGFFinding},
 	{prefix: "rdap:", name: "handleRDAP", handler: handleRDAP},
 	{prefix: "js:", name: "handleJS", handler: handleJS},
 	{prefix: "html:", name: "handleHTML", handler: handleHTML},
@@ -925,6 +926,58 @@ func handleMeta(s *Sink, line string, isActive bool, tool string) bool {
 	return false
 }
 
+func handleGFFinding(s *Sink, line string, isActive bool, tool string) bool {
+	payload := strings.TrimSpace(strings.TrimPrefix(line, "gffinding:"))
+	if payload == "" {
+		return true
+	}
+
+	var data struct {
+		Resource string   `json:"resource"`
+		Line     int      `json:"line"`
+		Evidence string   `json:"evidence"`
+		Context  string   `json:"context"`
+		Rules    []string `json:"rules"`
+	}
+	if err := json.Unmarshal([]byte(payload), &data); err != nil {
+		return true
+	}
+
+	evidence := strings.TrimSpace(data.Evidence)
+	if evidence == "" {
+		return true
+	}
+
+	resource := strings.TrimSpace(data.Resource)
+	context := strings.TrimSpace(data.Context)
+	rules := normalizeGFRules(data.Rules)
+
+	value := buildGFFindingValue(resource, data.Line, evidence)
+
+	metadata := map[string]any{"evidence": evidence}
+	if resource != "" {
+		metadata["resource"] = resource
+	}
+	if data.Line > 0 {
+		metadata["line"] = data.Line
+	}
+	if context != "" {
+		metadata["context"] = context
+	}
+	if len(rules) > 0 {
+		metadata["rules"] = rules
+	}
+
+	s.recordArtifact(tool, Artifact{
+		Type:     "gfFinding",
+		Types:    rules,
+		Value:    value,
+		Active:   isActive,
+		Metadata: metadata,
+	})
+	return true
+}
+
 func handleRelation(s *Sink, line string, isActive bool, tool string) bool {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" || !strings.Contains(trimmed, "-->") {
@@ -1036,6 +1089,53 @@ func splitRelation(line string) (string, string, string) {
 		return "", "", ""
 	}
 	return left, relation, right
+}
+
+func normalizeGFRules(rules []string) []string {
+	if len(rules) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(rules))
+	for _, rule := range rules {
+		rule = strings.TrimSpace(rule)
+		if rule == "" {
+			continue
+		}
+		set[rule] = struct{}{}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	ordered := make([]string, 0, len(set))
+	for rule := range set {
+		ordered = append(ordered, rule)
+	}
+	sort.Strings(ordered)
+	return ordered
+}
+
+func buildGFFindingValue(resource string, line int, evidence string) string {
+	evidence = strings.TrimSpace(evidence)
+	resource = strings.TrimSpace(resource)
+	if resource == "" && line <= 0 {
+		return evidence
+	}
+	var builder strings.Builder
+	if resource != "" {
+		builder.WriteString(resource)
+	}
+	if line > 0 {
+		if builder.Len() > 0 {
+			builder.WriteString(":")
+		}
+		builder.WriteString("#")
+		builder.WriteString(strconv.Itoa(line))
+	}
+	if builder.Len() > 0 && evidence != "" {
+		builder.WriteString(" -> ")
+	}
+	builder.WriteString(evidence)
+	return builder.String()
 }
 
 func parseRelationNode(node string) (value, kind string) {
