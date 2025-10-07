@@ -272,6 +272,39 @@ func TestSinkFiltersOutOfScope(t *testing.T) {
 	}
 }
 
+func TestArtifactsCaptureSourcesAndOccurrences(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+	sink.Start(1)
+
+	sink.In() <- WrapWithTool("subfinder", "example.com")
+	sink.In() <- WrapWithTool("assetfinder", "example.com")
+	sink.In() <- WrapWithTool("assetfinder", "example.com")
+
+	sink.Flush()
+	if err := sink.Close(); err != nil {
+		t.Fatalf("sink close: %v", err)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	domain := requireArtifact(t, artifacts, "domain", "example.com", false)
+	if domain.Occurrences != 3 {
+		t.Fatalf("expected 3 occurrences, got %d", domain.Occurrences)
+	}
+	wantTools := []string{"assetfinder", "subfinder"}
+	if diff := cmp.Diff(wantTools, domain.Tools); diff != "" {
+		t.Fatalf("unexpected tools (-want +got):\n%s", diff)
+	}
+	if domain.Tool != "subfinder" {
+		t.Fatalf("expected primary tool to be subfinder, got %q", domain.Tool)
+	}
+}
+
 func TestActiveCertLines(t *testing.T) {
 	t.Parallel()
 

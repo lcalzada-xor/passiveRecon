@@ -151,7 +151,7 @@ func TestRunPipelineConcurrentSourcesDedupesSink(t *testing.T) {
 				started <- name
 				<-release
 				for _, line := range lines {
-					opts.sink.In() <- line
+					opts.sink.In() <- pipeline.WrapWithTool(name, line)
 				}
 				return nil
 			},
