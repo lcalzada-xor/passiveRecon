@@ -31,6 +31,12 @@ const (
 	linkfinderEntriesPerSecond = 15
 )
 
+var linkfinderArtifactLabels = map[string]string{
+	"html":  "html",
+	"js":    "js",
+	"crawl": "crawl",
+}
+
 type linkfinderEndpoint struct {
 	Link    string `json:"Link"`
 	Context string `json:"Context"`
@@ -146,11 +152,15 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 
 	inputs := []struct {
 		label string
-		path  string
 	}{
-		{label: "html", path: filepath.Join("routes", "html", "html.active")},
-		{label: "js", path: filepath.Join("routes", "js", "js.active")},
-		{label: "crawl", path: filepath.Join("routes", "crawl", "crawl.active")},
+		{label: "html"},
+		{label: "js"},
+		{label: "crawl"},
+	}
+
+	artifactData, err := collectLinkfinderArtifactInputs(outdir)
+	if err != nil {
+		return err
 	}
 
 	aggregate := newLinkfinderAggregate()
@@ -162,19 +172,8 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 	}
 
 	for _, input := range inputs {
-		absPath := filepath.Join(outdir, input.path)
-		absPath, err := filepath.Abs(absPath)
-		if err != nil {
-			recordLinkfinderError(&firstErr, err)
-			continue
-		}
-		data, err := os.ReadFile(absPath)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				out <- fmt.Sprintf("active: meta: linkfinderevo skipped missing input %s", input.path)
-				continue
-			}
-			recordLinkfinderError(&firstErr, err)
+		data, ok := artifactData[input.label]
+		if !ok {
 			continue
 		}
 		if len(bytes.TrimSpace(data)) == 0 {
@@ -182,13 +181,24 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 		}
 
 		if totalBudget <= 0 {
-			out <- fmt.Sprintf("active: meta: linkfinderevo skipped %s (time budget exhausted)", input.path)
+			out <- fmt.Sprintf("active: meta: linkfinderevo skipped %s artifacts (time budget exhausted)", input.label)
 			break
 		}
 
 		tmpDir, err := os.MkdirTemp("", "passive-rec-linkfinderevo-*")
 		if err != nil {
 			recordLinkfinderError(&firstErr, err)
+			break
+		}
+
+		inputPath := filepath.Join(tmpDir, fmt.Sprintf("input.%s", sanitizeLinkfinderLabel(input.label)))
+		writeData := append([]byte(nil), data...)
+		if len(writeData) == 0 || writeData[len(writeData)-1] != '\n' {
+			writeData = append(writeData, '\n')
+		}
+		if err := os.WriteFile(inputPath, writeData, 0o644); err != nil {
+			recordLinkfinderError(&firstErr, err)
+			os.RemoveAll(tmpDir)
 			break
 		}
 
@@ -204,11 +214,11 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 			break
 		}
 		if samplePath != "" {
-			absPath = samplePath
-			out <- fmt.Sprintf("active: meta: linkfinderevo sampling %d of %d entries from %s", sampledEntries, totalEntries, input.path)
+			inputPath = samplePath
+			out <- fmt.Sprintf("active: meta: linkfinderevo sampling %d of %d entries from %s artifacts", sampledEntries, totalEntries, input.label)
 		}
 		if sampledEntries == 0 {
-			out <- fmt.Sprintf("active: meta: linkfinderevo skipped %s (no entries within time budget)", input.path)
+			out <- fmt.Sprintf("active: meta: linkfinderevo skipped %s artifacts (no entries within time budget)", input.label)
 			os.RemoveAll(tmpDir)
 			continue
 		}
@@ -222,7 +232,7 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 		htmlPath := filepath.Join(tmpDir, "findings.html")
 		jsonPath := filepath.Join(tmpDir, "findings.json")
 
-		args := buildLinkfinderArgs(absPath, target, rawPath, htmlPath, jsonPath)
+		args := buildLinkfinderArgs(inputPath, target, rawPath, htmlPath, jsonPath)
 
 		intermediate := make(chan string)
 		var wg sync.WaitGroup
@@ -273,6 +283,77 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 	}
 
 	return firstErr
+}
+
+type artifactManifestEntry struct {
+	Type     string         `json:"type"`
+	Value    string         `json:"value"`
+	Active   bool           `json:"active"`
+	Metadata map[string]any `json:"metadata"`
+}
+
+func collectLinkfinderArtifactInputs(outdir string) (map[string][]byte, error) {
+	manifestPath := filepath.Join(outdir, "artifacts.jsonl")
+	file, err := os.Open(manifestPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return map[string][]byte{}, nil
+		}
+		return nil, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 10*1024*1024)
+
+	entries := make(map[string][]string)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		var entry artifactManifestEntry
+		if err := json.Unmarshal(line, &entry); err != nil {
+			return nil, err
+		}
+		if !entry.Active {
+			continue
+		}
+		label, ok := linkfinderArtifactLabels[entry.Type]
+		if !ok {
+			continue
+		}
+		raw := strings.TrimSpace(entry.Value)
+		if entry.Metadata != nil {
+			if rawValue, ok := entry.Metadata["raw"].(string); ok && strings.TrimSpace(rawValue) != "" {
+				raw = rawValue
+			}
+		}
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		entries[label] = append(entries[label], raw)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	result := make(map[string][]byte, len(entries))
+	for label, values := range entries {
+		if len(values) == 0 {
+			continue
+		}
+		var builder strings.Builder
+		for i, value := range values {
+			if i > 0 {
+				builder.WriteByte('\n')
+			}
+			builder.WriteString(value)
+		}
+		result[label] = []byte(builder.String())
+	}
+	return result, nil
 }
 
 func recordLinkfinderError(first *error, candidate error) {

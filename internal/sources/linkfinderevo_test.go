@@ -2,6 +2,7 @@ package sources
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -24,6 +25,31 @@ func sortedCopy(values []string) []string {
 	cp := append([]string(nil), values...)
 	sort.Strings(cp)
 	return cp
+}
+
+func appendArtifactEntry(t *testing.T, dir, typ string, active bool, value string, metadata map[string]any) {
+	t.Helper()
+	entry := map[string]any{
+		"type":   typ,
+		"value":  value,
+		"active": active,
+	}
+	if metadata != nil {
+		entry["metadata"] = metadata
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal artifact entry: %v", err)
+	}
+	artifactsPath := filepath.Join(dir, "artifacts.jsonl")
+	f, err := os.OpenFile(artifactsPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatalf("open artifacts.jsonl: %v", err)
+	}
+	defer f.Close()
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		t.Fatalf("write artifacts.jsonl: %v", err)
+	}
 }
 
 func TestClassifyLinkfinderEndpoint(t *testing.T) {
@@ -479,31 +505,13 @@ func TestLinkFinderEVOIntegrationGeneratesReports(t *testing.T) {
 
 	tmp := t.TempDir()
 	routesDir := filepath.Join(tmp, "routes")
-	if err := os.MkdirAll(filepath.Join(routesDir, "html"), 0o755); err != nil {
-		t.Fatalf("failed to create html dir: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(routesDir, "js"), 0o755); err != nil {
-		t.Fatalf("failed to create js dir: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(routesDir, "crawl"), 0o755); err != nil {
-		t.Fatalf("failed to create crawl dir: %v", err)
-	}
 
 	sample := filepath.Join(tmp, "sample.html")
 	if err := os.WriteFile(sample, []byte(`<html><body><script src="/static/app.js"></script><a href="/foo/bar.html">Link</a></body></html>`), 0o644); err != nil {
 		t.Fatalf("failed to write sample html: %v", err)
 	}
 
-	htmlList := filepath.Join(routesDir, "html", "html.active")
-	if err := os.WriteFile(htmlList, []byte("file://"+sample+"\n"), 0o644); err != nil {
-		t.Fatalf("failed to write html list: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(routesDir, "js", "js.active"), nil, 0o644); err != nil {
-		t.Fatalf("failed to write js list: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(routesDir, "crawl", "crawl.active"), nil, 0o644); err != nil {
-		t.Fatalf("failed to write crawl list: %v", err)
-	}
+	appendArtifactEntry(t, tmp, "html", true, "file://"+sample, map[string]any{"raw": "file://" + sample})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -575,17 +583,10 @@ func TestLinkFinderEVOLimitsWorkloadByDeadline(t *testing.T) {
 	}
 
 	tmp := t.TempDir()
-	routesDir := filepath.Join(tmp, "routes")
-	for _, sub := range []string{"html", "js", "crawl"} {
-		if err := os.MkdirAll(filepath.Join(routesDir, sub), 0o755); err != nil {
-			t.Fatalf("failed to create %s dir: %v", sub, err)
-		}
-		var builder strings.Builder
+	for _, typ := range []string{"html", "js", "crawl"} {
 		for i := 0; i < 100; i++ {
-			builder.WriteString(fmt.Sprintf("file://example.com/%s/%d\n", sub, i))
-		}
-		if err := os.WriteFile(filepath.Join(routesDir, sub, fmt.Sprintf("%s.active", sub)), []byte(builder.String()), 0o644); err != nil {
-			t.Fatalf("failed to write %s list: %v", sub, err)
+			value := fmt.Sprintf("file://example.com/%s/%d", typ, i)
+			appendArtifactEntry(t, tmp, typ, true, value, map[string]any{"raw": value})
 		}
 	}
 
