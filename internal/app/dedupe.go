@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"sort"
 
+	"passive-rec/internal/artifacts"
 	"passive-rec/internal/netutil"
 )
 
 func dedupeDomainList(outdir string) ([]string, error) {
-	inputPath := filepath.Join(outdir, "domains", "domains.passive")
-	file, err := os.Open(inputPath)
+	values, err := artifacts.CollectValues(outdir, "domain", artifacts.AnyState)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if err := writeDedupeFile(outdir, nil); err != nil {
@@ -22,15 +22,11 @@ func dedupeDomainList(outdir string) ([]string, error) {
 		}
 		return nil, err
 	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
 
 	seen := make(map[string]struct{})
 	var domains []string
-	for scanner.Scan() {
-		normalized := netutil.NormalizeDomain(scanner.Text())
+	for _, value := range values {
+		normalized := netutil.NormalizeDomain(value)
 		if normalized == "" {
 			continue
 		}
@@ -39,9 +35,6 @@ func dedupeDomainList(outdir string) ([]string, error) {
 		}
 		seen[normalized] = struct{}{}
 		domains = append(domains, normalized)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
 	}
 
 	sort.Strings(domains)

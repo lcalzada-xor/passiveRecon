@@ -262,12 +262,7 @@ func TestRunPipelineConcurrentSourcesDedupesSink(t *testing.T) {
 
 func TestStepDedupeRunsDNSXWhenActive(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "domains"), 0o755); err != nil {
-		t.Fatalf("mkdir domains: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "domains", "domains.passive"), []byte("one.example.com\n"), 0o644); err != nil {
-		t.Fatalf("write domains.passive: %v", err)
-	}
+	writeOrchestratorArtifacts(t, dir, []pipeline.Artifact{{Type: "domain", Value: "one.example.com"}})
 
 	originalDNSX := sourceDNSX
 	defer func() { sourceDNSX = originalDNSX }()
@@ -296,6 +291,23 @@ func TestStepDedupeRunsDNSXWhenActive(t *testing.T) {
 	}
 	if called != 1 {
 		t.Fatalf("expected dnsx to be invoked once, got %d", called)
+	}
+}
+
+func writeOrchestratorArtifacts(t *testing.T, outdir string, artifacts []pipeline.Artifact) {
+	t.Helper()
+	path := filepath.Join(outdir, "artifacts.jsonl")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create artifacts.jsonl: %v", err)
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	for _, artifact := range artifacts {
+		if err := encoder.Encode(artifact); err != nil {
+			t.Fatalf("encode artifact: %v", err)
+		}
 	}
 }
 
