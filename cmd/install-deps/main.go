@@ -54,11 +54,11 @@ func run() error {
 
 	for _, req := range reqs {
 		if path, err := exec.LookPath(req.binary); err == nil {
-			fmt.Printf("%s already installed at %s\n", req.binary, path)
-			continue
+			fmt.Printf("Updating %s (currently at %s) from %s...\n", req.binary, path, req.spec)
+		} else {
+			fmt.Printf("Installing %s from %s...\n", req.binary, req.spec)
 		}
 
-		fmt.Printf("Installing %s from %s...\n", req.binary, req.spec)
 		if err := installRequirement(req); err != nil {
 			return fmt.Errorf("failed to install %s: %w", req.binary, err)
 		}
