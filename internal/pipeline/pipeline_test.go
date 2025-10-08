@@ -591,11 +591,11 @@ func TestActiveRoutesSkip404(t *testing.T) {
 
 	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
 	dashboard := requireArtifact(t, artifacts, "route", "https://app.example.com/dashboard", true)
-	if !dashboard.Valid {
+	if !dashboard.Up {
 		t.Fatalf("expected successful dashboard route to be valid")
 	}
 	login := requireArtifact(t, artifacts, "route", "https://app.example.com/login", true)
-	if login.Valid {
+	if login.Up {
 		t.Fatalf("expected 404 login route to be invalid")
 	}
 }
@@ -631,11 +631,11 @@ func TestJSLinesAreWrittenToFile(t *testing.T) {
 
 	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
 	passiveJS := requireArtifact(t, artifacts, "js", "https://static.example.com/app.js", false)
-	if !passiveJS.Valid {
+	if !passiveJS.Up {
 		t.Fatalf("expected passive js artifact to be valid")
 	}
 	activeJS := requireArtifact(t, artifacts, "js", "https://static.example.com/app.js", true)
-	if !activeJS.Valid {
+	if !activeJS.Up {
 		t.Fatalf("expected active js artifact to be valid")
 	}
 }
@@ -665,11 +665,11 @@ func TestActiveJSExcludes404(t *testing.T) {
 
 	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
 	validJS := requireArtifact(t, artifacts, "js", "https://static.example.com/app.js", true)
-	if !validJS.Valid {
+	if !validJS.Up {
 		t.Fatalf("expected 200 js artifact to be valid")
 	}
 	missingJS := requireArtifact(t, artifacts, "js", "https://static.example.com/missing.js", true)
-	if missingJS.Valid {
+	if missingJS.Up {
 		t.Fatalf("expected 404 js artifact to be invalid")
 	}
 }
@@ -720,7 +720,7 @@ func TestHTMLActiveSkipsErrorResponses(t *testing.T) {
 
 	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
 	htmlArtifact := requireArtifact(t, artifacts, "html", "https://app.example.com", true)
-	if htmlArtifact.Valid {
+	if htmlArtifact.Up {
 		t.Fatalf("expected html artifact to be invalid for 404 response")
 	}
 	if status := metadataInt(t, htmlArtifact.Metadata, "status"); status != 404 {
@@ -791,7 +791,7 @@ func TestRouteArtifactsMergeSchemes(t *testing.T) {
 	if activeRoute.Occurrences != 2 {
 		t.Fatalf("expected 2 occurrences for active route, got %d", activeRoute.Occurrences)
 	}
-	if !activeRoute.Valid {
+	if !activeRoute.Up {
 		t.Fatalf("expected active route to be marked valid")
 	}
 	rawEntries := rawMetadataValues(activeRoute.Metadata)
@@ -812,7 +812,7 @@ func TestRouteArtifactsMergeSchemes(t *testing.T) {
 	if passiveRoute.Occurrences != 2 {
 		t.Fatalf("expected 2 occurrences for passive route, got %d", passiveRoute.Occurrences)
 	}
-	if !passiveRoute.Valid {
+	if !passiveRoute.Up {
 		t.Fatalf("expected passive route to be marked valid")
 	}
 	if values := rawMetadataValues(passiveRoute.Metadata); len(values) != 0 {
@@ -1206,7 +1206,7 @@ func TestHandleGFFindingRecordsArtifact(t *testing.T) {
 	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
 	value := buildGFFindingValue("https://example.com/app.js", 99, "fetch('/api')")
 	art := requireArtifact(t, artifacts, "gfFinding", value, true)
-	if !art.Valid {
+	if !art.Up {
 		t.Fatalf("expected gfFinding artifact to be valid")
 	}
 

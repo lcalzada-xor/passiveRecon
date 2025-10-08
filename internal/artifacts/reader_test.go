@@ -20,7 +20,7 @@ func TestCollectArtifactsByTypeMultiTypeRecords(t *testing.T) {
 		Types:  []string{"html"},
 		Value:  "https://app.example.com/login",
 		Active: false,
-		Valid:  true,
+		Up:     true,
 	}
 
 	path := filepath.Join(dir, "artifacts.jsonl")

@@ -31,7 +31,7 @@ func writeLinkfinderArtifacts(t *testing.T, outdir string, data map[string][]str
 	encoder := json.NewEncoder(file)
 	for typ, values := range data {
 		for _, value := range values {
-			if err := encoder.Encode(pipeline.Artifact{Type: typ, Value: value, Active: true, Valid: true}); err != nil {
+			if err := encoder.Encode(pipeline.Artifact{Type: typ, Value: value, Active: true, Up: true}); err != nil {
 				t.Fatalf("encode artifact: %v", err)
 			}
 		}

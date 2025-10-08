@@ -350,14 +350,14 @@ func TestExecuteStepHandlesErrors(t *testing.T) {
 func TestDedupeDomainListNormalizesAndFilters(t *testing.T) {
 	dir := t.TempDir()
 	writeArtifactsFile(t, dir, []pipeline.Artifact{
-		{Type: "domain", Value: "Example.com", Valid: true},
-		{Type: "domain", Value: "api.example.com ", Valid: true},
-		{Type: "domain", Value: "*.ignored.example.com", Valid: true},
-		{Type: "domain", Value: "https://WWW.Example.com/path", Valid: true},
-		{Type: "domain", Value: "login.example.com [source]", Valid: true},
-		{Type: "domain", Value: "  # comment", Valid: true},
-		{Type: "domain", Value: "[2001:db8::1]:443", Valid: true},
-		{Type: "domain", Value: "api.example.com", Valid: true},
+		{Type: "domain", Value: "Example.com", Up: true},
+		{Type: "domain", Value: "api.example.com ", Up: true},
+		{Type: "domain", Value: "*.ignored.example.com", Up: true},
+		{Type: "domain", Value: "https://WWW.Example.com/path", Up: true},
+		{Type: "domain", Value: "login.example.com [source]", Up: true},
+		{Type: "domain", Value: "  # comment", Up: true},
+		{Type: "domain", Value: "[2001:db8::1]:443", Up: true},
+		{Type: "domain", Value: "api.example.com", Up: true},
 	})
 
 	got, err := dedupeDomainList(dir)
@@ -503,7 +503,7 @@ drained:
 			} else {
 				targetFile = "meta.passive"
 			}
-			artifacts = append(artifacts, pipeline.Artifact{Type: "meta", Value: content, Active: isActive, Valid: true})
+			artifacts = append(artifacts, pipeline.Artifact{Type: "meta", Value: content, Active: isActive, Up: true})
 		} else if strings.Contains(trimmed, "://") {
 			if isActive {
 				targetFile = filepath.Join("routes", "routes.active")
@@ -518,12 +518,12 @@ drained:
 			if len(metadata) == 0 {
 				metadata = nil
 			}
-			artifacts = append(artifacts, pipeline.Artifact{Type: "route", Value: base, Active: isActive, Valid: true, Metadata: metadata})
+			artifacts = append(artifacts, pipeline.Artifact{Type: "route", Value: base, Active: isActive, Up: true, Metadata: metadata})
 			if host := extractHost(base); host != "" {
-				artifacts = append(artifacts, pipeline.Artifact{Type: "domain", Value: host, Active: isActive, Valid: true})
+				artifacts = append(artifacts, pipeline.Artifact{Type: "domain", Value: host, Active: isActive, Up: true})
 			}
 		} else {
-			artifacts = append(artifacts, pipeline.Artifact{Type: "domain", Value: trimmed, Active: isActive, Valid: true})
+			artifacts = append(artifacts, pipeline.Artifact{Type: "domain", Value: trimmed, Active: isActive, Up: true})
 		}
 
 		appendLine(filepath.Join(s.outdir, targetFile), lineData)
