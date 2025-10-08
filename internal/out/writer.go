@@ -140,10 +140,18 @@ func (w *Writer) writeUnique(line string) error {
 	if _, err := w.buf.WriteString(line); err != nil {
 		return err
 	}
-	if err := w.buf.WriteByte('\n'); err != nil {
-		return err
-	}
-	return nil
+        if err := w.buf.WriteByte('\n'); err != nil {
+                return err
+        }
+
+        // Flush inmediatamente para que los datos estén disponibles incluso si el
+        // consumidor lee el archivo antes de que Writer.Close sea llamado. Esto
+        // también garantiza que las pruebas que inspeccionan el contenido sin
+        // cerrar explícitamente el escritor vean los resultados.
+        if err := w.buf.Flush(); err != nil {
+                return err
+        }
+        return nil
 }
 
 func (w *Writer) WriteDomain(d string) error {
