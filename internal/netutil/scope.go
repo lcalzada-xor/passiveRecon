@@ -8,26 +8,27 @@ import (
 	"golang.org/x/net/publicsuffix"
 )
 
-// Scope represents the canonical domain boundaries for a scan.
+// Scope representa los límites canónicos de un escaneo.
 type Scope struct {
-	hostname    string
-	registrable string
-	ip          net.IP
+	hostname    string // host normalizado tal cual lo dio el usuario (subdominios incluidos)
+	registrable string // eTLD+1 (ej.: foo.bar.co.uk -> bar.co.uk)
+	ip          net.IP // si el objetivo es una IP
 }
 
-// NewScope builds a Scope from the provided target. If the target cannot
-// be normalised into a domain the returned scope is nil and no filtering
-// will be enforced.
+// NewScope construye un Scope desde el target dado. Si no se puede
+// normalizar como dominio/IP válido, devuelve nil (sin filtrado).
 func NewScope(target string) *Scope {
 	normalized := NormalizeDomain(target)
 	if normalized == "" {
 		return nil
 	}
 
+	// Caso IP
 	if ip := net.ParseIP(normalized); ip != nil {
 		return &Scope{hostname: normalized, ip: ip}
 	}
 
+	// Caso dominio: obtenemos el registrable (eTLD+1) si es posible
 	registrable := normalized
 	if effective, err := publicsuffix.EffectiveTLDPlusOne(normalized); err == nil && effective != "" {
 		registrable = strings.ToLower(effective)
@@ -39,8 +40,7 @@ func NewScope(target string) *Scope {
 	}
 }
 
-// AllowsDomain reports whether the provided domain falls within the
-// configured scope. Domains outside of scope are rejected.
+// AllowsDomain indica si el dominio proporcionado cae dentro del scope.
 func (s *Scope) AllowsDomain(candidate string) bool {
 	if s == nil {
 		return true
@@ -51,31 +51,36 @@ func (s *Scope) AllowsDomain(candidate string) bool {
 		return false
 	}
 
+	// Si el scope es IP, solo aceptamos esa misma IP exacta.
 	if s.ip != nil {
+		// El candidato debe ser IP y coincidir exactamente.
 		if net.ParseIP(normalized) == nil {
 			return false
 		}
 		return normalized == s.hostname
 	}
 
+	// Si el scope es dominio, rechazamos IPs.
 	if net.ParseIP(normalized) != nil {
 		return false
 	}
 
+	// Si no tenemos registrable (caso raro), exigimos coincidencia exacta.
 	if s.registrable == "" {
 		return normalized == s.hostname
 	}
 
+	// Coincidencia exacta con el host completo o con el registrable
 	if normalized == s.hostname || normalized == s.registrable {
 		return true
 	}
 
+	// Subdominios bajo el registrable (p. ej. a.b.example.com)
 	return strings.HasSuffix(normalized, "."+s.registrable)
 }
 
-// AllowsRoute reports whether the route belongs to the configured scope.
-// Relative paths (no host) are always allowed. When the route contains a
-// host, it must fall inside the scope boundaries.
+// AllowsRoute indica si una ruta/URL pertenece al scope.
+// Las rutas relativas (sin host) siempre están permitidas.
 func (s *Scope) AllowsRoute(route string) bool {
 	if s == nil {
 		return true
@@ -86,40 +91,39 @@ func (s *Scope) AllowsRoute(route string) bool {
 		return false
 	}
 
+	// URLs esquema-relativas: //host/path
 	if strings.HasPrefix(trimmed, "//") {
 		if parsed, err := url.Parse("http:" + trimmed); err == nil {
 			if host := parsed.Hostname(); host != "" {
 				return s.AllowsDomain(host)
 			}
 		}
-		host := strings.TrimPrefix(trimmed, "//")
-		return s.AllowsDomain(host)
+		// Fallback conservador: quitar los dos slashes e intentar como dominio
+		return s.AllowsDomain(strings.TrimPrefix(trimmed, "//"))
 	}
 
-	// Relative paths or fragments lack host information and are assumed to
-	// belong to the current scope.
+	// Rutas/fragmentos relativos: pertenecen al scope actual
 	switch trimmed[0] {
 	case '/', '.', '#', '?':
 		return true
 	}
 
-	if !strings.Contains(trimmed, "://") && !strings.HasPrefix(trimmed, "//") {
-		// Non-schemed values (like bare domains) are treated as domains.
+	// Valores sin esquema ni // (p. ej., "example.com" o "sub.example.com/path")
+	// Si es un dominio "desnudo" lo tratamos como dominio; si trae path, NormalizeDomain lo resolverá.
+	if !strings.Contains(trimmed, "://") {
 		return s.AllowsDomain(trimmed)
 	}
 
+	// URLs absolutas con esquema
 	parsed, err := url.Parse(trimmed)
 	if err != nil {
-		// Fall back to domain validation using the best-effort host guess.
-		host := trimmed
-		if idx := strings.Index(trimmed, "/"); idx != -1 {
-			host = trimmed[:idx]
-		}
-		return s.AllowsDomain(host)
+		// Fallback robusto: delegar en AllowsDomain para extraer host con nuestra lógica
+		return s.AllowsDomain(trimmed)
 	}
 
 	host := parsed.Hostname()
 	if host == "" {
+		// URLs como mailto:, javascript:, data:, etc., sin host: no salen del scope
 		return true
 	}
 	return s.AllowsDomain(host)
