@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,7 +19,6 @@ import (
 )
 
 type stepFunc func(context.Context, *pipelineState, orchestratorOptions) error
-
 type preconditionFunc func(*pipelineState, orchestratorOptions) (bool, string)
 
 type toolStep struct {
@@ -34,6 +35,28 @@ const (
 	defaultToolTimeoutSeconds = 120
 	minToolTimeoutSeconds     = 30
 	maxToolTimeoutSeconds     = 1200
+
+	// Env para ajustar concurrencia por grupo sin cambiar API:
+	// ORCHESTRATOR_GROUP_CONCURRENCY="subdomain-sources=3,archive-sources=2"
+	envGroupConcurrency = "ORCHESTRATOR_GROUP_CONCURRENCY"
+)
+
+// Nombres de herramientas como constantes para evitar typos.
+const (
+	toolAmass         = "amass"
+	toolSubfinder     = "subfinder"
+	toolAssetfinder   = "assetfinder"
+	toolRDAP          = "rdap"
+	toolCRTSh         = "crtsh"
+	toolCensys        = "censys"
+	toolDedupe        = "dedupe"
+	toolWayback       = "waybackurls"
+	toolGAU           = "gau"
+	toolHTTPX         = "httpx"
+	toolSubJS         = "subjs"
+	toolLinkFinderEVO = "linkfinderevo"
+	toolDNSX          = "dnsx"
+	toolUnknown       = "unknown"
 )
 
 type orchestratorOptions struct {
@@ -52,7 +75,27 @@ type pipelineState struct {
 	DomainsDirty   bool
 }
 
-func toolInputChannel(s sink, tool string) (chan<- string, func()) {
+// --- Helpers de emisión unificada ------------------------------------------------
+
+func emitWithTool(opts orchestratorOptions, tool, msg string) {
+	if msg == "" || opts.sink == nil {
+		return
+	}
+	opts.sink.In() <- pipeline.WrapWithTool(tool, msg)
+}
+
+func emitMeta(opts orchestratorOptions, tool, msg string) {
+	if msg == "" {
+		return
+	}
+	emitWithTool(opts, tool, "meta: "+msg)
+}
+
+// --- Sink-aware input channel con backpressure y cancelación ---------------------
+
+// toolInputChannel crea un proxy con buffer y cancelación para enviar al sink.
+// Mantiene la API pública (función no exportada) pero añade robustez interna.
+func toolInputChannel(ctx context.Context, s sink, tool string) (chan<- string, func()) {
 	type toolAware interface {
 		InWithTool(string) (chan<- string, func())
 	}
@@ -63,17 +106,27 @@ func toolInputChannel(s sink, tool string) (chan<- string, func()) {
 	base := s.In()
 	tool = strings.TrimSpace(tool)
 	if tool == "" {
+		// Sin etiquetar – útil para casos internos
 		return base, func() {}
 	}
-	ch := make(chan string)
+
+	// Canal intermedio buffered para amortiguar ráfagas.
+	ch := make(chan string, 512)
+
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for line := range ch {
-			base <- line
+			// Reenvío con cancelación: evita deadlocks si el sink se satura.
+			select {
+			case base <- line:
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
+
 	cleanup := func() {
 		close(ch)
 		wg.Wait()
@@ -81,43 +134,45 @@ func toolInputChannel(s sink, tool string) (chan<- string, func()) {
 	return ch, cleanup
 }
 
+// --- Definición del pipeline -----------------------------------------------------
+
 var defaultPipeline = []toolStep{
-	{Name: "amass", Group: "subdomain-sources", Run: stepAmass},
-	{Name: "subfinder", Group: "subdomain-sources", Run: stepSubfinder},
-	{Name: "assetfinder", Group: "subdomain-sources", Run: stepAssetfinder},
-	{Name: "rdap", Group: "subdomain-sources", Run: stepRDAP},
-	{Name: "crtsh", Group: "cert-sources", Run: stepCRTSh},
-	{Name: "censys", Group: "cert-sources", Run: stepCensys},
-	{Name: "dedupe", Run: stepDedupe},
+	{Name: toolAmass, Group: "subdomain-sources", Run: stepAmass},
+	{Name: toolSubfinder, Group: "subdomain-sources", Run: stepSubfinder},
+	{Name: toolAssetfinder, Group: "subdomain-sources", Run: stepAssetfinder},
+	{Name: toolRDAP, Group: "subdomain-sources", Run: stepRDAP},
+	{Name: toolCRTSh, Group: "cert-sources", Run: stepCRTSh},
+	{Name: toolCensys, Group: "cert-sources", Run: stepCensys},
+	{Name: toolDedupe, Run: stepDedupe},
 	{
-		Name:         "waybackurls",
+		Name:         toolWayback,
 		Group:        "archive-sources",
 		Run:          stepWayback,
 		Precondition: requireDedupedDomains("meta: waybackurls skipped (no domains after dedupe)"),
 		Timeout:      timeoutWaybackurls,
 	},
 	{
-		Name:         "gau",
+		Name:         toolGAU,
 		Group:        "archive-sources",
 		Run:          stepGAU,
 		Precondition: requireDedupedDomains("meta: gau skipped (no domains after dedupe)"),
 		Timeout:      timeoutGAU,
 	},
 	{
-		Name:                "httpx",
+		Name:                toolHTTPX,
 		Run:                 stepHTTPX,
 		RequiresActive:      true,
 		SkipInactiveMessage: "meta: httpx skipped (requires --active)",
 		Timeout:             timeoutHTTPX,
 	},
 	{
-		Name:                "subjs",
+		Name:                toolSubJS,
 		Run:                 stepSubJS,
 		RequiresActive:      true,
 		SkipInactiveMessage: "meta: subjs skipped (requires --active)",
 	},
 	{
-		Name:                "linkfinderevo",
+		Name:                toolLinkFinderEVO,
 		Run:                 stepLinkFinderEVO,
 		RequiresActive:      true,
 		SkipInactiveMessage: "meta: linkfinderevo skipped (requires --active)",
@@ -133,6 +188,8 @@ const (
 	cacheMaxAge        = 24 * time.Hour
 	cacheSkipBaseLabel = "resultado reutilizado desde cache"
 )
+
+// --- Orquestación ----------------------------------------------------------------
 
 func runPipeline(ctx context.Context, steps []toolStep, opts orchestratorOptions) *pipelineState {
 	state := &pipelineState{DomainListFile: filepath.Join("domains", "domains.passive")}
@@ -151,7 +208,7 @@ func runPipeline(ctx context.Context, steps []toolStep, opts orchestratorOptions
 			grouped = append(grouped, steps[i])
 			i++
 		}
-		runConcurrentSteps(ctx, grouped, state, opts)
+		runConcurrentSteps(ctx, group, grouped, state, opts)
 	}
 
 	return state
@@ -161,11 +218,9 @@ func executeStep(ctx context.Context, step toolStep, state *pipelineState, opts 
 	if !isStepRequested(step, opts) {
 		return nil, false
 	}
-
 	if skip := maybeSkipByCache(step, state, opts); skip {
 		return nil, false
 	}
-
 	if !shouldRunStep(step, state, opts) {
 		return nil, false
 	}
@@ -184,11 +239,9 @@ func isStepRequested(step toolStep, opts orchestratorOptions) bool {
 	if opts.requested[step.Name] {
 		return true
 	}
-
 	if opts.metrics != nil {
 		opts.metrics.RecordSkip(step.Name, "no solicitado")
 	}
-
 	return false
 }
 
@@ -196,8 +249,7 @@ func maybeSkipByCache(step toolStep, state *pipelineState, opts orchestratorOpti
 	if opts.cache == nil || opts.runHash == "" {
 		return false
 	}
-
-	if step.Name == "dedupe" && state.DomainsDirty {
+	if step.Name == toolDedupe && state.DomainsDirty {
 		// Nuevos dominios detectados en esta ejecución: no reutilizamos cache.
 		return false
 	}
@@ -207,7 +259,7 @@ func maybeSkipByCache(step toolStep, state *pipelineState, opts orchestratorOpti
 		return false
 	}
 
-	if step.Name != "dedupe" {
+	if step.Name != toolDedupe {
 		announceCacheReuse(step, opts, completedAt)
 		return true
 	}
@@ -222,7 +274,6 @@ func maybeSkipByCache(step toolStep, state *pipelineState, opts orchestratorOpti
 	if err := opts.cache.Invalidate(step.Name); err != nil {
 		logx.Warnf("no se pudo invalidar cache de %s: %v", step.Name, err)
 	}
-
 	return false
 }
 
@@ -241,8 +292,15 @@ func prepareStepTask(ctx context.Context, step toolStep, state *pipelineState, o
 	return func() error {
 		err := task()
 		if err != nil {
+			// Mantener comportamiento, pero dar diagnósticos mejores
 			if errors.Is(err, runner.ErrMissingBinary) {
+				emitMeta(opts, step.Name, "missing binary (omitiendo)")
 				return runner.ErrMissingBinary
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				emitMeta(opts, step.Name, fmt.Sprintf("timeout after %ds", timeout))
+				// No propagamos error para no parar el pipeline (comportamiento actual)
+				return nil
 			}
 			logx.Warnf("source error: %v", err)
 			return nil
@@ -253,7 +311,7 @@ func prepareStepTask(ctx context.Context, step toolStep, state *pipelineState, o
 				logx.Warnf("no se pudo actualizar cache para %s: %v", step.Name, markErr)
 			}
 		}
-		if step.Name == "dedupe" {
+		if step.Name == toolDedupe {
 			state.DomainsDirty = false
 		}
 		return nil
@@ -265,19 +323,45 @@ func runSingleStep(ctx context.Context, step toolStep, state *pipelineState, opt
 	if !ok {
 		return
 	}
-	task()
+	_ = task()
 }
 
-func runConcurrentSteps(ctx context.Context, steps []toolStep, state *pipelineState, opts orchestratorOptions) {
+func runConcurrentSteps(ctx context.Context, group string, steps []toolStep, state *pipelineState, opts orchestratorOptions) {
+	// Concurrencia por grupo configurable por env.
+	maxConc := parseGroupConcurrency(group, len(steps))
+	if maxConc <= 0 {
+		maxConc = len(steps)
+	}
+	sem := make(chan struct{}, maxConc)
+
+	start := time.Now()
+	if opts.metrics != nil {
+		// Podrías añadir un span por grupo en tu sistema de métricas si te interesa.
+	}
+	logx.Tracef("grupo %s: inicio con concurrencia=%d, steps=%d", group, maxConc, len(steps))
+
 	var wg runnerWaitGroup
-	for _, step := range steps {
+	for _, st := range steps {
+		step := st
 		task, ok := executeStep(ctx, step, state, opts)
 		if !ok {
 			continue
 		}
-		wg.Go(task)
+		wg.Go(func() error {
+			// Control de concurrencia
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			defer func() { <-sem }()
+			return task()
+		})
 	}
 	wg.Wait()
+
+	elapsed := time.Since(start).Round(time.Millisecond)
+	logx.Tracef("grupo %s: fin en %s", group, elapsed)
 }
 
 func computeStepTimeout(step toolStep, state *pipelineState, opts orchestratorOptions) int {
@@ -320,7 +404,8 @@ func shouldRunStep(step toolStep, state *pipelineState, opts orchestratorOptions
 
 func skipStep(step toolStep, opts orchestratorOptions, message string) {
 	if message != "" {
-		opts.sink.In() <- message
+		// Unificar: siempre vía emitWithTool
+		emitWithTool(opts, step.Name, message)
 	}
 	if opts.bar != nil {
 		opts.bar.StepDone(step.Name, "omitido")
@@ -347,7 +432,7 @@ func buildStepMap(steps []toolStep) map[string]toolStep {
 }
 
 func requireDedupedDomains(message string) preconditionFunc {
-	return func(state *pipelineState, opts orchestratorOptions) (bool, string) {
+	return func(state *pipelineState, _ orchestratorOptions) (bool, string) {
 		if len(state.DedupedDomains) == 0 {
 			return false, message
 		}
@@ -355,56 +440,61 @@ func requireDedupedDomains(message string) preconditionFunc {
 	}
 }
 
+// --- Steps ----------------------------------------------------------------------
+
 func stepAmass(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(opts.sink, "amass")
+	input, done := toolInputChannel(ctx, opts.sink, toolAmass)
 	defer done()
 	return sourceAmass(ctx, opts.cfg.Target, input, opts.cfg.Active)
 }
 
 func stepSubfinder(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(opts.sink, "subfinder")
+	input, done := toolInputChannel(ctx, opts.sink, toolSubfinder)
 	defer done()
 	return sourceSubfinder(ctx, opts.cfg.Target, input)
 }
 
 func stepAssetfinder(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(opts.sink, "assetfinder")
+	input, done := toolInputChannel(ctx, opts.sink, toolAssetfinder)
 	defer done()
 	return sourceAssetfinder(ctx, opts.cfg.Target, input)
 }
 
 func stepRDAP(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(opts.sink, "rdap")
+	input, done := toolInputChannel(ctx, opts.sink, toolRDAP)
 	defer done()
 	return sourceRDAP(ctx, opts.cfg.Target, input)
 }
 
 func stepCRTSh(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(opts.sink, "crtsh")
+	input, done := toolInputChannel(ctx, opts.sink, toolCRTSh)
 	defer done()
 	return sourceCRTSh(ctx, opts.cfg.Target, input)
 }
 
 func stepCensys(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(opts.sink, "censys")
+	input, done := toolInputChannel(ctx, opts.sink, toolCensys)
 	defer done()
 	return sourceCensys(ctx, opts.cfg.Target, opts.cfg.CensysAPIID, opts.cfg.CensysAPISecret, input)
 }
 
 func stepDedupe(ctx context.Context, state *pipelineState, opts orchestratorOptions) error {
 	opts.sink.Flush()
+
 	domains, err := dedupeDomainList(opts.cfg.OutDir)
 	if err != nil {
 		return err
 	}
 	state.DedupedDomains = domains
 	state.DomainListFile = filepath.Join("domains", "domains.dedupe")
-	opts.sink.In() <- pipeline.WrapWithTool("dedupe", fmt.Sprintf("meta: dedupe retained %d domains", len(domains)))
+
+	emitMeta(opts, toolDedupe, fmt.Sprintf("dedupe retained %d domains", len(domains)))
 	if len(domains) == 0 {
-		opts.sink.In() <- pipeline.WrapWithTool("dedupe", "meta: dedupe produced no domains")
+		emitMeta(opts, toolDedupe, "dedupe produced no domains")
 	}
+
 	if opts.cfg.Active {
-		input, done := toolInputChannel(opts.sink, "dnsx")
+		input, done := toolInputChannel(ctx, opts.sink, toolDNSX)
 		defer done()
 		if err := sourceDNSX(ctx, domains, opts.cfg.OutDir, input); err != nil {
 			return err
@@ -414,25 +504,39 @@ func stepDedupe(ctx context.Context, state *pipelineState, opts orchestratorOpti
 }
 
 func stepWayback(ctx context.Context, state *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(opts.sink, "waybackurls")
+	input, done := toolInputChannel(ctx, opts.sink, toolWayback)
 	defer done()
 	return sourceWayback(ctx, state.DedupedDomains, input)
 }
 
 func stepGAU(ctx context.Context, state *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(opts.sink, "gau")
+	input, done := toolInputChannel(ctx, opts.sink, toolGAU)
 	defer done()
 	return sourceGAU(ctx, state.DedupedDomains, input)
 }
 
-func stepHTTPX(ctx context.Context, state *pipelineState, opts orchestratorOptions) error {
+func stepHTTPX(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
 	opts.sink.Flush()
-	input, done := toolInputChannel(opts.sink, "httpx")
+	input, done := toolInputChannel(ctx, opts.sink, toolHTTPX)
 	defer done()
 	err := sourceHTTPX(ctx, opts.cfg.OutDir, input)
 	opts.sink.Flush()
 	return err
 }
+
+func stepSubJS(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
+	input, done := toolInputChannel(ctx, opts.sink, toolSubJS)
+	defer done()
+	return sourceSubJS(ctx, opts.cfg.OutDir, input)
+}
+
+func stepLinkFinderEVO(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
+	input, done := toolInputChannel(ctx, opts.sink, toolLinkFinderEVO)
+	defer done()
+	return sourceLinkFinderEVO(ctx, opts.cfg.Target, opts.cfg.OutDir, input)
+}
+
+// --- Timeouts dependientes del input -------------------------------------------
 
 func timeoutWaybackurls(state *pipelineState, opts orchestratorOptions) int {
 	base := baseTimeoutSeconds(opts.cfg.TimeoutS)
@@ -440,6 +544,7 @@ func timeoutWaybackurls(state *pipelineState, opts orchestratorOptions) int {
 	if domains == 0 {
 		return base
 	}
+	// Tiering suave para evitar picos raros
 	extra := domains / 20
 	if extra > 600 {
 		extra = 600
@@ -477,17 +582,7 @@ func timeoutHTTPX(state *pipelineState, opts orchestratorOptions) int {
 	return base + extra
 }
 
-func stepSubJS(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(opts.sink, "subjs")
-	defer done()
-	return sourceSubJS(ctx, opts.cfg.OutDir, input)
-}
-
-func stepLinkFinderEVO(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(opts.sink, "linkfinderevo")
-	defer done()
-	return sourceLinkFinderEVO(ctx, opts.cfg.Target, opts.cfg.OutDir, input)
-}
+// --- Unknown tools & cache messaging --------------------------------------------
 
 func executePostProcessing(ctx context.Context, cfg *config.Config, sink sink, bar *progressBar, unknown []string) {
 	notifyUnknownTools(sink, bar, unknown)
@@ -509,7 +604,9 @@ func executePostProcessing(ctx context.Context, cfg *config.Config, sink sink, b
 
 func notifyUnknownTools(sink sink, bar *progressBar, unknown []string) {
 	for _, tool := range unknown {
-		sink.In() <- pipeline.WrapWithTool("unknown", fmt.Sprintf("meta: unknown tool: %s", tool))
+		if sink != nil {
+			sink.In() <- pipeline.WrapWithTool(toolUnknown, fmt.Sprintf("meta: unknown tool: %s", tool))
+		}
 		if bar != nil {
 			bar.StepDone(tool, "desconocido")
 		}
@@ -517,9 +614,7 @@ func notifyUnknownTools(sink sink, bar *progressBar, unknown []string) {
 }
 
 func announceCacheReuse(step toolStep, opts orchestratorOptions, completedAt time.Time) {
-	if opts.sink != nil {
-		opts.sink.In() <- pipeline.WrapWithTool(step.Name, fmt.Sprintf("meta: %s reutilizado desde cache%s", step.Name, cacheAgeSuffix(completedAt)))
-	}
+	emitWithTool(opts, step.Name, fmt.Sprintf("meta: %s reutilizado desde cache%s", step.Name, cacheAgeSuffix(completedAt)))
 	if opts.bar != nil {
 		opts.bar.StepDone(step.Name, "cache")
 	}
@@ -552,7 +647,7 @@ func cacheSkipReason(completedAt time.Time) string {
 
 func producesDomainData(stepName string) bool {
 	switch stepName {
-	case "amass", "subfinder", "assetfinder", "rdap", "crtsh", "censys":
+	case toolAmass, toolSubfinder, toolAssetfinder, toolRDAP, toolCRTSh, toolCensys:
 		return true
 	default:
 		return false
@@ -570,4 +665,35 @@ func loadCachedDedupe(state *pipelineState, opts orchestratorOptions) bool {
 	state.DedupedDomains = domains
 	state.DomainListFile = filepath.Join("domains", "domains.dedupe")
 	return true
+}
+
+// --- Concurrencia por grupo (env) -----------------------------------------------
+
+func parseGroupConcurrency(group string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(envGroupConcurrency))
+	if raw == "" {
+		return fallback
+	}
+	// formato: "subdomain-sources=3,archive-sources=2"
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		k := strings.TrimSpace(kv[0])
+		v := strings.TrimSpace(kv[1])
+		if !strings.EqualFold(k, group) {
+			continue
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fallback
+		}
+		return n
+	}
+	return fallback
 }

@@ -48,12 +48,18 @@ func Run(cfg *config.Config) error {
 	}
 	cfg.OutDir = outDir
 
-	sink, err := sinkFactory(cfg.OutDir, cfg.Active, cfg.Target, pipeline.LineBufferSize(cfg.Workers))
+	// Clamp de workers por robustez (evita Start(0)).
+	workers := cfg.Workers
+	if workers <= 0 {
+		workers = 1
+	}
+
+	sink, err := sinkFactory(cfg.OutDir, cfg.Active, cfg.Target, pipeline.LineBufferSize(workers))
 	if err != nil {
 		return err
 	}
 	defer sink.Close()
-	sink.Start(cfg.Workers)
+	sink.Start(workers)
 
 	requested, ordered, unknown := normalizeRequestedTools(cfg)
 
@@ -133,6 +139,7 @@ func normalizeRequestedTools(cfg *config.Config) (map[string]bool, []string, []s
 		requested[tool] = true
 	}
 
+	// Si hay fuentes de URLs, fuerza dedupe salvo que ya lo pidan.
 	if (requested["waybackurls"] || requested["gau"]) && !requested["dedupe"] {
 		requested["dedupe"] = true
 	}
@@ -143,7 +150,9 @@ func normalizeRequestedTools(cfg *config.Config) (map[string]bool, []string, []s
 	}
 
 	var ordered []string
-	seenOrdered := make(map[string]bool)
+	seenOrdered := make(map[string]bool, len(defaultToolOrder))
+
+	// Mantener orden por defecto para las herramientas conocidas seleccionadas.
 	for _, tool := range defaultToolOrder {
 		if requested[tool] {
 			ordered = append(ordered, tool)
@@ -151,6 +160,7 @@ func normalizeRequestedTools(cfg *config.Config) (map[string]bool, []string, []s
 		}
 	}
 
+	// Añadir desconocidas manteniendo el orden en que las pidió el usuario.
 	var unknown []string
 	for _, tool := range normalizedOrder {
 		if seenOrdered[tool] {
@@ -172,6 +182,14 @@ func (w *runnerWaitGroup) Go(fn func() error) {
 	errCh := make(chan error, 1)
 	w.ch = append(w.ch, errCh)
 	go func() {
+		// Convertir pánico en error para no tumbar el orquestador.
+		defer func() {
+			if r := recover(); r != nil {
+				// Si hay pánico, devolvemos un error genérico para el logger.
+				errCh <- errors.New("source panicked")
+				return
+			}
+		}()
 		errCh <- fn()
 	}()
 }
