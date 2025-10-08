@@ -1,0 +1,1534 @@
+package pipeline
+
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+
+	"github.com/google/go-cmp/cmp"
+
+	"passive-rec/internal/adapters/artifacts"
+	"passive-rec/internal/platform/certs"
+	"passive-rec/internal/platform/netutil"
+)
+
+type Artifact = artifacts.Artifact
+
+func newTestSink(t *testing.T, active bool) (*Sink, string) {
+	t.Helper()
+	dir := t.TempDir()
+	sink, err := NewSink(dir, active, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+	return sink, dir
+}
+
+func TestSinkClassification(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+
+	certOne, err := (certs.Record{
+		Source:       "test",
+		CommonName:   "direct-cert.example.com",
+		DNSNames:     []string{"alt1.example.com", "alt2.example.com"},
+		Issuer:       "Example CA",
+		NotBefore:    "2024-01-01T00:00:00Z",
+		NotAfter:     "2025-01-01T00:00:00Z",
+		SerialNumber: "01",
+	}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal certOne: %v", err)
+	}
+	certTwo, err := (certs.Record{
+		Source:       "test",
+		CommonName:   "alt3.example.com",
+		DNSNames:     []string{"alt3.example.com"},
+		Issuer:       "Example CA",
+		NotBefore:    "2023-06-01T00:00:00Z",
+		NotAfter:     "2024-06-01T00:00:00Z",
+		SerialNumber: "02",
+	}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal certTwo: %v", err)
+	}
+
+	inputs := []string{
+		"  example.com  ",
+		"https://app.example.com/login",
+		"http://example.com/about",
+		"meta: run started",
+		"sub.example.com/path",
+		"www.example.com",
+		"[2001:db8::1]:8443",
+		"2001:db8::1",
+		"meta: run started",
+		"cert: " + certOne,
+		"cert: " + certTwo,
+		"   ",
+	}
+
+	for _, line := range inputs {
+		sink.In() <- line
+	}
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	domains := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
+	wantDomains := []string{
+		"example.com",
+		"www.example.com",
+		"alt1.example.com",
+		"alt2.example.com",
+		"direct-cert.example.com",
+		"alt3.example.com",
+	}
+	if diff := cmp.Diff(wantDomains, domains); diff != "" {
+		t.Fatalf("unexpected domains (-want +got):\n%s", diff)
+	}
+
+	if activeDomains := readLines(t, filepath.Join(dir, "domains", "domains.active")); activeDomains != nil {
+		t.Fatalf("expected empty domains.active, got %v", activeDomains)
+	}
+
+	routes := readLines(t, filepath.Join(dir, "routes", "routes.passive"))
+	wantRoutes := []string{
+		"https://app.example.com/login",
+		"http://example.com/about",
+		"http://sub.example.com/path",
+	}
+	if diff := cmp.Diff(wantRoutes, routes); diff != "" {
+		t.Fatalf("unexpected routes (-want +got):\n%s", diff)
+	}
+
+	if activeRoutes := readLines(t, filepath.Join(dir, "routes", "routes.active")); activeRoutes != nil {
+		t.Fatalf("expected empty routes.active, got %v", activeRoutes)
+	}
+
+	certLines := readLines(t, filepath.Join(dir, "certs", "certs.passive"))
+	if len(certLines) != 2 {
+		t.Fatalf("expected two certificate records, got %d", len(certLines))
+	}
+	var gotCerts []certs.Record
+	for _, line := range certLines {
+		record, err := certs.Parse(line)
+		if err != nil {
+			t.Fatalf("parse certificate line: %v", err)
+		}
+		gotCerts = append(gotCerts, record)
+	}
+
+	wantRecords := []certs.Record{{
+		Source:       "test",
+		CommonName:   "alt3.example.com",
+		DNSNames:     []string{"alt3.example.com"},
+		Issuer:       "Example CA",
+		NotBefore:    "2023-06-01T00:00:00Z",
+		NotAfter:     "2024-06-01T00:00:00Z",
+		SerialNumber: "02",
+	}, {
+		Source:       "test",
+		CommonName:   "direct-cert.example.com",
+		DNSNames:     []string{"alt1.example.com", "alt2.example.com"},
+		Issuer:       "Example CA",
+		NotBefore:    "2024-01-01T00:00:00Z",
+		NotAfter:     "2025-01-01T00:00:00Z",
+		SerialNumber: "01",
+	}}
+
+	sort.Slice(gotCerts, func(i, j int) bool { return gotCerts[i].CommonName < gotCerts[j].CommonName })
+	sort.Slice(wantRecords, func(i, j int) bool { return wantRecords[i].CommonName < wantRecords[j].CommonName })
+	if diff := cmp.Diff(wantRecords, gotCerts); diff != "" {
+		t.Fatalf("unexpected certificate records (-want +got):\n%s", diff)
+	}
+
+	if activeCerts := readLines(t, filepath.Join(dir, "certs", "certs.active")); activeCerts != nil {
+		t.Fatalf("expected empty certs.active, got %v", activeCerts)
+	}
+
+	meta := readLines(t, filepath.Join(dir, "meta.passive"))
+	wantMeta := []string{"run started"}
+	if diff := cmp.Diff(wantMeta, meta); diff != "" {
+		t.Fatalf("unexpected meta (-want +got):\n%s", diff)
+	}
+
+	if activeMeta := readLines(t, filepath.Join(dir, "meta.active")); activeMeta != nil {
+		t.Fatalf("expected empty meta.active, got %v", activeMeta)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	requireArtifact(t, artifacts, "domain", "example.com", false)
+	requireArtifact(t, artifacts, "route", "https://app.example.com/login", false)
+	metaArtifact := requireArtifact(t, artifacts, "meta", "run started", false)
+	if raw, ok := metaArtifact.Metadata["raw"].(string); !ok || raw != "meta: run started" {
+		t.Fatalf("unexpected meta raw metadata: %#v", metaArtifact.Metadata["raw"])
+	}
+	certArtifact := requireArtifact(t, artifacts, "certificate", certOne, false)
+	if certArtifact.Tool != "test" {
+		t.Fatalf("unexpected certificate tool: %q", certArtifact.Tool)
+	}
+	names := metadataStringSlice(t, certArtifact.Metadata, "names")
+	sort.Strings(names)
+	if diff := cmp.Diff([]string{"alt1.example.com", "alt2.example.com", "direct-cert.example.com"}, names); diff != "" {
+		t.Fatalf("unexpected certificate names metadata (-want +got):\n%s", diff)
+	}
+}
+
+func TestSinkFiltersOutOfScope(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(2))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+	sink.Start(2)
+
+	allowedCert, err := (certs.Record{CommonName: "app.example.com", DNSNames: []string{"app.example.com", "evil.com"}}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal allowed cert: %v", err)
+	}
+	deniedCert, err := (certs.Record{CommonName: "evil.com", DNSNames: []string{"evil.com"}}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal denied cert: %v", err)
+	}
+
+	inputs := []string{
+		"example.com",
+		"evil.com",
+		"https://app.example.com/login",
+		"https://evil.com/hack",
+		"js: https://app.example.com/app.js",
+		"js: https://evil.com/app.js",
+		"html: https://app.example.com/index.html",
+		"html: //cdn.evil.com/lib.js",
+		"cert: " + allowedCert,
+		"cert: " + deniedCert,
+	}
+
+	for _, line := range inputs {
+		sink.In() <- line
+	}
+
+	sink.Flush()
+	if err := sink.Close(); err != nil {
+		t.Fatalf("sink close: %v", err)
+	}
+
+	read := func(path string) []string {
+		data, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		trimmed := strings.TrimSpace(string(data))
+		if trimmed == "" {
+			return nil
+		}
+		return strings.Split(trimmed, "\n")
+	}
+
+	domains := read(filepath.Join(dir, "domains", "domains.passive"))
+	sort.Strings(domains)
+	wantDomains := []string{"app.example.com", "example.com"}
+	if diff := cmp.Diff(wantDomains, domains); diff != "" {
+		t.Fatalf("unexpected domains.passive contents (-want +got):\n%s", diff)
+	}
+
+	routes := read(filepath.Join(dir, "routes", "routes.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/login"}, routes); diff != "" {
+		t.Fatalf("unexpected routes.passive contents (-want +got):\n%s", diff)
+	}
+
+	jsRoutes := read(filepath.Join(dir, "routes", "js", "js.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/app.js"}, jsRoutes); diff != "" {
+		t.Fatalf("unexpected js.passive contents (-want +got):\n%s", diff)
+	}
+
+	htmlRoutes := read(filepath.Join(dir, "routes", "html", "html.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/index.html"}, htmlRoutes); diff != "" {
+		t.Fatalf("unexpected html.passive contents (-want +got):\n%s", diff)
+	}
+
+	certsPassive := read(filepath.Join(dir, "certs", "certs.passive"))
+	if len(certsPassive) != 1 {
+		t.Fatalf("expected 1 certificate, got %v", certsPassive)
+	}
+	if !strings.Contains(certsPassive[0], "app.example.com") || strings.Contains(certsPassive[0], "evil.com") {
+		t.Fatalf("unexpected cert contents: %s", certsPassive[0])
+	}
+}
+
+func TestArtifactsCaptureSourcesAndOccurrences(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+	sink.Start(1)
+
+	sink.In() <- WrapWithTool("subfinder", "example.com")
+	sink.In() <- WrapWithTool("assetfinder", "example.com")
+	sink.In() <- WrapWithTool("assetfinder", "example.com")
+
+	sink.Flush()
+	if err := sink.Close(); err != nil {
+		t.Fatalf("sink close: %v", err)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	domain := requireArtifact(t, artifacts, "domain", "example.com", false)
+	if domain.Occurrences != 3 {
+		t.Fatalf("expected 3 occurrences, got %d", domain.Occurrences)
+	}
+	wantTools := []string{"assetfinder", "subfinder"}
+	if diff := cmp.Diff(wantTools, domain.Tools); diff != "" {
+		t.Fatalf("unexpected tools (-want +got):\n%s", diff)
+	}
+	if domain.Tool != "subfinder" {
+		t.Fatalf("expected primary tool to be subfinder, got %q", domain.Tool)
+	}
+}
+
+func TestActiveCertLines(t *testing.T) {
+	t.Parallel()
+
+	sink, dir := newTestSink(t, true)
+	sink.Start(1)
+
+	passiveRecord, err := (certs.Record{
+		Source:       "passive",
+		CommonName:   "passive-cert.example.com",
+		DNSNames:     []string{"passive-san.example.com"},
+		Issuer:       "Example CA",
+		NotBefore:    "2023-01-01T00:00:00Z",
+		NotAfter:     "2024-01-01T00:00:00Z",
+		SerialNumber: "p-01",
+	}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal passive record: %v", err)
+	}
+
+	activeRecord, err := (certs.Record{
+		Source:       "active",
+		CommonName:   "active-cert.example.com",
+		DNSNames:     []string{"active-san-one.example.com", "active-san-two.example.com"},
+		Issuer:       "Example Active CA",
+		NotBefore:    "2024-02-02T00:00:00Z",
+		NotAfter:     "2025-02-02T00:00:00Z",
+		SerialNumber: "a-01",
+	}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal active record: %v", err)
+	}
+
+	sink.In() <- "cert: " + passiveRecord
+	sink.In() <- "active: cert: " + activeRecord
+	sink.In() <- "active: cert: " + activeRecord
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	passiveLines := readLines(t, filepath.Join(dir, "certs", "certs.passive"))
+	if diff := cmp.Diff([]string{passiveRecord}, passiveLines); diff != "" {
+		t.Fatalf("unexpected certs.passive contents (-want +got):\n%s", diff)
+	}
+
+	activeLines := readLines(t, filepath.Join(dir, "certs", "certs.active"))
+	if diff := cmp.Diff([]string{activeRecord}, activeLines); diff != "" {
+		t.Fatalf("unexpected certs.active contents (-want +got):\n%s", diff)
+	}
+
+	passiveDomains := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
+	sort.Strings(passiveDomains)
+	wantPassiveDomains := []string{
+		"active-cert.example.com",
+		"active-san-one.example.com",
+		"active-san-two.example.com",
+		"passive-cert.example.com",
+		"passive-san.example.com",
+	}
+	if diff := cmp.Diff(wantPassiveDomains, passiveDomains); diff != "" {
+		t.Fatalf("unexpected domains.passive contents (-want +got):\n%s", diff)
+	}
+
+	activeDomains := readLines(t, filepath.Join(dir, "domains", "domains.active"))
+	sort.Strings(activeDomains)
+	if diff := cmp.Diff(wantPassiveDomains, activeDomains); diff != "" {
+		t.Fatalf("unexpected domains.active contents (-want +got):\n%s", diff)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	requireArtifact(t, artifacts, "certificate", passiveRecord, false)
+	requireArtifact(t, artifacts, "certificate", activeRecord, true)
+}
+
+func TestSinkFlush(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(2))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(2)
+
+	sink.In() <- "one.example.com"
+	sink.In() <- "two.example.com"
+
+	sink.Flush()
+
+	domains := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
+	wantDomains := []string{"one.example.com", "two.example.com"}
+	sort.Strings(domains)
+	if diff := cmp.Diff(wantDomains, domains); diff != "" {
+		t.Fatalf("unexpected domains after flush (-want +got):\n%s", diff)
+	}
+
+	sink.In() <- "meta: later"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestNormalizeDomainIPv6(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"[2001:db8::1]:8443":                "2001:db8::1",
+		"2001:db8::1":                       "2001:db8::1",
+		"HTTPS://[2001:db8::1]:8443/path":   "2001:db8::1",
+		"http://[2001:db8::1]/":             "2001:db8::1",
+		"[2001:db8::1]:8443 extra metadata": "2001:db8::1",
+	}
+
+	for input, want := range cases {
+		input, want := input, want
+		t.Run(input, func(t *testing.T) {
+			t.Parallel()
+			if got := netutil.NormalizeDomain(input); got != want {
+				t.Fatalf("NormalizeDomain(%q) = %q, want %q", input, got, want)
+			}
+		})
+	}
+}
+
+func TestNewSinkClosesWritersOnError(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	// Force the second writer creation to fail by pre-creating a directory with
+	// the same name. os.OpenFile will return an error because the path points to
+	// a directory instead of a regular file.
+	routesDir := filepath.Join(dir, "routes")
+	if err := os.MkdirAll(routesDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll routes dir: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(routesDir, "routes.passive"), 0o755); err != nil {
+		t.Fatalf("Mkdir routes.passive: %v", err)
+	}
+
+	domainPath := filepath.Join(dir, "domains", "domains.passive")
+	if got := countOpenFDs(t, domainPath); got != 0 {
+		t.Fatalf("unexpected open descriptors before NewSink: %d", got)
+	}
+
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err == nil {
+		// Close to ensure no resources leak in this unexpected success case.
+		_ = sink.Close()
+		t.Fatalf("expected NewSink to fail")
+	}
+
+	if _, err := os.Stat(domainPath); err != nil {
+		t.Fatalf("expected %q to exist: %v", domainPath, err)
+	}
+
+	if got := countOpenFDs(t, domainPath); got != 0 {
+		t.Fatalf("domains writer file descriptor leaked: %d", got)
+	}
+}
+
+func TestCertLinesPopulateDomainsPassiveSink(t *testing.T) {
+	t.Parallel()
+
+	sink, dir := newTestSink(t, false)
+	sink.Start(1)
+
+	raw, err := (certs.Record{
+		CommonName: "cn.example.com",
+		DNSNames:   []string{"alt1.example.com"},
+	}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal certificate: %v", err)
+	}
+
+	sink.In() <- "cert: " + raw
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	domains := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
+	want := []string{"alt1.example.com", "cn.example.com"}
+	if diff := cmp.Diff(want, domains); diff != "" {
+		t.Fatalf("unexpected domains.passive contents (-want +got):\n%s", diff)
+	}
+
+	if active := readLines(t, filepath.Join(dir, "domains", "domains.active")); active != nil {
+		t.Fatalf("expected empty domains.active, got %v", active)
+	}
+}
+
+func TestCertLinesPopulateDomainsActiveSink(t *testing.T) {
+	t.Parallel()
+
+	sink, dir := newTestSink(t, true)
+	sink.Start(1)
+
+	raw, err := (certs.Record{
+		CommonName: "api.example.com",
+		DNSNames:   []string{"service.example.com"},
+	}).Marshal()
+	if err != nil {
+		t.Fatalf("marshal certificate: %v", err)
+	}
+
+	sink.In() <- "cert: " + raw
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	want := []string{"api.example.com", "service.example.com"}
+
+	passive := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
+	if diff := cmp.Diff(want, passive); diff != "" {
+		t.Fatalf("unexpected domains.passive contents (-want +got):\n%s", diff)
+	}
+
+	active := readLines(t, filepath.Join(dir, "domains", "domains.active"))
+	if diff := cmp.Diff(want, active); diff != "" {
+		t.Fatalf("unexpected domains.active contents (-want +got):\n%s", diff)
+	}
+}
+
+func TestActiveRoutesPopulatePassive(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "active: https://app.example.com/login [200] [Title]"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	passive := readLines(t, filepath.Join(dir, "routes", "routes.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/login"}, passive); diff != "" {
+		t.Fatalf("unexpected routes.passive contents (-want +got):\n%s", diff)
+	}
+
+	active := readLines(t, filepath.Join(dir, "routes", "routes.active"))
+	if diff := cmp.Diff([]string{"https://app.example.com/login [200] [Title]"}, active); diff != "" {
+		t.Fatalf("unexpected routes.active contents (-want +got):\n%s", diff)
+	}
+}
+
+func TestActiveRoutesSkip404(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "active: https://app.example.com/login [404]"
+	sink.In() <- "active: https://app.example.com/dashboard [200]"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	passive := readLines(t, filepath.Join(dir, "routes", "routes.passive"))
+	wantPassive := []string{
+		"https://app.example.com/login",
+		"https://app.example.com/dashboard",
+	}
+	if diff := cmp.Diff(wantPassive, passive); diff != "" {
+		t.Fatalf("unexpected routes.passive contents (-want +got):\n%s", diff)
+	}
+
+	active := readLines(t, filepath.Join(dir, "routes", "routes.active"))
+	if diff := cmp.Diff([]string{"https://app.example.com/dashboard [200]"}, active); diff != "" {
+		t.Fatalf("unexpected routes.active contents (-want +got):\n%s", diff)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	dashboard := requireArtifact(t, artifacts, "route", "https://app.example.com/dashboard", true)
+	if !dashboard.Up {
+		t.Fatalf("expected successful dashboard route to be valid")
+	}
+	login := requireArtifact(t, artifacts, "route", "https://app.example.com/login", true)
+	if login.Up {
+		t.Fatalf("expected 404 login route to be invalid")
+	}
+}
+
+func TestJSLinesAreWrittenToFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "js: https://static.example.com/app.js"
+	sink.In() <- "active: js: https://static.example.com/app.js"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	passivePath := filepath.Join(dir, "routes", "js", "js.passive")
+	passiveLines := readLines(t, passivePath)
+	if diff := cmp.Diff([]string{"https://static.example.com/app.js"}, passiveLines); diff != "" {
+		t.Fatalf("unexpected js.passive contents (-want +got):\n%s", diff)
+	}
+
+	activePath := filepath.Join(dir, "routes", "js", "js.active")
+	activeLines := readLines(t, activePath)
+	if diff := cmp.Diff([]string{"https://static.example.com/app.js"}, activeLines); diff != "" {
+		t.Fatalf("unexpected js.active contents (-want +got):\n%s", diff)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	passiveJS := requireArtifact(t, artifacts, "js", "https://static.example.com/app.js", false)
+	if !passiveJS.Up {
+		t.Fatalf("expected passive js artifact to be valid")
+	}
+	activeJS := requireArtifact(t, artifacts, "js", "https://static.example.com/app.js", true)
+	if !activeJS.Up {
+		t.Fatalf("expected active js artifact to be valid")
+	}
+}
+
+func TestActiveJSExcludes404(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "active: js: https://static.example.com/app.js [200]"
+	sink.In() <- "active: js: https://static.example.com/missing.js [404]"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	activePath := filepath.Join(dir, "routes", "js", "js.active")
+	activeLines := readLines(t, activePath)
+	if diff := cmp.Diff([]string{"https://static.example.com/app.js [200]"}, activeLines); diff != "" {
+		t.Fatalf("unexpected js.active contents (-want +got):\n%s", diff)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	validJS := requireArtifact(t, artifacts, "js", "https://static.example.com/app.js", true)
+	if !validJS.Up {
+		t.Fatalf("expected 200 js artifact to be valid")
+	}
+	missingJS := requireArtifact(t, artifacts, "js", "https://static.example.com/missing.js", true)
+	if missingJS.Up {
+		t.Fatalf("expected 404 js artifact to be invalid")
+	}
+}
+
+func TestHTMLLinesAreWrittenToActiveFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "active: html: https://app.example.com"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	htmlPath := filepath.Join(dir, "routes", "html", "html.active")
+	htmlLines := readLines(t, htmlPath)
+	if diff := cmp.Diff([]string{"https://app.example.com"}, htmlLines); diff != "" {
+		t.Fatalf("unexpected html.active contents (-want +got):\n%s", diff)
+	}
+}
+
+func TestHTMLActiveSkipsErrorResponses(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "active: html: https://app.example.com [404] [Not Found]"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	htmlPath := filepath.Join(dir, "routes", "html", "html.active")
+	if lines := readLines(t, htmlPath); len(lines) != 0 {
+		t.Fatalf("expected html.active to be empty, got %v", lines)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	htmlArtifact := requireArtifact(t, artifacts, "html", "https://app.example.com", true)
+	if htmlArtifact.Up {
+		t.Fatalf("expected html artifact to be invalid for 404 response")
+	}
+	if status := metadataInt(t, htmlArtifact.Metadata, "status"); status != 404 {
+		t.Fatalf("unexpected html artifact status: %v", status)
+	}
+	if raw, ok := htmlArtifact.Metadata["raw"].(string); !ok || !strings.Contains(raw, "[404]") {
+		t.Fatalf("unexpected html artifact raw metadata: %#v", htmlArtifact.Metadata["raw"])
+	}
+}
+
+func TestArtifactsMergeTypes(t *testing.T) {
+	t.Parallel()
+
+	sink, dir := newTestSink(t, false)
+	sink.Start(1)
+
+	sink.In() <- "https://app.example.com/login"
+	sink.In() <- "html: https://app.example.com/login"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	var matches []Artifact
+	for _, art := range artifacts {
+		if art.Value == "https://app.example.com/login" && !art.Active {
+			matches = append(matches, art)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected single artifact for route/html, got %d", len(matches))
+	}
+
+	combined := matches[0]
+	switch combined.Type {
+	case "route":
+		if !containsType(combined.Types, "html") {
+			t.Fatalf("expected route artifact to include html as secondary type, got %v", combined.Types)
+		}
+	case "html":
+		if !containsType(combined.Types, "route") {
+			t.Fatalf("expected html artifact to include route as secondary type, got %v", combined.Types)
+		}
+	default:
+		t.Fatalf("unexpected primary type: %q", combined.Type)
+	}
+}
+
+func TestRouteArtifactsMergeSchemes(t *testing.T) {
+	t.Parallel()
+
+	sink, dir := newTestSink(t, false)
+	sink.Start(1)
+
+	sink.In() <- "active: https://app.example.com/login [200] [OK]"
+	sink.In() <- "active: http://app.example.com/login [301] [Moved Permanently]"
+	sink.In() <- "https://app.example.com/login"
+	sink.In() <- "http://app.example.com/login"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+
+	activeRoute := findRouteArtifactByCanonical(t, artifacts, "https://app.example.com/login", true)
+	if activeRoute.Occurrences != 2 {
+		t.Fatalf("expected 2 occurrences for active route, got %d", activeRoute.Occurrences)
+	}
+	if !activeRoute.Up {
+		t.Fatalf("expected active route to be marked valid")
+	}
+	rawEntries := rawMetadataValues(activeRoute.Metadata)
+	if len(rawEntries) != 2 {
+		t.Fatalf("expected 2 raw entries, got %d (%v)", len(rawEntries), rawEntries)
+	}
+	if !containsString(rawEntries, "https://app.example.com/login [200] [OK]") {
+		t.Fatalf("active route missing https raw entry: %v", rawEntries)
+	}
+	if !containsString(rawEntries, "http://app.example.com/login [301] [Moved Permanently]") {
+		t.Fatalf("active route missing http raw entry: %v", rawEntries)
+	}
+	if status := metadataInt(t, activeRoute.Metadata, "status"); status != 200 {
+		t.Fatalf("unexpected active route status: %d", status)
+	}
+
+	passiveRoute := findRouteArtifactByCanonical(t, artifacts, "https://app.example.com/login", false)
+	if passiveRoute.Occurrences != 2 {
+		t.Fatalf("expected 2 occurrences for passive route, got %d", passiveRoute.Occurrences)
+	}
+	if !passiveRoute.Up {
+		t.Fatalf("expected passive route to be marked valid")
+	}
+	if values := rawMetadataValues(passiveRoute.Metadata); len(values) != 0 {
+		t.Fatalf("expected no raw metadata for passive route, got %v", values)
+	}
+}
+
+func TestNewSinkDoesNotTruncateExistingFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	htmlDir := filepath.Join(dir, "routes", "html")
+	if err := os.MkdirAll(htmlDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	htmlPath := filepath.Join(htmlDir, "html.active")
+	if err := os.WriteFile(htmlPath, []byte("https://app.example.com\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+	sink.Start(1)
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	lines := readLines(t, htmlPath)
+	if diff := cmp.Diff([]string{"https://app.example.com"}, lines); diff != "" {
+		t.Fatalf("unexpected html.active contents (-want +got):\n%s", diff)
+	}
+}
+
+func TestHTMLImageLinesAreRedirectedToImagesFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "active: html: https://app.example.com/assets/logo.png"
+	sink.In() <- "active: html: https://app.example.com/assets/logo.svg"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	htmlPath := filepath.Join(dir, "routes", "html", "html.active")
+	if lines := readLines(t, htmlPath); len(lines) != 0 {
+		t.Fatalf("expected html.active to be empty, got %v", lines)
+	}
+
+	imagesPath := filepath.Join(dir, "routes", "images", "images.active")
+	imagesLines := readLines(t, imagesPath)
+	wantImages := []string{
+		"https://app.example.com/assets/logo.png",
+		"https://app.example.com/assets/logo.svg",
+	}
+	if diff := cmp.Diff(wantImages, imagesLines); diff != "" {
+		t.Fatalf("unexpected images.active contents (-want +got):\n%s", diff)
+	}
+}
+
+func TestRouteCategorizationPassive(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	inputs := []string{
+		"https://app.example.com/static/app.js.map",
+		"https://app.example.com/static/app.jsonld",
+		"https://app.example.com/static/manifest.json",
+		"https://app.example.com/static/swagger.yaml",
+		"https://app.example.com/static/swagger.json",
+		"https://app.example.com/static/module.wasm",
+		"https://app.example.com/static/vector.svg",
+		"https://app.example.com/robots.txt",
+		"https://app.example.com/sitemap.xml",
+		"https://app.example.com/backup.tar.gz?download=1",
+		"https://app.example.com/debug?token=secret",
+	}
+	for _, line := range inputs {
+		sink.In() <- line
+	}
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	mapsLines := readLines(t, filepath.Join(dir, "routes", "maps", "maps.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/app.js.map"}, mapsLines); diff != "" {
+		t.Fatalf("unexpected maps.passive contents (-want +got):\n%s", diff)
+	}
+
+	jsonLines := readLines(t, filepath.Join(dir, "routes", "json", "json.passive"))
+	wantJSON := []string{
+		"https://app.example.com/static/app.jsonld",
+		"https://app.example.com/static/manifest.json",
+	}
+	if diff := cmp.Diff(wantJSON, jsonLines); diff != "" {
+		t.Fatalf("unexpected json.passive contents (-want +got):\n%s", diff)
+	}
+
+	apiLines := readLines(t, filepath.Join(dir, "routes", "api", "api.passive"))
+	wantAPI := []string{
+		"https://app.example.com/static/swagger.yaml",
+		"https://app.example.com/static/swagger.json",
+	}
+	if diff := cmp.Diff(wantAPI, apiLines); diff != "" {
+		t.Fatalf("unexpected api.passive contents (-want +got):\n%s", diff)
+	}
+
+	wasmLines := readLines(t, filepath.Join(dir, "routes", "wasm", "wasm.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/module.wasm"}, wasmLines); diff != "" {
+		t.Fatalf("unexpected wasm.passive contents (-want +got):\n%s", diff)
+	}
+
+	svgLines := readLines(t, filepath.Join(dir, "routes", "svg", "svg.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/vector.svg"}, svgLines); diff != "" {
+		t.Fatalf("unexpected svg.passive contents (-want +got):\n%s", diff)
+	}
+
+	crawlLines := readLines(t, filepath.Join(dir, "routes", "crawl", "crawl.passive"))
+	wantCrawl := []string{
+		"https://app.example.com/robots.txt",
+		"https://app.example.com/sitemap.xml",
+	}
+	if diff := cmp.Diff(wantCrawl, crawlLines); diff != "" {
+		t.Fatalf("unexpected crawl.passive contents (-want +got):\n%s", diff)
+	}
+
+	metaLines := readLines(t, filepath.Join(dir, "routes", "meta", "meta.passive"))
+	wantMeta := []string{
+		"https://app.example.com/backup.tar.gz?download=1",
+		"https://app.example.com/debug?token=secret",
+	}
+	if diff := cmp.Diff(wantMeta, metaLines); diff != "" {
+		t.Fatalf("unexpected meta.passive contents (-want +got):\n%s", diff)
+	}
+}
+
+func TestRouteCategorizationActiveMode(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, true, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "https://app.example.com/static/app.js.map"
+	sink.In() <- "active: https://app.example.com/static/app.js.map [200]"
+	sink.In() <- "active: https://app.example.com/static/manifest.json [200]"
+	sink.In() <- "https://app.example.com/static/swagger.json"
+	sink.In() <- "active: https://app.example.com/static/swagger.json [200]"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	mapsPassive := readLines(t, filepath.Join(dir, "routes", "maps", "maps.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/app.js.map"}, mapsPassive); diff != "" {
+		t.Fatalf("unexpected maps.passive contents (-want +got):\n%s", diff)
+	}
+
+	mapsPath := filepath.Join(dir, "routes", "maps", "maps.active")
+	mapsLines := readLines(t, mapsPath)
+	if diff := cmp.Diff([]string{"https://app.example.com/static/app.js.map"}, mapsLines); diff != "" {
+		t.Fatalf("unexpected maps.active contents (-want +got):\n%s", diff)
+	}
+
+	jsonLines := readLines(t, filepath.Join(dir, "routes", "json", "json.active"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/manifest.json"}, jsonLines); diff != "" {
+		t.Fatalf("unexpected json.active contents (-want +got):\n%s", diff)
+	}
+
+	apiPassive := readLines(t, filepath.Join(dir, "routes", "api", "api.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/swagger.json"}, apiPassive); diff != "" {
+		t.Fatalf("unexpected api.passive contents (-want +got):\n%s", diff)
+	}
+
+	apiLines := readLines(t, filepath.Join(dir, "routes", "api", "api.active"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/swagger.json"}, apiLines); diff != "" {
+		t.Fatalf("unexpected api.active contents (-want +got):\n%s", diff)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "routes", "meta")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected routes/meta to be absent, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "routes", "wasm")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected routes/wasm to be absent, got err=%v", err)
+	}
+}
+
+func TestRouteCategorizationActiveModeSkipsErrorStatus(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, true, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "active: https://app.example.com/static/config.json [404] [Not Found]"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	jsonPath := filepath.Join(dir, "routes", "json", "json.active")
+	if _, err := os.Stat(jsonPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected no json.active file, got err=%v", err)
+	}
+}
+
+func TestRouteCategorizationPassiveModeEmitsActiveFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "active: https://app.example.com/static/app.js.map [200]"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	activeLines := readLines(t, filepath.Join(dir, "routes", "maps", "maps.active"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/app.js.map"}, activeLines); diff != "" {
+		t.Fatalf("unexpected maps.active contents (-want +got):\n%s", diff)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "routes", "maps", "maps.passive")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected maps.passive to be absent, got err=%v", err)
+	}
+}
+
+func TestRouteCategorizationDeduplicatesCategoryOutputs(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(2))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(2)
+	inputs := []string{
+		"https://app.example.com/static/app.js.map",
+		"https://app.example.com/static/app.js.map",
+		"https://app.example.com/static/manifest.json",
+		"https://app.example.com/static/manifest.json",
+		"https://app.example.com/static/swagger.json",
+		"https://app.example.com/static/swagger.json",
+		"https://app.example.com/static/module.wasm",
+		"https://app.example.com/static/module.wasm",
+		"https://app.example.com/static/vector.svg",
+		"https://app.example.com/static/vector.svg",
+		"https://app.example.com/robots.txt",
+		"https://app.example.com/robots.txt",
+		"https://app.example.com/sitemap.xml",
+		"https://app.example.com/sitemap.xml",
+		"https://app.example.com/backup.tar.gz?download=1",
+		"https://app.example.com/backup.tar.gz?download=1",
+	}
+	for _, line := range inputs {
+		sink.In() <- line
+	}
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	mapsLines := readLines(t, filepath.Join(dir, "routes", "maps", "maps.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/app.js.map"}, mapsLines); diff != "" {
+		t.Fatalf("unexpected maps.passive contents (-want +got):\n%s", diff)
+	}
+
+	jsonLines := readLines(t, filepath.Join(dir, "routes", "json", "json.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/manifest.json"}, jsonLines); diff != "" {
+		t.Fatalf("unexpected json.passive contents (-want +got):\n%s", diff)
+	}
+
+	apiLines := readLines(t, filepath.Join(dir, "routes", "api", "api.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/swagger.json"}, apiLines); diff != "" {
+		t.Fatalf("unexpected api.passive contents (-want +got):\n%s", diff)
+	}
+
+	wasmLines := readLines(t, filepath.Join(dir, "routes", "wasm", "wasm.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/module.wasm"}, wasmLines); diff != "" {
+		t.Fatalf("unexpected wasm.passive contents (-want +got):\n%s", diff)
+	}
+
+	svgLines := readLines(t, filepath.Join(dir, "routes", "svg", "svg.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/static/vector.svg"}, svgLines); diff != "" {
+		t.Fatalf("unexpected svg.passive contents (-want +got):\n%s", diff)
+	}
+
+	crawlLines := readLines(t, filepath.Join(dir, "routes", "crawl", "crawl.passive"))
+	wantCrawl := []string{
+		"https://app.example.com/robots.txt",
+		"https://app.example.com/sitemap.xml",
+	}
+	if diff := cmp.Diff(wantCrawl, crawlLines); diff != "" {
+		t.Fatalf("unexpected crawl.passive contents (-want +got):\n%s", diff)
+	}
+
+	metaLines := readLines(t, filepath.Join(dir, "routes", "meta", "meta.passive"))
+	if diff := cmp.Diff([]string{"https://app.example.com/backup.tar.gz?download=1"}, metaLines); diff != "" {
+		t.Fatalf("unexpected meta.passive contents (-want +got):\n%s", diff)
+	}
+}
+
+func TestHandleMetaStripsANSISequences(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "meta: [\u001b[32m200\u001b[0m]"
+	sink.In() <- "meta: [\u001b[35mtext/html\u001b[0m]"
+	sink.In() <- "meta: [\u001b"
+	sink.In() <- "meta: [31m404\u001b"
+	sink.In() <- "meta: [0m]"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	metaLines := readLines(t, filepath.Join(dir, "meta.passive"))
+	wantMeta := []string{"[200]", "[text/html]", "[404]"}
+	if diff := cmp.Diff(wantMeta, metaLines); diff != "" {
+		t.Fatalf("unexpected meta.passive contents (-want +got):\n%s", diff)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	requireArtifact(t, artifacts, "meta", "[200]", false)
+	requireArtifact(t, artifacts, "meta", "[404]", false)
+	requireArtifact(t, artifacts, "meta", "[text/html]", false)
+}
+
+func TestHandleGFFindingRecordsArtifact(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, true, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	payload := map[string]any{
+		"resource": "https://example.com/app.js",
+		"line":     99,
+		"evidence": "fetch('/api')",
+		"context":  "const data = fetch('/api')",
+		"rules":    []string{"xss", "sqli", "xss"},
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	sink.In() <- "active: gffinding: " + string(data)
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+	value := buildGFFindingValue("https://example.com/app.js", 99, "fetch('/api')")
+	art := requireArtifact(t, artifacts, "gfFinding", value, true)
+	if !art.Up {
+		t.Fatalf("expected gfFinding artifact to be valid")
+	}
+
+	if diff := cmp.Diff([]string{"sqli", "xss"}, art.Types); diff != "" {
+		t.Fatalf("unexpected gfFinding types (-want +got):\n%s", diff)
+	}
+
+	if got := art.Metadata["resource"]; got != "https://example.com/app.js" {
+		t.Fatalf("unexpected resource metadata: %#v", got)
+	}
+	if got, ok := art.Metadata["line"].(float64); !ok || got != 99 {
+		t.Fatalf("unexpected line metadata: %#v", art.Metadata["line"])
+	}
+	if got := art.Metadata["context"]; got != "const data = fetch('/api')" {
+		t.Fatalf("unexpected context metadata: %#v", got)
+	}
+	if got := art.Metadata["evidence"]; got != "fetch('/api')" {
+		t.Fatalf("unexpected evidence metadata: %#v", got)
+	}
+	if rules, ok := art.Metadata["rules"].([]any); ok {
+		have := make([]string, 0, len(rules))
+		for _, rule := range rules {
+			if str, ok := rule.(string); ok {
+				have = append(have, str)
+			}
+		}
+		sort.Strings(have)
+		if diff := cmp.Diff([]string{"sqli", "xss"}, have); diff != "" {
+			t.Fatalf("unexpected metadata rules (-want +got):\n%s", diff)
+		}
+	} else {
+		t.Fatalf("expected rules metadata to be a slice, got %#v", art.Metadata["rules"])
+	}
+}
+
+func TestHandleRelationParsesDNSRecords(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+	sink.In() <- "chapela.es (FQDN) --> ns_record --> leonidas.ns.cloudflare.com (FQDN)"
+	sink.In() <- "chapela.es (FQDN) --> mx_record --> mx.buzondecorreo.com (FQDN)"
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+
+	nsArtifact, ok := findDNSArtifact(artifacts, "NS", "leonidas.ns.cloudflare.com")
+	if !ok {
+		t.Fatalf("expected NS artifact not found")
+	}
+	if got := nsArtifact.Metadata["relationship"]; got != "ns_record" {
+		t.Fatalf("unexpected NS relationship metadata: %#v", got)
+	}
+
+	var nsRecord dnsArtifact
+	if err := json.Unmarshal([]byte(nsArtifact.Value), &nsRecord); err != nil {
+		t.Fatalf("unmarshal NS artifact value: %v", err)
+	}
+	if nsRecord.Host != "chapela.es" || nsRecord.Type != "NS" || nsRecord.Value != "leonidas.ns.cloudflare.com" {
+		t.Fatalf("unexpected NS record: %#v", nsRecord)
+	}
+
+	mxArtifact, ok := findDNSArtifact(artifacts, "MX", "mx.buzondecorreo.com")
+	if !ok {
+		t.Fatalf("expected MX artifact not found")
+	}
+	if got := mxArtifact.Metadata["relationship"]; got != "mx_record" {
+		t.Fatalf("unexpected MX relationship metadata: %#v", got)
+	}
+	if got := mxArtifact.Metadata["source_kind"]; got != "FQDN" {
+		t.Fatalf("unexpected MX source kind: %#v", got)
+	}
+	if got := mxArtifact.Metadata["target_kind"]; got != "FQDN" {
+		t.Fatalf("unexpected MX target kind: %#v", got)
+	}
+
+	var mxRecord dnsArtifact
+	if err := json.Unmarshal([]byte(mxArtifact.Value), &mxRecord); err != nil {
+		t.Fatalf("unmarshal MX artifact value: %v", err)
+	}
+	if mxRecord.Host != "chapela.es" || mxRecord.Type != "MX" || mxRecord.Value != "mx.buzondecorreo.com" {
+		t.Fatalf("unexpected MX record: %#v", mxRecord)
+	}
+
+	if metaLines := readLines(t, filepath.Join(dir, "meta.passive")); metaLines != nil {
+		t.Fatalf("expected meta.passive to be empty, got %v", metaLines)
+	}
+}
+
+func findDNSArtifact(artifacts []Artifact, recordType, value string) (Artifact, bool) {
+	for _, art := range artifacts {
+		if art.Type != "dns" || art.Active {
+			continue
+		}
+		if art.Metadata == nil {
+			continue
+		}
+		if art.Metadata["type"] != recordType {
+			continue
+		}
+		if art.Metadata["value"] != value {
+			continue
+		}
+		if art.Metadata["host"] != "chapela.es" {
+			continue
+		}
+		return art, true
+	}
+	return Artifact{}, false
+}
+
+func readLines(t *testing.T, path string) []string {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", path, err)
+	}
+	contents := strings.TrimSpace(string(data))
+	if contents == "" {
+		return nil
+	}
+	return strings.Split(contents, "\n")
+}
+
+func readArtifactsFile(t *testing.T, path string) []Artifact {
+	t.Helper()
+
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open artifacts %q: %v", path, err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
+
+	var artifacts []Artifact
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var artifact Artifact
+		if err := json.Unmarshal([]byte(line), &artifact); err != nil {
+			t.Fatalf("unmarshal artifact %q: %v", line, err)
+		}
+		artifacts = append(artifacts, artifact)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan artifacts: %v", err)
+	}
+	return artifacts
+}
+
+func requireArtifact(t *testing.T, artifacts []Artifact, typ, value string, active bool) Artifact {
+	t.Helper()
+	for _, a := range artifacts {
+		if a.Type == typ && a.Value == value && a.Active == active {
+			return a
+		}
+	}
+	t.Fatalf("artifact not found type=%q value=%q active=%v", typ, value, active)
+	return Artifact{}
+}
+
+func metadataStringSlice(t *testing.T, metadata map[string]any, key string) []string {
+	t.Helper()
+	if metadata == nil {
+		t.Fatalf("metadata nil when looking for %q", key)
+	}
+	raw, ok := metadata[key]
+	if !ok {
+		t.Fatalf("metadata missing key %q", key)
+	}
+	values, ok := raw.([]any)
+	if !ok {
+		t.Fatalf("metadata %q is not an array: %#v", key, raw)
+	}
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		str, ok := v.(string)
+		if !ok {
+			t.Fatalf("metadata %q contains non-string: %#v", key, v)
+		}
+		out = append(out, str)
+	}
+	return out
+}
+
+func containsType(types []string, typ string) bool {
+	typ = strings.TrimSpace(typ)
+	if typ == "" {
+		return false
+	}
+	for _, candidate := range types {
+		if strings.TrimSpace(candidate) == typ {
+			return true
+		}
+	}
+	return false
+}
+
+func findRouteArtifactByCanonical(t *testing.T, records []Artifact, value string, active bool) Artifact {
+	t.Helper()
+	expectedKey := artifacts.KeyFor(artifacts.Artifact{Type: "route", Value: value, Active: active})
+	for _, art := range records {
+		if strings.TrimSpace(art.Type) != "route" {
+			continue
+		}
+		if art.Active != active {
+			continue
+		}
+		candidateKey := artifacts.KeyFor(artifacts.Artifact{Type: art.Type, Value: art.Value, Active: art.Active})
+		if candidateKey.Value == expectedKey.Value && candidateKey.Active == expectedKey.Active {
+			return art
+		}
+	}
+	t.Fatalf("route artifact %q (active=%v) not found", value, active)
+	return Artifact{}
+}
+
+func rawMetadataValues(metadata map[string]any) []string {
+	if metadata == nil {
+		return nil
+	}
+	raw, ok := metadata["raw"]
+	if !ok || raw == nil {
+		return nil
+	}
+	switch v := raw.(type) {
+	case string:
+		candidate := strings.TrimSpace(v)
+		if candidate == "" {
+			return nil
+		}
+		return []string{candidate}
+	case []string:
+		var out []string
+		for _, candidate := range v {
+			candidate = strings.TrimSpace(candidate)
+			if candidate == "" {
+				continue
+			}
+			out = append(out, candidate)
+		}
+		return out
+	case []any:
+		var out []string
+		for _, candidate := range v {
+			if s, ok := candidate.(string); ok {
+				s = strings.TrimSpace(s)
+				if s == "" {
+					continue
+				}
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func containsString(values []string, target string) bool {
+	target = strings.TrimSpace(target)
+	for _, value := range values {
+		if strings.TrimSpace(value) == target {
+			return true
+		}
+	}
+	return false
+}
+
+func metadataInt(t *testing.T, metadata map[string]any, key string) int {
+	t.Helper()
+	if metadata == nil {
+		t.Fatalf("metadata nil when looking for %q", key)
+	}
+	raw, ok := metadata[key]
+	if !ok {
+		t.Fatalf("metadata missing key %q", key)
+	}
+	switch v := raw.(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	default:
+		t.Fatalf("metadata %q has unexpected type %T", key, raw)
+	}
+	return 0
+}
+
+func countOpenFDs(t *testing.T, path string) int {
+	t.Helper()
+
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatalf("ReadDir(/proc/self/fd): %v", err)
+	}
+
+	count := 0
+	for _, e := range entries {
+		target, err := os.Readlink(filepath.Join("/proc/self/fd", e.Name()))
+		if err != nil {
+			continue
+		}
+		if strings.HasPrefix(target, path) {
+			count++
+		}
+	}
+	return count
+}

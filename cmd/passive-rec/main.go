@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"passive-rec/internal/app"
-	"passive-rec/internal/config"
-	"passive-rec/internal/logx"
+	"passive-rec/internal/core/app"
+	"passive-rec/internal/platform/config"
+	"passive-rec/internal/platform/logx"
 )
 
 func main() {

@@ -2,6 +2,17 @@
 
 Passive web enumeration.
 
+## Project structure
+
+The repository follows a layered Go layout that separates binaries, core orchestration and infrastructure adapters:
+
+- `cmd/` contiene las aplicaciones CLI, incluyendo `passive-rec` y utilidades auxiliares como `install-deps`.
+- `internal/core/` agrupa la lógica del dominio (aplicación, runner y pipeline) que orquesta la enumeración.
+- `internal/adapters/` reúne integraciones con el exterior como fuentes de datos, rutas, reportes y manejo de artefactos.
+- `internal/platform/` concentra utilidades de plataforma compartidas (configuración, logging, red, certificados y salida).
+
+Esta organización mantiene las dependencias direccionadas desde el núcleo hacia los adaptadores y facilita ubicar las piezas según su responsabilidad.
+
 ## External tools
 
 This project relies on several third-party reconnaissance utilities. You can ensure they are installed by running:
