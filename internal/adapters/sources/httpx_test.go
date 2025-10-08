@@ -15,6 +15,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"passive-rec/internal/adapters/artifacts"
+	"passive-rec/internal/core/materializer"
 	"passive-rec/internal/core/pipeline"
 )
 
@@ -432,6 +433,9 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 	if err := sink.Close(); err != nil {
 		t.Fatalf("close sink: %v", err)
 	}
+	if err := materializer.Materialize(outputDir); err != nil {
+		t.Fatalf("materialize output: %v", err)
+	}
 
 	readLines := func(path string) []string {
 		data, err := os.ReadFile(path)
@@ -466,7 +470,7 @@ func TestHTTPXNormalizesOutput(t *testing.T) {
 	}
 
 	htmlRoutes := readLines(filepath.Join(outputDir, "routes", "html", "html.active"))
-	if diff := cmp.Diff([]string{"https://app.example.com"}, htmlRoutes); diff != "" {
+	if diff := cmp.Diff([]string{"https://app.example.com [200] [Title] [text/html; charset=utf-8]"}, htmlRoutes); diff != "" {
 		t.Fatalf("unexpected html.active contents (-want +got):\n%s", diff)
 	}
 }

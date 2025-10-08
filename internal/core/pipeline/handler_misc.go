@@ -12,11 +12,7 @@ func handleMeta(ctx *Context, line string, isActive bool, tool string) bool {
 	if trimmed == "" {
 		return true
 	}
-	if ctx == nil || ctx.S == nil || ctx.Store == nil {
-		return true
-	}
-	target := ctx.S.writer(writerMeta, isActive)
-	if target == nil {
+	if ctx == nil || ctx.Store == nil {
 		return true
 	}
 	if strings.HasPrefix(trimmed, "meta:") {
@@ -28,7 +24,6 @@ func handleMeta(ctx *Context, line string, isActive bool, tool string) bool {
 		if normalized == "" {
 			return true
 		}
-		_ = target.WriteRaw(normalized)
 		ctx.Store.Record(tool, artifacts.Artifact{
 			Type:   "meta",
 			Value:  normalized,

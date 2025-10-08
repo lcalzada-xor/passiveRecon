@@ -20,24 +20,6 @@ const (
 	toolSeparator = "\x00"
 )
 
-const (
-	writerDomains      = "domains"
-	writerRoutes       = "routes"
-	writerRoutesJS     = "routes:js"
-	writerRoutesHTML   = "routes:html"
-	writerRoutesImages = "routes:images"
-	writerRDAP         = "rdap"
-	writerRoutesMaps   = "routes:maps"
-	writerRoutesJSON   = "routes:json"
-	writerRoutesAPI    = "routes:api"
-	writerRoutesWASM   = "routes:wasm"
-	writerRoutesSVG    = "routes:svg"
-	writerRoutesCrawl  = "routes:crawl"
-	writerRoutesMeta   = "routes:meta"
-	writerCerts        = "certs"
-	writerMeta         = "meta"
-)
-
 // LineBufferSize calcula un tamaño de búfer recomendado para el canal de líneas
 // en función del número de workers configurado.
 func LineBufferSize(workers int) int {
@@ -52,7 +34,6 @@ func LineBufferSize(workers int) int {
 }
 
 type Sink struct {
-	writers        CategoryWriters
 	artifacts      ArtifactStore
 	dedup          *Dedupe
 	scope          *netutil.Scope
@@ -72,98 +53,7 @@ func NewSink(outdir string, active bool, target string, lineBuffer int) (*Sink, 
 	if lineBuffer <= 0 {
 		lineBuffer = defaultLineBuffer
 	}
-	if err := os.MkdirAll(filepath.Join(outdir, "dns"), 0o755); err != nil {
-		return nil, err
-	}
-
-	newWriter := func(subdir, name string) (sinkWriter, error) {
-		if name == "" {
-			return nil, nil
-		}
-		if err := ensureOutputFile(outdir, subdir, name); err != nil {
-			return nil, err
-		}
-		return newLazyWriter(outdir, subdir, name), nil
-	}
-
-	createPair := func(subdir, passiveName, activeName string) (writerPair, error) {
-		var pair writerPair
-		if passiveName != "" {
-			writer, err := newWriter(subdir, passiveName)
-			if err != nil {
-				return writerPair{}, err
-			}
-			pair.passive = writer
-		}
-		if activeName != "" {
-			writer, err := newWriter(subdir, activeName)
-			if err != nil {
-				return writerPair{}, err
-			}
-			pair.active = writer
-		}
-		return pair, nil
-	}
-
-	writers := make(CategoryWriters)
-
-	domainsPair, err := createPair("domains", "domains.passive", "domains.active")
-	if err != nil {
-		return nil, err
-	}
-	writers.add(writerDomains, domainsPair)
-
-	routesPair, err := createPair("routes", "routes.passive", "routes.active")
-	if err != nil {
-		return nil, err
-	}
-	writers.add(writerRoutes, routesPair)
-
-	rdapPair, err := createPair("rdap", "rdap.passive", "")
-	if err != nil {
-		return nil, err
-	}
-	writers.add(writerRDAP, rdapPair)
-
-	jsPair, err := createPair(filepath.Join("routes", "js"), "js.passive", "js.active")
-	if err != nil {
-		return nil, err
-	}
-	writers.add(writerRoutesJS, jsPair)
-
-	htmlPair, err := createPair(filepath.Join("routes", "html"), "html.passive", "html.active")
-	if err != nil {
-		return nil, err
-	}
-	writers.add(writerRoutesHTML, htmlPair)
-
-	imagesPair, err := createPair(filepath.Join("routes", "images"), "", "images.active")
-	if err != nil {
-		return nil, err
-	}
-	writers.add(writerRoutesImages, imagesPair)
-
-	certsPair, err := createPair("certs", "certs.passive", "certs.active")
-	if err != nil {
-		return nil, err
-	}
-	writers.add(writerCerts, certsPair)
-
-	metaPair, err := createPair("", "meta.passive", "meta.active")
-	if err != nil {
-		return nil, err
-	}
-	writers.add(writerMeta, metaPair)
-
-	writers.add(writerRoutesMaps, makeLazyWriterPair(outdir, filepath.Join("routes", "maps"), "maps.passive", "maps.active"))
-	writers.add(writerRoutesJSON, makeLazyWriterPair(outdir, filepath.Join("routes", "json"), "json.passive", "json.active"))
-	writers.add(writerRoutesAPI, makeLazyWriterPair(outdir, filepath.Join("routes", "api"), "api.passive", "api.active"))
-	writers.add(writerRoutesWASM, makeLazyWriterPair(outdir, filepath.Join("routes", "wasm"), "wasm.passive", "wasm.active"))
-	writers.add(writerRoutesSVG, makeLazyWriterPair(outdir, filepath.Join("routes", "svg"), "svg.passive", "svg.active"))
-	writers.add(writerRoutesCrawl, makeLazyWriterPair(outdir, filepath.Join("routes", "crawl"), "crawl.passive", "crawl.active"))
-	writers.add(writerRoutesMeta, makeLazyWriterPair(outdir, filepath.Join("routes", "meta"), "meta.passive", "meta.active"))
-
-	if err := ensureOutputFile(outdir, "", "artifacts.jsonl"); err != nil {
+	if err := os.MkdirAll(outdir, 0o755); err != nil {
 		return nil, err
 	}
 
@@ -172,7 +62,6 @@ func NewSink(outdir string, active bool, target string, lineBuffer int) (*Sink, 
 	dedup := NewDedupe()
 
 	s := &Sink{
-		writers:        writers,
 		artifacts:      store,
 		dedup:          dedup,
 		scope:          netutil.NewScope(target),
@@ -351,23 +240,11 @@ func (s *Sink) Close() error {
 	if err := s.artifacts.Flush(); err != nil {
 		return err
 	}
-	if err := s.writers.closeAll(); err != nil {
-		return err
-	}
 	return s.artifacts.Close()
 }
 
 // Helper para ejecutar una fuente con contexto y volcar al sink
 type SourceFunc func(ctx context.Context, target string, out chan<- string) error
-
-func (s *Sink) writer(key string, active bool) sinkWriter {
-	pair := s.writers.pair(key)
-	return pair.writer(active)
-}
-
-func (s *Sink) writerPair(key string) writerPair {
-	return s.writers.pair(key)
-}
 
 func (s *Sink) inActiveMode() bool { return s != nil && s.activeMode }
 

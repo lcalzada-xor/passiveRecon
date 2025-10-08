@@ -69,14 +69,9 @@ func handleRDAP(ctx *Context, line string, isActive bool, tool string) bool {
 	if content == "" {
 		return true
 	}
-	if ctx == nil || ctx.S == nil || ctx.Store == nil {
+	if ctx == nil || ctx.Store == nil {
 		return true
 	}
-	target := ctx.S.writer(writerRDAP, false)
-	if target == nil {
-		return true
-	}
-	_ = target.WriteRaw(content)
 	ctx.Store.Record(tool, artifacts.Artifact{
 		Type:   "rdap",
 		Value:  content,

@@ -14,6 +14,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"passive-rec/internal/adapters/artifacts"
+	"passive-rec/internal/core/materializer"
 	"passive-rec/internal/core/pipeline"
 	"passive-rec/internal/platform/config"
 )
@@ -211,6 +212,9 @@ func TestRunPipelineConcurrentSourcesDedupesSink(t *testing.T) {
 	}
 
 	sink.Flush()
+	if err := materializer.Materialize(dir); err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
 
 	domainsPath := filepath.Join(dir, "domains", "domains.passive")
 	domains := readLines(t, domainsPath)

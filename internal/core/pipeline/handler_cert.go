@@ -62,17 +62,32 @@ func writeCertLine(ctx *Context, line string, isActive bool, tool string) {
 		if domain == "" {
 			continue
 		}
-		if ctx.Dedup != nil && !ctx.Dedup.Seen(keyspaceDomainPassive, domain) {
-			if writer := ctx.S.writer(writerDomains, false); writer != nil {
-				_ = writer.WriteDomain(domain)
+		metadata := map[string]any{"source": "certificate"}
+		trimmed := strings.TrimSpace(name)
+		if trimmed != "" && trimmed != domain {
+			metadata["raw"] = trimmed
+		}
+		if ctx.Dedup != nil {
+			_ = ctx.Dedup.Seen(keyspaceDomainPassive, domain)
+			if ctx.S.inActiveMode() {
+				_ = ctx.Dedup.Seen(keyspaceDomainActive, domain)
 			}
 		}
+		ctx.Store.Record(tool, artifacts.Artifact{
+			Type:     "domain",
+			Value:    domain,
+			Active:   false,
+			Up:       true,
+			Metadata: metadata,
+		})
 		if ctx.S.inActiveMode() {
-			if ctx.Dedup != nil && !ctx.Dedup.Seen(keyspaceDomainActive, domain) {
-				if writer := ctx.S.writer(writerDomains, true); writer != nil {
-					_ = writer.WriteDomain(domain)
-				}
-			}
+			ctx.Store.Record(tool, artifacts.Artifact{
+				Type:     "domain",
+				Value:    domain,
+				Active:   true,
+				Up:       true,
+				Metadata: metadata,
+			})
 		}
 	}
 	serialized, err := filtered.Marshal()
@@ -87,27 +102,15 @@ func writeCertLine(ctx *Context, line string, isActive bool, tool string) {
 	if isActive {
 		keyspace = keyspaceCertActive
 	}
-	if ctx.Dedup != nil && ctx.Dedup.Seen(keyspace, key) {
-		meta := map[string]any{"names": names}
-		if key != "" {
-			meta["key"] = key
-		}
-		ctx.Store.Record(tool, artifacts.Artifact{
-			Type:     "certificate",
-			Value:    serialized,
-			Active:   isActive,
-			Tool:     filtered.Source,
-			Metadata: meta,
-		})
-		return
-	}
-	target := ctx.S.writer(writerCerts, isActive)
-	if target != nil {
-		_ = target.WriteRaw(serialized)
-	}
 	meta := map[string]any{"names": names}
 	if key != "" {
 		meta["key"] = key
+	}
+	if ctx.Dedup != nil {
+		_ = ctx.Dedup.Seen(keyspace, key)
+	}
+	if len(meta) == 0 {
+		meta = nil
 	}
 	ctx.Store.Record(tool, artifacts.Artifact{
 		Type:     "certificate",

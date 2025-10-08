@@ -10,14 +10,12 @@ import (
 type CategorySpec struct {
 	Name             string
 	Prefix           string
-	WriterKey        string
 	PassiveKeyspace  string
 	ActiveKeyspace   string
 	ArtifactType     string
 	IncludeRouteType bool
 	NormalizePassive bool
 	CheckScope       bool
-	ImageWriterKey   string
 	ImagePassiveKey  string
 	ImageActiveKey   string
 	Custom           func(*Context, CategorySpec, string, bool, string) bool
@@ -78,41 +76,21 @@ func defaultCategoryHandler(ctx *Context, spec CategorySpec, line string, isActi
 			}
 		}
 	}
-	keyspace := spec.PassiveKeyspace
-	if isActive {
-		keyspace = spec.ActiveKeyspace
-	}
-	key := artifactValue
-	if key == "" {
-		key = value
-	}
-	if keyspace != "" && ctx.Dedup != nil && ctx.Dedup.Seen(keyspace, key) {
-		ctx.Store.Record(tool, artifacts.Artifact{
-			Type:     spec.ArtifactType,
-			Types:    extras,
-			Value:    artifactValue,
-			Active:   isActive,
-			Up:       true,
-			Metadata: metadata,
-		})
-		return true
-	}
-	writer := ctx.S.writer(spec.WriterKey, isActive)
-	if writer == nil {
-		return true
-	}
-	if isActive || !spec.NormalizePassive {
+	if ctx.Dedup != nil {
+		keyspace := spec.PassiveKeyspace
 		if isActive {
-			_ = writer.WriteRaw(value)
-		} else {
-			_ = writer.WriteURL(value)
+			keyspace = spec.ActiveKeyspace
 		}
-	} else {
-		normalized := artifactValue
-		if normalized == "" {
-			normalized = value
+		key := artifactValue
+		if key == "" {
+			key = value
 		}
-		_ = writer.WriteURL(normalized)
+		if keyspace != "" {
+			_ = ctx.Dedup.Seen(keyspace, key)
+		}
+	}
+	if len(metadata) == 0 {
+		metadata = nil
 	}
 	ctx.Store.Record(tool, artifacts.Artifact{
 		Type:     spec.ArtifactType,
@@ -214,57 +192,20 @@ func htmlCategoryHandler(ctx *Context, spec CategorySpec, line string, isActive 
 		}
 	}
 	if isImageURL(imageTarget) {
-		imageKeyspace := spec.ImagePassiveKey
-		if isActive {
-			imageKeyspace = spec.ImageActiveKey
+		if ctx.Dedup != nil {
+			imageKeyspace := spec.ImagePassiveKey
+			if isActive {
+				imageKeyspace = spec.ImageActiveKey
+			}
+			if imageKeyspace != "" {
+				_ = ctx.Dedup.Seen(imageKeyspace, value)
+			}
 		}
-		key := value
-		if ctx.Dedup != nil && imageKeyspace != "" && ctx.Dedup.Seen(imageKeyspace, key) {
-			ctx.Store.Record(tool, artifacts.Artifact{
-				Type:     "image",
-				Types:    extras,
-				Value:    artifactValue,
-				Active:   isActive,
-				Up:       true,
-				Metadata: metadata,
-			})
-			return true
+		if len(metadata) == 0 {
+			metadata = nil
 		}
-		writer := ctx.S.writer(spec.ImageWriterKey, isActive)
-		if writer == nil {
-			return true
-		}
-		if isActive {
-			_ = writer.WriteRaw(value)
-			ctx.Store.Record(tool, artifacts.Artifact{
-				Type:     "image",
-				Types:    extras,
-				Value:    artifactValue,
-				Active:   true,
-				Up:       true,
-				Metadata: metadata,
-			})
-			return true
-		}
-		_ = writer.WriteURL(value)
 		ctx.Store.Record(tool, artifacts.Artifact{
 			Type:     "image",
-			Types:    extras,
-			Value:    artifactValue,
-			Active:   false,
-			Up:       true,
-			Metadata: metadata,
-		})
-		return true
-	}
-	keyspace := spec.PassiveKeyspace
-	if isActive {
-		keyspace = spec.ActiveKeyspace
-	}
-	key := value
-	if ctx.Dedup != nil && keyspace != "" && ctx.Dedup.Seen(keyspace, key) {
-		ctx.Store.Record(tool, artifacts.Artifact{
-			Type:     spec.ArtifactType,
 			Types:    extras,
 			Value:    artifactValue,
 			Active:   isActive,
@@ -273,14 +214,17 @@ func htmlCategoryHandler(ctx *Context, spec CategorySpec, line string, isActive 
 		})
 		return true
 	}
-	writer := ctx.S.writer(spec.WriterKey, isActive)
-	if writer == nil {
-		return true
+	if ctx.Dedup != nil {
+		keyspace := spec.PassiveKeyspace
+		if isActive {
+			keyspace = spec.ActiveKeyspace
+		}
+		if keyspace != "" {
+			_ = ctx.Dedup.Seen(keyspace, value)
+		}
 	}
-	if isActive {
-		_ = writer.WriteRaw(value)
-	} else {
-		_ = writer.WriteURL(value)
+	if len(metadata) == 0 {
+		metadata = nil
 	}
 	ctx.Store.Record(tool, artifacts.Artifact{
 		Type:     spec.ArtifactType,
@@ -313,10 +257,8 @@ func routeCategoryHandler(ctx *Context, spec CategorySpec, line string, isActive
 		metadata["raw"] = trimmed
 	}
 	if isActive {
-		if ctx.Dedup != nil && !ctx.Dedup.Seen(keyspaceRoutePassive, base) {
-			if writer := ctx.S.writer(writerRoutes, false); writer != nil {
-				_ = writer.WriteURL(base)
-			}
+		if ctx.Dedup != nil {
+			_ = ctx.Dedup.Seen(keyspaceRoutePassive, base)
 		}
 		if status, ok := parseActiveRouteStatus(trimmed, base); ok {
 			metadata["status"] = status
@@ -332,35 +274,28 @@ func routeCategoryHandler(ctx *Context, spec CategorySpec, line string, isActive
 			}
 		}
 	}
-	keyspace := keyspaceRoutePassive
-	if isActive {
-		keyspace = keyspaceRouteActive
-	}
-	key := base
-	if key == "" {
-		key = trimmed
-	}
-	if key == "" {
-		key = line
-	}
-	if ctx.Dedup != nil && ctx.Dedup.Seen(keyspace, key) {
-		ctx.Store.Record(tool, artifacts.Artifact{
-			Type:     spec.ArtifactType,
-			Value:    base,
-			Active:   isActive,
-			Up:       true,
-			Metadata: metadata,
-		})
-		return true
+	if ctx.Dedup != nil {
+		keyspace := keyspaceRoutePassive
+		if isActive {
+			keyspace = keyspaceRouteActive
+		}
+		key := base
+		if key == "" {
+			key = trimmed
+		}
+		if key == "" {
+			key = line
+		}
+		if keyspace != "" {
+			_ = ctx.Dedup.Seen(keyspace, key)
+		}
 	}
 	if !isActive || shouldCategorizeActiveRoute(line, base) {
 		writeRouteCategories(ctx, base, isActive, tool)
 	}
-	writer := ctx.S.writer(writerRoutes, isActive)
-	if writer == nil {
-		return true
+	if len(metadata) == 0 {
+		metadata = nil
 	}
-	_ = writer.WriteURL(line)
 	ctx.Store.Record(tool, artifacts.Artifact{
 		Type:     spec.ArtifactType,
 		Value:    base,
@@ -406,7 +341,6 @@ func init() {
 	categorySpecs = map[string]CategorySpec{
 		"route": {
 			Name:             "route",
-			WriterKey:        writerRoutes,
 			PassiveKeyspace:  keyspaceRoutePassive,
 			ActiveKeyspace:   keyspaceRouteActive,
 			ArtifactType:     "route",
@@ -418,7 +352,6 @@ func init() {
 		"js": {
 			Name:             "js",
 			Prefix:           "js:",
-			WriterKey:        writerRoutesJS,
 			ArtifactType:     "js",
 			IncludeRouteType: true,
 			NormalizePassive: false,
@@ -427,14 +360,12 @@ func init() {
 		"html": {
 			Name:             "html",
 			Prefix:           "html:",
-			WriterKey:        writerRoutesHTML,
 			PassiveKeyspace:  keyspaceHTMLPassive,
 			ActiveKeyspace:   keyspaceHTMLActive,
 			ArtifactType:     "html",
 			IncludeRouteType: true,
 			NormalizePassive: false,
 			CheckScope:       true,
-			ImageWriterKey:   writerRoutesImages,
 			ImagePassiveKey:  keyspaceImagePassive,
 			ImageActiveKey:   keyspaceImageActive,
 			Custom:           htmlCategoryHandler,
@@ -442,7 +373,6 @@ func init() {
 		"maps": {
 			Name:             "maps",
 			Prefix:           "maps:",
-			WriterKey:        writerRoutesMaps,
 			PassiveKeyspace:  keyspaceMapsPassive,
 			ActiveKeyspace:   keyspaceMapsActive,
 			ArtifactType:     "maps",
@@ -453,7 +383,6 @@ func init() {
 		"json": {
 			Name:             "json",
 			Prefix:           "json:",
-			WriterKey:        writerRoutesJSON,
 			PassiveKeyspace:  keyspaceJSONPassive,
 			ActiveKeyspace:   keyspaceJSONActive,
 			ArtifactType:     "json",
@@ -464,7 +393,6 @@ func init() {
 		"api": {
 			Name:             "api",
 			Prefix:           "api:",
-			WriterKey:        writerRoutesAPI,
 			PassiveKeyspace:  keyspaceAPIPassive,
 			ActiveKeyspace:   keyspaceAPIActive,
 			ArtifactType:     "api",
@@ -475,7 +403,6 @@ func init() {
 		"wasm": {
 			Name:             "wasm",
 			Prefix:           "wasm:",
-			WriterKey:        writerRoutesWASM,
 			PassiveKeyspace:  keyspaceWASMPassive,
 			ActiveKeyspace:   keyspaceWASMActive,
 			ArtifactType:     "wasm",
@@ -486,7 +413,6 @@ func init() {
 		"svg": {
 			Name:             "svg",
 			Prefix:           "svg:",
-			WriterKey:        writerRoutesSVG,
 			PassiveKeyspace:  keyspaceSVGPassive,
 			ActiveKeyspace:   keyspaceSVGActive,
 			ArtifactType:     "svg",
@@ -497,7 +423,6 @@ func init() {
 		"crawl": {
 			Name:             "crawl",
 			Prefix:           "crawl:",
-			WriterKey:        writerRoutesCrawl,
 			PassiveKeyspace:  keyspaceCrawlPassive,
 			ActiveKeyspace:   keyspaceCrawlActive,
 			ArtifactType:     "crawl",
@@ -508,7 +433,6 @@ func init() {
 		"meta-route": {
 			Name:             "meta-route",
 			Prefix:           "meta-route:",
-			WriterKey:        writerRoutesMeta,
 			PassiveKeyspace:  keyspaceMetaRoutePass,
 			ActiveKeyspace:   keyspaceMetaRouteAct,
 			ArtifactType:     "meta-route",
