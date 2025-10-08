@@ -21,6 +21,8 @@ func TestDetectCategories(t *testing.T) {
 		{name: "crawl robots", input: "robots.txt", want: []Category{CategoryCrawl, CategoryDocs}},
 		{name: "meta", input: "https://example.com/backup.zip", want: []Category{CategoryArchives, CategoryMeta}},
 		{name: "multiple", input: "https://example.com/backup.zip?token=abc", want: []Category{CategoryArchives, CategoryMeta}},
+		{name: "graphql path", input: "https://api.example.com/graphql?query={users}", want: []Category{CategoryAPI, CategoryGraphQL}},
+		{name: "operationName without graphql", input: "https://example.com/api/search?operationName=listUsers", want: []Category{CategoryAPI}},
 	}
 
 	for _, tt := range tests {

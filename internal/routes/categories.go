@@ -249,7 +249,8 @@ func isGraphQL(lowerPath, base, lowerFull string) bool {
 		return true
 	}
 	// query hints: ?query=... o operationName
-	if strings.Contains(lowerFull, "operationname=") || strings.Contains(lowerFull, "query=") && reGraphQL.MatchString(lowerFull) {
+	if (strings.Contains(lowerFull, "operationname=") || strings.Contains(lowerFull, "query=")) &&
+		reGraphQL.MatchString(lowerFull) {
 		return true
 	}
 	return false
