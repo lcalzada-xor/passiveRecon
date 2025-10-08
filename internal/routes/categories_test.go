@@ -18,9 +18,9 @@ func TestDetectCategories(t *testing.T) {
 		{name: "json", input: "https://example.com/config.json", want: []Category{CategoryJSON, CategoryMeta}},
 		{name: "api json", input: "https://example.com/openapi.json", want: []Category{CategoryAPI}},
 		{name: "crawl xml", input: "https://example.com/sitemap.xml", want: []Category{CategoryCrawl}},
-		{name: "crawl robots", input: "robots.txt", want: []Category{CategoryCrawl}},
-		{name: "meta", input: "https://example.com/backup.zip", want: []Category{CategoryMeta}},
-		{name: "multiple", input: "https://example.com/backup.zip?token=abc", want: []Category{CategoryMeta}},
+		{name: "crawl robots", input: "robots.txt", want: []Category{CategoryCrawl, CategoryDocs}},
+		{name: "meta", input: "https://example.com/backup.zip", want: []Category{CategoryArchives, CategoryMeta}},
+		{name: "multiple", input: "https://example.com/backup.zip?token=abc", want: []Category{CategoryArchives, CategoryMeta}},
 	}
 
 	for _, tt := range tests {

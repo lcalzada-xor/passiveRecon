@@ -57,10 +57,10 @@ func TestClassifyLinkfinderEndpoint(t *testing.T) {
 		wantImage  bool
 		wantCats   []routes.Category
 	}{
-		{name: "javascript absolute", input: "https://example.com/app/main.js", wantJS: true},
-		{name: "html absolute", input: "https://example.com/index.html", wantHTML: true},
-		{name: "image absolute", input: "https://example.com/static/logo.png", wantImage: true},
-		{name: "relative path", input: "api/v1/users", undetected: true},
+		{name: "javascript absolute", input: "https://example.com/app/main.js", wantJS: true, wantCats: []routes.Category{routes.CategoryJS}},
+		{name: "html absolute", input: "https://example.com/index.html", wantHTML: true, wantCats: []routes.Category{routes.CategoryHTML}},
+		{name: "image absolute", input: "https://example.com/static/logo.png", wantImage: true, wantCats: []routes.Category{routes.CategoryImages}},
+		{name: "relative path", input: "api/v1/users", undetected: true, wantCats: []routes.Category{routes.CategoryAPI}},
 		{name: "svg relative", input: "logo.svg", undetected: true, wantImage: true, wantCats: []routes.Category{routes.CategorySVG}},
 		{name: "wasm", input: "https://example.com/app.wasm", wantCats: []routes.Category{routes.CategoryWASM}},
 	}
