@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"passive-rec/internal/pipeline"
+	"passive-rec/internal/artifacts"
 	"passive-rec/internal/runner"
 )
 
-func writeSubJSArtifacts(t *testing.T, outdir string, artifacts []pipeline.Artifact) {
+func writeSubJSArtifacts(t *testing.T, outdir string, artifacts []artifacts.Artifact) {
 	t.Helper()
 	path := filepath.Join(outdir, "artifacts.jsonl")
 	file, err := os.Create(path)
@@ -92,7 +92,7 @@ func TestSubJSMissingInputFile(t *testing.T) {
 
 func TestSubJSSuccess(t *testing.T) {
 	dir := t.TempDir()
-	writeSubJSArtifacts(t, dir, []pipeline.Artifact{
+	writeSubJSArtifacts(t, dir, []artifacts.Artifact{
 		{Type: "route", Value: "https://app.example.com/login [200]", Active: true, Up: true},
 		{Type: "route", Value: "https://app.example.com/login", Active: true, Up: true},
 	})
@@ -173,7 +173,7 @@ func TestSubJSSuccess(t *testing.T) {
 
 func TestSubJSAcceptsNonErrorStatuses(t *testing.T) {
 	dir := t.TempDir()
-	writeSubJSArtifacts(t, dir, []pipeline.Artifact{{Type: "route", Value: "https://app.example.com/login", Active: true, Up: true}})
+	writeSubJSArtifacts(t, dir, []artifacts.Artifact{{Type: "route", Value: "https://app.example.com/login", Active: true, Up: true}})
 
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -14,8 +14,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"passive-rec/internal/artifacts"
 	"passive-rec/internal/config"
-	"passive-rec/internal/pipeline"
 	"passive-rec/internal/runner"
 )
 
@@ -349,7 +349,7 @@ func TestExecuteStepHandlesErrors(t *testing.T) {
 
 func TestDedupeDomainListNormalizesAndFilters(t *testing.T) {
 	dir := t.TempDir()
-	writeArtifactsFile(t, dir, []pipeline.Artifact{
+	writeArtifactsFile(t, dir, []artifacts.Artifact{
 		{Type: "domain", Value: "Example.com", Up: true},
 		{Type: "domain", Value: "api.example.com ", Up: true},
 		{Type: "domain", Value: "*.ignored.example.com", Up: true},
@@ -385,7 +385,7 @@ func TestDedupeDomainListNormalizesAndFilters(t *testing.T) {
 	}
 }
 
-func writeArtifactsFile(t *testing.T, outdir string, artifacts []pipeline.Artifact) {
+func writeArtifactsFile(t *testing.T, outdir string, records []artifacts.Artifact) {
 	t.Helper()
 	path := filepath.Join(outdir, "artifacts.jsonl")
 	file, err := os.Create(path)
@@ -395,7 +395,7 @@ func writeArtifactsFile(t *testing.T, outdir string, artifacts []pipeline.Artifa
 	defer file.Close()
 
 	encoder := json.NewEncoder(file)
-	for _, artifact := range artifacts {
+	for _, artifact := range records {
 		if err := encoder.Encode(artifact); err != nil {
 			t.Fatalf("encode artifact: %v", err)
 		}
@@ -420,12 +420,12 @@ func TestDedupeDomainListWriteError(t *testing.T) {
 }
 
 type testSink struct {
-	outdir    string
-	lines     chan string
-	pending   []string
-	artifacts []pipeline.Artifact
-	mu        sync.Mutex
-	onFlush   func()
+	outdir  string
+	lines   chan string
+	pending []string
+	records []artifacts.Artifact
+	mu      sync.Mutex
+	onFlush func()
 }
 
 func newTestSink(outdir string) (*testSink, error) {
@@ -490,7 +490,7 @@ drained:
 		}
 
 		lineData := trimmed
-		var artifacts []pipeline.Artifact
+		var records []artifacts.Artifact
 
 		if strings.HasPrefix(trimmed, "meta: ") {
 			content := strings.TrimSpace(strings.TrimPrefix(trimmed, "meta: "))
@@ -503,7 +503,7 @@ drained:
 			} else {
 				targetFile = "meta.passive"
 			}
-			artifacts = append(artifacts, pipeline.Artifact{Type: "meta", Value: content, Active: isActive, Up: true})
+			records = append(records, artifacts.Artifact{Type: "meta", Value: content, Active: isActive, Up: true})
 		} else if strings.Contains(trimmed, "://") {
 			if isActive {
 				targetFile = filepath.Join("routes", "routes.active")
@@ -518,16 +518,16 @@ drained:
 			if len(metadata) == 0 {
 				metadata = nil
 			}
-			artifacts = append(artifacts, pipeline.Artifact{Type: "route", Value: base, Active: isActive, Up: true, Metadata: metadata})
+			records = append(records, artifacts.Artifact{Type: "route", Value: base, Active: isActive, Up: true, Metadata: metadata})
 			if host := extractHost(base); host != "" {
-				artifacts = append(artifacts, pipeline.Artifact{Type: "domain", Value: host, Active: isActive, Up: true})
+				records = append(records, artifacts.Artifact{Type: "domain", Value: host, Active: isActive, Up: true})
 			}
 		} else {
-			artifacts = append(artifacts, pipeline.Artifact{Type: "domain", Value: trimmed, Active: isActive, Up: true})
+			records = append(records, artifacts.Artifact{Type: "domain", Value: trimmed, Active: isActive, Up: true})
 		}
 
 		appendLine(filepath.Join(s.outdir, targetFile), lineData)
-		s.appendArtifacts(artifacts...)
+		s.appendArtifacts(records...)
 	}
 }
 
@@ -536,13 +536,13 @@ func (s *testSink) Close() error {
 	return nil
 }
 
-func (s *testSink) appendArtifacts(artifacts ...pipeline.Artifact) {
-	if len(artifacts) == 0 {
+func (s *testSink) appendArtifacts(records ...artifacts.Artifact) {
+	if len(records) == 0 {
 		return
 	}
 	s.mu.Lock()
-	s.artifacts = append(s.artifacts, artifacts...)
-	snapshot := append([]pipeline.Artifact(nil), s.artifacts...)
+	s.records = append(s.records, records...)
+	snapshot := append([]artifacts.Artifact(nil), s.records...)
 	s.mu.Unlock()
 
 	var builder strings.Builder

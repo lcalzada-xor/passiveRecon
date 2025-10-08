@@ -20,7 +20,6 @@ import (
 	"passive-rec/internal/certs"
 	"passive-rec/internal/config"
 	"passive-rec/internal/netutil"
-	"passive-rec/internal/pipeline"
 )
 
 // Generate reads the artifact manifest and renders an HTML report in cfg.OutDir.
@@ -43,7 +42,7 @@ func Generate(ctx context.Context, cfg *config.Config) error {
 		"certificate": artifacts.PassiveOnly,
 		"meta":        artifacts.PassiveOnly,
 	}
-	var passiveArtifacts map[string][]pipeline.Artifact
+	var passiveArtifacts map[string][]artifacts.Artifact
 	if exists {
 		passiveArtifacts, err = artifacts.CollectArtifactsByType(cfg.OutDir, selectors)
 		if err != nil {
@@ -70,7 +69,7 @@ func Generate(ctx context.Context, cfg *config.Config) error {
 			"dns":         artifacts.ActiveOnly,
 		}
 
-		var activeArtifacts map[string][]pipeline.Artifact
+		var activeArtifacts map[string][]artifacts.Artifact
 		if exists {
 			activeArtifacts, err = artifacts.CollectArtifactsByType(cfg.OutDir, activeSelectors)
 			if err != nil {
@@ -271,12 +270,12 @@ var (
 	}
 )
 
-func artifactValues(artifacts []pipeline.Artifact) []string {
-	if len(artifacts) == 0 {
+func artifactValues(list []artifacts.Artifact) []string {
+	if len(list) == 0 {
 		return nil
 	}
-	values := make([]string, 0, len(artifacts))
-	for _, artifact := range artifacts {
+	values := make([]string, 0, len(list))
+	for _, artifact := range list {
 		value := cleanReportText(artifact.Value)
 		if value == "" {
 			continue
@@ -289,12 +288,12 @@ func artifactValues(artifacts []pipeline.Artifact) []string {
 	return values
 }
 
-func artifactRawValues(artifacts []pipeline.Artifact) []string {
-	if len(artifacts) == 0 {
+func artifactRawValues(list []artifacts.Artifact) []string {
+	if len(list) == 0 {
 		return nil
 	}
-	values := make([]string, 0, len(artifacts))
-	for _, artifact := range artifacts {
+	values := make([]string, 0, len(list))
+	for _, artifact := range list {
 		candidates := make([]string, 0, 1)
 		if artifact.Metadata != nil {
 			switch raw := artifact.Metadata["raw"].(type) {
@@ -327,12 +326,12 @@ func artifactRawValues(artifacts []pipeline.Artifact) []string {
 	return values
 }
 
-func parseDNSArtifacts(artifacts []pipeline.Artifact) ([]dnsRecord, error) {
-	if len(artifacts) == 0 {
+func parseDNSArtifacts(list []artifacts.Artifact) ([]dnsRecord, error) {
+	if len(list) == 0 {
 		return nil, nil
 	}
-	records := make([]dnsRecord, 0, len(artifacts))
-	for _, artifact := range artifacts {
+	records := make([]dnsRecord, 0, len(list))
+	for _, artifact := range list {
 		value := strings.TrimSpace(artifact.Value)
 		if value == "" {
 			continue

@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"passive-rec/internal/artifacts"
 	"passive-rec/internal/config"
 	"passive-rec/internal/pipeline"
 )
@@ -262,7 +263,7 @@ func TestRunPipelineConcurrentSourcesDedupesSink(t *testing.T) {
 
 func TestStepDedupeRunsDNSXWhenActive(t *testing.T) {
 	dir := t.TempDir()
-	writeOrchestratorArtifacts(t, dir, []pipeline.Artifact{{Type: "domain", Value: "one.example.com", Up: true}})
+	writeOrchestratorArtifacts(t, dir, []artifacts.Artifact{{Type: "domain", Value: "one.example.com", Up: true}})
 
 	originalDNSX := sourceDNSX
 	defer func() { sourceDNSX = originalDNSX }()
@@ -294,7 +295,7 @@ func TestStepDedupeRunsDNSXWhenActive(t *testing.T) {
 	}
 }
 
-func writeOrchestratorArtifacts(t *testing.T, outdir string, artifacts []pipeline.Artifact) {
+func writeOrchestratorArtifacts(t *testing.T, outdir string, artifacts []artifacts.Artifact) {
 	t.Helper()
 	path := filepath.Join(outdir, "artifacts.jsonl")
 	file, err := os.Create(path)

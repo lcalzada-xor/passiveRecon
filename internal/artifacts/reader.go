@@ -8,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"passive-rec/internal/pipeline"
 )
 
 // ActiveState defines the activity filter applied when collecting artifacts.
@@ -74,7 +72,7 @@ func CollectValuesByType(outdir string, selectors map[string]ActiveState) (map[s
 // CollectArtifactsByType lee artifacts.jsonl desde el directorio proporcionado y
 // devuelve los artefactos agrupados por tipo aplicando el filtro de actividad
 // indicado por selectors.
-func CollectArtifactsByType(outdir string, selectors map[string]ActiveState) (map[string][]pipeline.Artifact, error) {
+func CollectArtifactsByType(outdir string, selectors map[string]ActiveState) (map[string][]Artifact, error) {
 	path := filepath.Join(outdir, "artifacts.jsonl")
 	file, err := os.Open(path)
 	if err != nil {
@@ -85,14 +83,14 @@ func CollectArtifactsByType(outdir string, selectors map[string]ActiveState) (ma
 	buf := bufio.NewScanner(file)
 	buf.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
 
-	result := make(map[string][]pipeline.Artifact, len(selectors))
+	result := make(map[string][]Artifact, len(selectors))
 	for buf.Scan() {
 		line := strings.TrimSpace(buf.Text())
 		if line == "" {
 			continue
 		}
 
-		var artifact pipeline.Artifact
+		var artifact Artifact
 		if err := json.Unmarshal([]byte(line), &artifact); err != nil {
 			return nil, fmt.Errorf("unmarshal artifact: %w", err)
 		}
