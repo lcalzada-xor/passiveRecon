@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -170,15 +171,103 @@ type HandlerMetric struct {
 // Artifact representa un hallazgo generado por el pipeline y serializado en el
 // manifiesto JSONL.
 type Artifact struct {
-	Type        string         `json:"type"`
-	Types       []string       `json:"types,omitempty"`
-	Value       string         `json:"value"`
-	Active      bool           `json:"active"`
-	Valid       bool           `json:"valid"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	Tool        string         `json:"tool,omitempty"`
-	Tools       []string       `json:"tools,omitempty"`
-	Occurrences int            `json:"occurrences,omitempty"`
+	Type        string
+	Types       []string
+	Value       string
+	Active      bool
+	Valid       bool
+	Metadata    map[string]any
+	Tool        string
+	Tools       []string
+	Occurrences int
+}
+
+func (a Artifact) MarshalJSON() ([]byte, error) {
+	type alias struct {
+		Type        string         `json:"type"`
+		Types       []string       `json:"types,omitempty"`
+		Value       any            `json:"value"`
+		Active      bool           `json:"active"`
+		Valid       bool           `json:"valid"`
+		Metadata    map[string]any `json:"metadata,omitempty"`
+		Tool        string         `json:"tool,omitempty"`
+		Tools       []string       `json:"tools,omitempty"`
+		Occurrences int            `json:"occurrences,omitempty"`
+	}
+
+	out := alias{
+		Type:        a.Type,
+		Types:       a.Types,
+		Active:      a.Active,
+		Valid:       a.Valid,
+		Metadata:    a.Metadata,
+		Tool:        a.Tool,
+		Tools:       a.Tools,
+		Occurrences: a.Occurrences,
+	}
+
+	if a.Type == "certificate" {
+		raw := json.RawMessage([]byte(a.Value))
+		if json.Valid(raw) {
+			out.Value = raw
+		} else {
+			out.Value = a.Value
+		}
+	} else {
+		out.Value = a.Value
+	}
+
+	return json.Marshal(out)
+}
+
+func (a *Artifact) UnmarshalJSON(data []byte) error {
+	type alias struct {
+		Type        string          `json:"type"`
+		Types       []string        `json:"types,omitempty"`
+		Value       json.RawMessage `json:"value"`
+		Active      bool            `json:"active"`
+		Valid       bool            `json:"valid"`
+		Metadata    map[string]any  `json:"metadata,omitempty"`
+		Tool        string          `json:"tool,omitempty"`
+		Tools       []string        `json:"tools,omitempty"`
+		Occurrences int             `json:"occurrences,omitempty"`
+	}
+
+	var aux alias
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	*a = Artifact{
+		Type:        aux.Type,
+		Types:       aux.Types,
+		Active:      aux.Active,
+		Valid:       aux.Valid,
+		Metadata:    aux.Metadata,
+		Tool:        aux.Tool,
+		Tools:       aux.Tools,
+		Occurrences: aux.Occurrences,
+	}
+
+	raw := bytes.TrimSpace(aux.Value)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		a.Value = ""
+		return nil
+	}
+
+	if aux.Type == "certificate" && len(raw) > 0 && raw[0] != '"' {
+		a.Value = string(raw)
+		return nil
+	}
+
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		a.Value = string(raw)
+		return nil
+	}
+
+	a.Value = value
+	return nil
 }
 
 type artifactKey struct {

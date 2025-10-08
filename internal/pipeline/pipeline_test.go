@@ -183,6 +183,24 @@ func TestSinkClassification(t *testing.T) {
 	if diff := cmp.Diff([]string{"alt1.example.com", "alt2.example.com", "direct-cert.example.com"}, names); diff != "" {
 		t.Fatalf("unexpected certificate names metadata (-want +got):\n%s", diff)
 	}
+
+	rawLines := readArtifactLines(t, filepath.Join(dir, "artifacts.jsonl"))
+	var certificateLines int
+	for _, line := range rawLines {
+		if !strings.Contains(line, "\"type\":\"certificate\"") {
+			continue
+		}
+		certificateLines++
+		if strings.Contains(line, "\"value\":\"{\\\"") {
+			t.Fatalf("certificate artifact should not encode value as JSON string: %q", line)
+		}
+		if !strings.Contains(line, "\"value\":{") {
+			t.Fatalf("certificate artifact should expose structured value: %q", line)
+		}
+	}
+	if certificateLines == 0 {
+		t.Fatalf("expected certificate artifact line in artifacts.jsonl")
+	}
 }
 
 func TestSinkFiltersOutOfScope(t *testing.T) {
@@ -1368,6 +1386,32 @@ func readArtifactsFile(t *testing.T, path string) []Artifact {
 		t.Fatalf("scan artifacts: %v", err)
 	}
 	return artifacts
+}
+
+func readArtifactLines(t *testing.T, path string) []string {
+	t.Helper()
+
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open artifacts %q: %v", path, err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
+
+	var lines []string
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan artifacts: %v", err)
+	}
+	return lines
 }
 
 func requireArtifact(t *testing.T, artifacts []Artifact, typ, value string, active bool) Artifact {
