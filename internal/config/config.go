@@ -141,9 +141,10 @@ func ParseFlags() *Config {
 	if *configPath != "" {
 		info, err := os.Stat(*configPath)
 		if err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				log.Fatalf("no se pudo acceder al archivo de configuración %q: %v", *configPath, err)
+			if errors.Is(err, os.ErrNotExist) {
+				log.Fatalf("el archivo de configuración %q no existe", *configPath)
 			}
+			log.Fatalf("no se pudo acceder al archivo de configuración %q: %v", *configPath, err)
 		} else if info.IsDir() {
 			log.Fatalf("la ruta de configuración %q apunta a un directorio", *configPath)
 		} else {
