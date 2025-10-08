@@ -174,7 +174,7 @@ type Artifact struct {
 	Types       []string       `json:"types,omitempty"`
 	Value       string         `json:"value"`
 	Active      bool           `json:"active"`
-	Valid       bool           `json:"valid"`
+	Up          bool           `json:"up"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
 	Tool        string         `json:"tool,omitempty"`
 	Tools       []string       `json:"tools,omitempty"`
@@ -630,7 +630,7 @@ func (s *Sink) recordArtifact(tool string, artifact Artifact) {
 	} else {
 		mergeArtifactMetadata(&rec.Artifact, normalized.Metadata)
 		mergeArtifactTypes(&rec.Artifact, normalized.Type, normalized.Types)
-		rec.Artifact.Valid = rec.Artifact.Valid && normalized.Valid
+		rec.Artifact.Up = rec.Artifact.Up && normalized.Up
 	}
 
 	rec.addTool(normalized.Tool)
@@ -1094,7 +1094,7 @@ func handleMeta(s *Sink, line string, isActive bool, tool string) bool {
 			Type:   "meta",
 			Value:  normalized,
 			Active: isActive,
-			Valid:  true,
+			Up:     true,
 			Tool:   inferToolFromMessage(normalized),
 			Metadata: map[string]any{
 				"raw": trimmed,
@@ -1153,7 +1153,7 @@ func handleGFFinding(s *Sink, line string, isActive bool, tool string) bool {
 		Types:    rules,
 		Value:    value,
 		Active:   isActive,
-		Valid:    true,
+		Up:       true,
 		Metadata: metadata,
 	})
 	return true
@@ -1209,7 +1209,7 @@ func handleRelation(s *Sink, line string, isActive bool, tool string) bool {
 		Type:     "dns",
 		Value:    string(payload),
 		Active:   isActive,
-		Valid:    true,
+		Up:       true,
 		Metadata: metadata,
 	})
 	return true
@@ -1401,7 +1401,7 @@ func handleDNS(s *Sink, line string, isActive bool, tool string) bool {
 		Type:     "dns",
 		Value:    payload,
 		Active:   isActive,
-		Valid:    true,
+		Up:       true,
 		Metadata: metadata,
 	})
 	return true
@@ -1423,7 +1423,7 @@ func handleRDAP(s *Sink, line string, isActive bool, tool string) bool {
 		Type:   "rdap",
 		Value:  content,
 		Active: false,
-		Valid:  true,
+		Up:     true,
 		Tool:   inferToolFromMessage(content),
 	})
 	return true
@@ -1461,7 +1461,7 @@ func handleJS(s *Sink, line string, isActive bool, tool string) bool {
 					Types:    buildExtras(),
 					Value:    value,
 					Active:   true,
-					Valid:    false,
+					Up:       false,
 					Metadata: metadata,
 				})
 				return true
@@ -1475,7 +1475,7 @@ func handleJS(s *Sink, line string, isActive bool, tool string) bool {
 			Types:    buildExtras(),
 			Value:    value,
 			Active:   true,
-			Valid:    true,
+			Up:       true,
 			Metadata: metadata,
 		})
 		return true
@@ -1487,7 +1487,7 @@ func handleJS(s *Sink, line string, isActive bool, tool string) bool {
 			Types:    buildExtras(),
 			Value:    value,
 			Active:   false,
-			Valid:    true,
+			Up:       true,
 			Metadata: metadata,
 		})
 	}
@@ -1541,7 +1541,7 @@ func handleHTML(s *Sink, line string, isActive bool, tool string) bool {
 					Types:    buildExtras(),
 					Value:    value,
 					Active:   true,
-					Valid:    false,
+					Up:       false,
 					Metadata: metadata,
 				})
 				return true
@@ -1565,7 +1565,7 @@ func handleHTML(s *Sink, line string, isActive bool, tool string) bool {
 				Types:    buildExtras(),
 				Value:    value,
 				Active:   isActive,
-				Valid:    true,
+				Up:       true,
 				Metadata: metadata,
 			})
 			return true
@@ -1577,7 +1577,7 @@ func handleHTML(s *Sink, line string, isActive bool, tool string) bool {
 				Types:    buildExtras(),
 				Value:    value,
 				Active:   true,
-				Valid:    true,
+				Up:       true,
 				Metadata: metadata,
 			})
 			return true
@@ -1588,7 +1588,7 @@ func handleHTML(s *Sink, line string, isActive bool, tool string) bool {
 			Types:    buildExtras(),
 			Value:    value,
 			Active:   false,
-			Valid:    true,
+			Up:       true,
 			Metadata: metadata,
 		})
 		return true
@@ -1609,7 +1609,7 @@ func handleHTML(s *Sink, line string, isActive bool, tool string) bool {
 			Types:    buildExtras(),
 			Value:    value,
 			Active:   isActive,
-			Valid:    true,
+			Up:       true,
 			Metadata: metadata,
 		})
 		return true
@@ -1621,7 +1621,7 @@ func handleHTML(s *Sink, line string, isActive bool, tool string) bool {
 			Types:    buildExtras(),
 			Value:    value,
 			Active:   true,
-			Valid:    true,
+			Up:       true,
 			Metadata: metadata,
 		})
 		return true
@@ -1632,7 +1632,7 @@ func handleHTML(s *Sink, line string, isActive bool, tool string) bool {
 		Types:    buildExtras(),
 		Value:    value,
 		Active:   false,
-		Valid:    true,
+		Up:       true,
 		Metadata: metadata,
 	})
 	return true
@@ -1697,7 +1697,7 @@ func handleCategorizedRoute(s *Sink, line string, isActive bool, tool string, pr
 					Types:    buildExtras(),
 					Value:    artifactValue,
 					Active:   true,
-					Valid:    false,
+					Up:       false,
 					Metadata: metadata,
 				})
 				return true
@@ -1719,7 +1719,7 @@ func handleCategorizedRoute(s *Sink, line string, isActive bool, tool string, pr
 				Types:    buildExtras(),
 				Value:    artifactValue,
 				Active:   isActive,
-				Valid:    true,
+				Up:       true,
 				Metadata: metadata,
 			})
 			return true
@@ -1741,7 +1741,7 @@ func handleCategorizedRoute(s *Sink, line string, isActive bool, tool string, pr
 			Types:    buildExtras(),
 			Value:    artifactValue,
 			Active:   isActive,
-			Valid:    true,
+			Up:       true,
 			Metadata: metadata,
 		})
 		return true
@@ -1753,7 +1753,7 @@ func handleCategorizedRoute(s *Sink, line string, isActive bool, tool string, pr
 		Types:    buildExtras(),
 		Value:    artifactValue,
 		Active:   false,
-		Valid:    true,
+		Up:       true,
 		Metadata: metadata,
 	})
 	return true
@@ -1798,7 +1798,7 @@ func handleRoute(s *Sink, line string, isActive bool, tool string) bool {
 					Type:     "route",
 					Value:    base,
 					Active:   true,
-					Valid:    false,
+					Up:       false,
 					Metadata: metadata,
 				})
 				return true
@@ -1827,7 +1827,7 @@ func handleRoute(s *Sink, line string, isActive bool, tool string) bool {
 			Type:     "route",
 			Value:    base,
 			Active:   isActive,
-			Valid:    true,
+			Up:       true,
 			Metadata: metadata,
 		})
 		return true
@@ -1840,7 +1840,7 @@ func handleRoute(s *Sink, line string, isActive bool, tool string) bool {
 		Type:     "route",
 		Value:    base,
 		Active:   isActive,
-		Valid:    true,
+		Up:       true,
 		Metadata: metadata,
 	})
 	return true
@@ -1898,7 +1898,7 @@ func handleDomain(s *Sink, line string, isActive bool, tool string) bool {
 			Type:     "domain",
 			Value:    key,
 			Active:   isActive,
-			Valid:    true,
+			Up:       true,
 			Metadata: metadata,
 		})
 		return true
@@ -1908,7 +1908,7 @@ func handleDomain(s *Sink, line string, isActive bool, tool string) bool {
 		Type:     "domain",
 		Value:    key,
 		Active:   isActive,
-		Valid:    true,
+		Up:       true,
 		Metadata: metadata,
 	})
 	return true
@@ -2049,7 +2049,7 @@ func (s *Sink) writeLazyCategory(route string, isActive bool, tool string, write
 			Type:   artifactType,
 			Value:  route,
 			Active: isActive,
-			Valid:  true,
+			Up:     true,
 		})
 		return
 	}
@@ -2066,7 +2066,7 @@ func (s *Sink) writeLazyCategory(route string, isActive bool, tool string, write
 			Type:   artifactType,
 			Value:  route,
 			Active: true,
-			Valid:  true,
+			Up:     true,
 		})
 		return
 	}
@@ -2075,7 +2075,7 @@ func (s *Sink) writeLazyCategory(route string, isActive bool, tool string, write
 		Type:   artifactType,
 		Value:  route,
 		Active: false,
-		Valid:  true,
+		Up:     true,
 	})
 }
 
@@ -2181,7 +2181,7 @@ func (s *Sink) writeCertLine(line string, isActive bool, tool string) {
 		Type:     "certificate",
 		Value:    serialized,
 		Active:   isActive,
-		Valid:    true,
+		Up:       true,
 		Tool:     filtered.Source,
 		Metadata: meta,
 	})
