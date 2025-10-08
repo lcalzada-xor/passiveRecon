@@ -14,10 +14,9 @@ import (
 
 var ErrMissingBinary = errors.New("missing binary")
 
-// findBinaryMatchingVersion iterates over candidate binary names and returns the
-// first one whose `-version` output contains the provided substring. The
-// comparison is performed using a case-insensitive match. If no binary matches
-// the search criteria ErrMissingBinary is returned.
+// findBinaryMatchingVersion recorre binarios candidatos y devuelve el primero cuyo
+// `-version` contenga la subcadena indicada (case-insensitive). Añadimos un timeout
+// corto por binario para evitar bloqueos.
 func findBinaryMatchingVersion(match string, candidates ...string) (string, error) {
 	match = strings.ToLower(match)
 	for _, candidate := range candidates {
@@ -25,29 +24,28 @@ func findBinaryMatchingVersion(match string, candidates ...string) (string, erro
 		if err != nil {
 			continue
 		}
-
-		cmd := exec.Command(path, "-version")
-		output, err := cmd.CombinedOutput()
-		if err != nil {
+		// Timeout defensivo para comandos colgados en -version.
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		cmd := exec.CommandContext(ctx, path, "-version")
+		output, execErr := cmd.CombinedOutput()
+		cancel()
+		if execErr != nil {
 			continue
 		}
-
 		if strings.Contains(strings.ToLower(string(output)), match) {
 			return path, nil
 		}
 	}
-
 	return "", ErrMissingBinary
 }
 
-// HTTPXBin attempts to locate the ProjectDiscovery httpx binary. This avoids
-// accidentally picking the Python `httpx` CLI, which is incompatible with the
-// flags used by passive-rec.
+// HTTPXBin intenta localizar el binario httpx de ProjectDiscovery.
+// Evita confundirlo con el CLI de Python llamado "httpx".
 func HTTPXBin() (string, error) {
 	return findBinaryMatchingVersion("projectdiscovery", "httpx", "httpx-toolkit")
 }
 
-// DNSXBin attempts to locate the ProjectDiscovery dnsx binary.
+// DNSXBin intenta localizar el binario dnsx de ProjectDiscovery.
 func DNSXBin() (string, error) {
 	return findBinaryMatchingVersion("projectdiscovery", "dnsx")
 }
@@ -57,9 +55,7 @@ func HasBin(name string) bool {
 	return err == nil
 }
 
-// FindBin returns the first binary name from the provided list that is available
-// on the current PATH. If none of the binaries are found the returned string is
-// empty and the second boolean value is false.
+// FindBin devuelve el primer binario disponible en PATH de la lista.
 func FindBin(names ...string) (string, bool) {
 	for _, name := range names {
 		if HasBin(name) {
@@ -73,9 +69,9 @@ func RunCommand(ctx context.Context, name string, args []string, out chan<- stri
 	return runCommand(ctx, name, args, out, "")
 }
 
-// RunCommandWithDir executes the provided command while setting the working
-// directory to dir. The stdout stream is forwarded line-by-line to the provided
-// channel. If dir is empty this behaves like RunCommand.
+// RunCommandWithDir ejecuta el comando en el directorio indicado.
+// Redirige stdout línea a línea al canal out. Si dir está vacío,
+// equivale a RunCommand.
 func RunCommandWithDir(ctx context.Context, dir string, name string, args []string, out chan<- string) error {
 	return runCommand(ctx, name, args, out, dir)
 }
@@ -100,9 +96,8 @@ func runCommand(ctx context.Context, name string, args []string, out chan<- stri
 		argsJoined = "<none>"
 	}
 
-	deadline, hasDeadline := ctx.Deadline()
 	deadlineInfo := "none"
-	if hasDeadline {
+	if deadline, ok := ctx.Deadline(); ok {
 		remaining := time.Until(deadline)
 		deadlineInfo = fmt.Sprintf("%s (~%s)", deadline.Format(time.RFC3339), remaining.Round(time.Millisecond))
 	}
@@ -113,7 +108,8 @@ func runCommand(ctx context.Context, name string, args []string, out chan<- stri
 	}
 
 	logx.Debugf("run: %s %s", name, argsJoined)
-	logx.Tracef("command details name=%s path=%q args=%q dir=%q deadline=%s env=%s", name, cmd.Path, args, cmd.Dir, deadlineInfo, envInfo)
+	logx.Tracef("command details name=%s path=%q args=%q dir=%q deadline=%s env=%s",
+		name, cmd.Path, args, cmd.Dir, deadlineInfo, envInfo)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -132,67 +128,71 @@ func runCommand(ctx context.Context, name string, args []string, out chan<- stri
 		return err
 	}
 
-	// stderr debug
+	// Escucha de stderr (debug), con buffer ampliado.
 	go func() {
-		s := bufio.NewScanner(stderr)
-		for s.Scan() {
-			logx.Debugf("%s stderr: %s", name, s.Text())
+		sc := bufio.NewScanner(stderr)
+		sc.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
+		for sc.Scan() {
+			logx.Debugf("%s stderr: %s", name, sc.Text())
+		}
+		if e := sc.Err(); e != nil {
+			logx.Tracef("%s stderr scan error: %v", name, e)
 		}
 	}()
 
-	s := bufio.NewScanner(stdout)
-	// Algunos programas como httpx o gau pueden emitir líneas largas (URLs con
-	// query strings extensos). El búfer por defecto de bufio.Scanner (64 KiB)
-	// provoca un error "token too long" y aborta el procesamiento del comando.
-	// Ampliamos el límite a 2 MiB para acomodar salidas más grandes sin fallar.
-	s.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
+	// Lectura de stdout con buffer ampliado para líneas largas.
+	sc := bufio.NewScanner(stdout)
+	// Algunos programas (httpx, gau, etc.) pueden emitir líneas >64KiB.
+	sc.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
+
 	lines := 0
-	var ctxErr error
-loop:
-	for s.Scan() {
+readLoop:
+	for sc.Scan() {
+		line := sc.Text()
+		// Envío "context-aware" para no quedar bloqueados si out no lee y el ctx se cancela.
 		select {
 		case <-ctx.Done():
 			logx.Warnf("ctx cancel %s", name)
-			ctxErr = ctx.Err()
-			break loop
-		default:
+			break readLoop
+		case out <- line:
 			lines++
-			out <- s.Text()
 		}
 	}
-	if ctxErr == nil {
-		select {
-		case <-ctx.Done():
-			logx.Warnf("ctx cancel %s", name)
-			ctxErr = ctx.Err()
-		default:
-		}
-	}
-	if err := s.Err(); err != nil && ctxErr == nil {
+	// Error del scanner (solo si no es por ctx cancel).
+	if err := sc.Err(); err != nil && ctx.Err() == nil {
 		logx.Errorf("scan %s: %v", name, err)
+		_ = cmd.Wait() // asegurar recolección
 		return err
 	}
+
+	// Espera de finalización del proceso.
 	if err := cmd.Wait(); err != nil {
-		if ctxErr != nil {
+		if ctx.Err() != nil {
 			logx.Debugf("wait after ctx cancel %s: %v", name, err)
 		} else {
 			logx.Errorf("wait %s: %v", name, err)
 			return err
 		}
 	}
-	if ctxErr != nil {
+
+	// Si el contexto se canceló, devolvemos su error.
+	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr
 	}
+
 	duration := time.Since(start)
 	exitCode := 0
 	if state := cmd.ProcessState; state != nil {
 		exitCode = state.ExitCode()
 	}
 	logx.Debugf("done: %s", name)
-	logx.Tracef("command finished name=%s exit=%d duration=%s lines=%d", name, exitCode, duration.Round(time.Millisecond), lines)
+	logx.Tracef("command finished name=%s exit=%d duration=%s lines=%d",
+		name, exitCode, duration.Round(time.Millisecond), lines)
+
 	return nil
 }
 
+// WithTimeout retorna un ctx con timeout (por defecto 120s).
 func WithTimeout(parent context.Context, seconds int) (context.Context, context.CancelFunc) {
 	if seconds <= 0 {
 		seconds = 120

@@ -8,19 +8,24 @@ import (
 )
 
 func Amass(ctx context.Context, target string, out chan<- string, active bool) error {
-	if !runner.HasBin("amass") {
+	bin, ok := runner.FindBin("amass")
+	if !ok {
 		out <- "meta: amass not found in PATH"
 		return runner.ErrMissingBinary
 	}
 
+	run := func(args []string) error {
+		return runner.RunCommand(ctx, bin, args, out)
+	}
+
 	passiveArgs := []string{"enum", "-passive", "-d", target}
-	passiveErr := runner.RunCommand(ctx, "amass", passiveArgs, out)
+	passiveErr := run(passiveArgs)
 	if !active {
 		return passiveErr
 	}
 
 	activeArgs := []string{"enum", "-d", target}
-	activeErr := runner.RunCommand(ctx, "amass", activeArgs, out)
+	activeErr := run(activeArgs)
 
 	switch {
 	case passiveErr == nil:

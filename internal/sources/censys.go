@@ -72,12 +72,13 @@ func Censys(ctx context.Context, domain, apiID, apiSecret string, out chan<- str
 		return errors.New("censys: missing API credentials")
 	}
 
+	// Construcción de la query: certificados cuyo SAN incluya el dominio.
 	query := fmt.Sprintf("parsed.names: %s", domain)
 	values := url.Values{}
 	values.Set("per_page", "100")
 	values.Set("q", query)
 
-	seen := map[string]struct{}{}
+	seen := make(map[string]struct{})
 
 	baseURL, err := url.Parse(censysBaseURL)
 	if err != nil {
@@ -86,12 +87,16 @@ func Censys(ctx context.Context, domain, apiID, apiSecret string, out chan<- str
 	}
 
 	nextURL := fmt.Sprintf("%s?%s", censysBaseURL, values.Encode())
+
 	for nextURL != "" {
+		// Cancelación rápida por contexto
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
+
+		// Preparar petición
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
 		if err != nil {
 			censysMeta(out, "failed creating request: %v", err)
@@ -101,96 +106,114 @@ func Censys(ctx context.Context, domain, apiID, apiSecret string, out chan<- str
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("User-Agent", "passive-rec/1.0 (+https://github.com/llvch/passiveRecon)")
 
+		// Hacer petición
 		resp, err := censysHTTPClient.Do(req)
 		if err != nil {
 			censysMeta(out, "request failed: %v", err)
 			return err
 		}
-		if resp.StatusCode != http.StatusOK {
-			if resp.Body != nil {
-				resp.Body.Close()
-			}
-			censysMeta(out, "unexpected HTTP status %d", resp.StatusCode)
-			return fmt.Errorf("censys: unexpected status %d", resp.StatusCode)
-		}
+		// Cierre seguro del body
+		func() {
+			defer resp.Body.Close()
 
-		var decoded censysResponse
-		if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-			resp.Body.Close()
-			censysMeta(out, "failed decoding response: %v", err)
+			if resp.StatusCode != http.StatusOK {
+				censysMeta(out, "unexpected HTTP status %d", resp.StatusCode)
+				err = fmt.Errorf("censys: unexpected status %d", resp.StatusCode)
+				return
+			}
+
+			var decoded censysResponse
+			if decErr := json.NewDecoder(resp.Body).Decode(&decoded); decErr != nil {
+				censysMeta(out, "failed decoding response: %v", decErr)
+				err = decErr
+				return
+			}
+
+			// Procesar resultados
+			for _, hit := range decoded.Result.Hits {
+				record := certs.Record{Source: "censys"}
+
+				// CommonName preferente, con fallback al nombre bruto
+				record.CommonName = strings.TrimSpace(hit.Parsed.Subject.CommonName)
+				if record.CommonName == "" {
+					record.CommonName = hit.Name
+				}
+
+				// DNSNames: mantenemos el orden original (no deduplicamos para no alterar Marshal()).
+				record.DNSNames = append(record.DNSNames, hit.Name)
+				record.DNSNames = append(record.DNSNames, hit.Parsed.Names...)
+
+				// Subject / Issuer DN
+				subjectDN := strings.TrimSpace(hit.Parsed.SubjectDN)
+				if subjectDN == "" {
+					subjectDN = strings.TrimSpace(hit.Parsed.Subject.DN)
+				}
+				issuerDN := strings.TrimSpace(hit.Parsed.IssuerDN)
+				if issuerDN == "" {
+					issuerDN = strings.TrimSpace(hit.Parsed.Issuer.DN)
+				}
+				if subjectDN != "" {
+					record.Subject = subjectDN
+				}
+				if issuerDN != "" {
+					record.Issuer = issuerDN
+				} else if cn := strings.TrimSpace(hit.Parsed.Issuer.CommonName); cn != "" {
+					record.Issuer = cn
+				}
+
+				// Validez y fingerprints
+				record.NotBefore = hit.Parsed.Validity.Start
+				record.NotAfter = hit.Parsed.Validity.End
+				record.SerialNumber = hit.Parsed.SerialNumber
+				record.FingerprintSHA256 = hit.FingerprintSHA256
+				record.FingerprintSHA1 = hit.FingerprintSHA1
+				record.FingerprintMD5 = hit.FingerprintMD5
+
+				record.Normalize()
+
+				// Deduplicación por clave de certificado
+				key := record.Key()
+				if key == "" {
+					continue
+				}
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+
+				encoded, encErr := record.Marshal()
+				if encErr != nil {
+					// Silencioso, igual que tu versión
+					continue
+				}
+				out <- "cert: " + encoded
+			}
+
+			// Paginación
+			next := strings.TrimSpace(decoded.Result.Links.Next)
+			if next == "" {
+				nextURL = ""
+				return
+			}
+
+			parsedNext, parseErr := url.Parse(next)
+			if parseErr != nil {
+				censysMeta(out, "failed parsing next link: %v", parseErr)
+				err = fmt.Errorf("censys: parse next link: %w", parseErr)
+				return
+			}
+			if !parsedNext.IsAbs() {
+				// Resolver contra la URL de la petición actual o la base
+				parsedNext = req.URL.ResolveReference(parsedNext)
+				if parsedNext == nil {
+					parsedNext = baseURL.ResolveReference(parsedNext)
+				}
+			}
+			nextURL = parsedNext.String()
+		}()
+		if err != nil { // recoge errores del bloque anterior
 			return err
 		}
-		resp.Body.Close()
-
-		for _, hit := range decoded.Result.Hits {
-			record := certs.Record{Source: "censys"}
-			record.CommonName = hit.Parsed.Subject.CommonName
-			if record.CommonName == "" {
-				record.CommonName = hit.Name
-			}
-			record.DNSNames = append(record.DNSNames, hit.Name)
-			record.DNSNames = append(record.DNSNames, hit.Parsed.Names...)
-			subjectDN := strings.TrimSpace(hit.Parsed.SubjectDN)
-			if subjectDN == "" {
-				subjectDN = hit.Parsed.Subject.DN
-			}
-			issuerDN := strings.TrimSpace(hit.Parsed.IssuerDN)
-			if issuerDN == "" {
-				issuerDN = hit.Parsed.Issuer.DN
-			}
-			if subjectDN != "" {
-				record.Subject = subjectDN
-			}
-			if issuerDN != "" {
-				record.Issuer = issuerDN
-			} else if hit.Parsed.Issuer.CommonName != "" {
-				record.Issuer = hit.Parsed.Issuer.CommonName
-			}
-			record.NotBefore = hit.Parsed.Validity.Start
-			record.NotAfter = hit.Parsed.Validity.End
-			record.SerialNumber = hit.Parsed.SerialNumber
-			record.FingerprintSHA256 = hit.FingerprintSHA256
-			record.FingerprintSHA1 = hit.FingerprintSHA1
-			record.FingerprintMD5 = hit.FingerprintMD5
-			record.Normalize()
-
-			key := record.Key()
-			if key == "" {
-				continue
-			}
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			seen[key] = struct{}{}
-
-			encoded, err := record.Marshal()
-			if err != nil {
-				continue
-			}
-			out <- "cert: " + encoded
-		}
-
-		next := strings.TrimSpace(decoded.Result.Links.Next)
-		if next == "" {
-			nextURL = ""
-			continue
-		}
-
-		parsedNext, err := url.Parse(next)
-		if err != nil {
-			censysMeta(out, "failed parsing next link: %v", err)
-			return fmt.Errorf("censys: parse next link: %w", err)
-		}
-		if !parsedNext.IsAbs() {
-			// Resolve relative links against either the last requested URL or the
-			// configured base URL when pagination uses relative references.
-			if req != nil && req.URL != nil {
-				parsedNext = req.URL.ResolveReference(parsedNext)
-			} else {
-				parsedNext = baseURL.ResolveReference(parsedNext)
-			}
-		}
-		nextURL = parsedNext.String()
 	}
 
 	logx.Debugf("censys query %s: %d resultados", domain, len(seen))

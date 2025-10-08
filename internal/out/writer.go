@@ -1,6 +1,7 @@
 package out
 
 import (
+	"bufio"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -11,9 +12,11 @@ import (
 )
 
 type Writer struct {
-	mu   sync.Mutex
-	file *os.File
-	seen map[string]bool
+	mu     sync.Mutex
+	file   *os.File
+	buf    *bufio.Writer
+	seen   map[string]struct{}
+	closed bool
 }
 
 func New(outdir, name string) (*Writer, error) {
@@ -25,15 +28,35 @@ func New(outdir, name string) (*Writer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Writer{file: f, seen: make(map[string]bool)}, nil
+	return &Writer{
+		file: f,
+		buf:  bufio.NewWriterSize(f, 64*1024),
+		seen: make(map[string]struct{}),
+	}, nil
 }
 
 func (w *Writer) Close() error {
-	if w.file != nil {
-		return w.file.Close()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return nil
 	}
-	return nil
+	w.closed = true
+	var err error
+	if w.buf != nil {
+		if e := w.buf.Flush(); e != nil && err == nil {
+			err = e
+		}
+	}
+	if w.file != nil {
+		if e := w.file.Close(); e != nil && err == nil {
+			err = e
+		}
+	}
+	return err
 }
+
+// --- Normalizadores ---
 
 func normalizeDomain(d string) string {
 	d = strings.TrimSpace(d)
@@ -41,6 +64,7 @@ func normalizeDomain(d string) string {
 		return ""
 	}
 
+	// Preservar "metadata" tras el primer espacio/tab si existe.
 	var meta string
 	if i := strings.IndexAny(d, " \t"); i != -1 {
 		meta = strings.TrimSpace(d[i:])
@@ -64,24 +88,24 @@ func normalizeURL(u string) string {
 		return ""
 	}
 
+	// Asegurar esquema si falta.
 	if !strings.Contains(u, "://") {
 		u = "http://" + u
 	}
 
-	// If the string already contains whitespace, assume it carries metadata
-	// (e.g. httpx status/title) and keep the original representation so the
-	// additional information remains human-readable.
+	// Si ya contiene whitespace, asumimos que trae metadata y lo devolvemos tal cual.
 	if strings.ContainsAny(u, " \t") {
 		return u
 	}
 
 	parsed, err := url.Parse(u)
 	if err != nil {
-		// Si la URL es inválida devolvemos la versión con esquema para evitar perder datos.
+		// Si la URL es inválida, devolvemos lo que tengamos (con esquema) para no perder info.
 		return u
 	}
 
 	parsed.Scheme = strings.ToLower(parsed.Scheme)
+
 	host := parsed.Hostname()
 	port := parsed.Port()
 	if host != "" {
@@ -94,40 +118,42 @@ func normalizeURL(u string) string {
 	return parsed.String()
 }
 
-func (w *Writer) WriteDomain(d string) error {
-	d = normalizeDomain(d)
-	if d == "" {
-		return nil
-	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.seen[d] {
-		return nil
-	}
-	w.seen[d] = true
-	_, err := w.file.WriteString(d + "\n")
-	return err
-}
+// --- Escrituras ---
 
-func (w *Writer) WriteRaw(line string) error {
-	line = strings.TrimSpace(line)
+func (w *Writer) writeUnique(line string) error {
 	if line == "" {
 		return nil
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.seen[line] {
+
+	if w.closed {
+		return os.ErrClosed
+	}
+
+	if _, ok := w.seen[line]; ok {
 		return nil
 	}
-	w.seen[line] = true
-	_, err := w.file.WriteString(line + "\n")
-	return err
+	w.seen[line] = struct{}{}
+
+	// Escribir + newline
+	if _, err := w.buf.WriteString(line); err != nil {
+		return err
+	}
+	if err := w.buf.WriteByte('\n'); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *Writer) WriteDomain(d string) error {
+	return w.writeUnique(normalizeDomain(d))
+}
+
+func (w *Writer) WriteRaw(line string) error {
+	return w.writeUnique(strings.TrimSpace(line))
 }
 
 func (w *Writer) WriteURL(u string) error {
-	u = normalizeURL(u)
-	if u == "" {
-		return nil
-	}
-	return w.WriteRaw(u)
+	return w.writeUnique(normalizeURL(u))
 }

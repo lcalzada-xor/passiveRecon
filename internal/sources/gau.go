@@ -14,16 +14,25 @@ func GAU(ctx context.Context, targets []string, out chan<- string) error {
 	if len(targets) == 0 {
 		return nil
 	}
+
 	bin, ok := runner.FindBin("gau", "getallurls")
 	if !ok {
-		out <- "meta: gau/getallurls not found in PATH"
+		// Mantener exactamente el mismo mensaje meta
+		if out != nil {
+			out <- "meta: gau/getallurls not found in PATH"
+		}
 		return runner.ErrMissingBinary
 	}
 
 	group, groupCtx := errgroup.WithContext(ctx)
+
+	// Concurrency sensata
 	concurrency := runtime.NumCPU()
 	if concurrency <= 0 {
 		concurrency = 1
+	}
+	if n := len(targets); n < concurrency {
+		concurrency = n
 	}
 	sem := make(chan struct{}, concurrency)
 
@@ -34,14 +43,30 @@ func GAU(ctx context.Context, targets []string, out chan<- string) error {
 			continue
 		}
 		scheduled = true
+
+		// Captura segura por iteración
 		current := target
-		group.Go(func() error {
+
+		group.Go(func() (err error) {
+			// Adquirir hueco o abortar por cancelación
 			select {
 			case sem <- struct{}{}:
 			case <-groupCtx.Done():
 				return groupCtx.Err()
 			}
-			defer func() { <-sem }()
+			// Asegurar liberación del hueco
+			defer func() {
+				<-sem
+				// Protegernos ante un posible pánico en RunCommand/consumo
+				if r := recover(); r != nil {
+					// Convertimos el pánico en error para errgroup
+					err = ctx.Err()
+					if err == nil {
+						err = context.Canceled
+					}
+				}
+			}()
+
 			return runner.RunCommand(groupCtx, bin, []string{current}, out)
 		})
 	}
@@ -50,9 +75,5 @@ func GAU(ctx context.Context, targets []string, out chan<- string) error {
 		return nil
 	}
 
-	if err := group.Wait(); err != nil {
-		return err
-	}
-	return nil
-
+	return group.Wait()
 }

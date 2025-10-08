@@ -44,23 +44,24 @@ var (
 func HTTPX(ctx context.Context, outdir string, out chan<- string) error {
 	bin, err := httpxBinFinder()
 	if err != nil {
-		out <- "active: meta: httpx not found in PATH"
+		if out != nil {
+			out <- "active: meta: httpx not found in PATH"
+		}
 		return err
 	}
 
 	originalMeta := httpxMetaEmit
 	httpxMetaEmit = func(line string) {
-		out <- line
+		if out != nil {
+			out <- line
+		}
 	}
-	defer func() {
-		httpxMetaEmit = originalMeta
-	}()
+	defer func() { httpxMetaEmit = originalMeta }()
 
 	combined, err := collectHTTPXInputs(outdir)
 	if err != nil {
 		return err
 	}
-
 	if len(combined) == 0 {
 		return nil
 	}
@@ -91,13 +92,7 @@ func collectHTTPXInputs(outdir string) ([]string, error) {
 
 	appendValue := func(line string) {
 		line = strings.TrimSpace(line)
-		if line == "" {
-			return
-		}
-		if strings.HasPrefix(line, "#") {
-			return
-		}
-		if shouldSkipHTTPXInput(line) {
+		if line == "" || strings.HasPrefix(line, "#") || shouldSkipHTTPXInput(line) {
 			return
 		}
 		if _, ok := seen[line]; ok {
@@ -118,14 +113,18 @@ func collectHTTPXInputs(outdir string) ([]string, error) {
 }
 
 func forwardHTTPXOutput(out chan<- string) (chan<- string, func()) {
-	intermediate := make(chan string)
+	// Buffer generoso para absorber ráfagas de httpx sin bloquear
+	intermediate := make(chan string, 1024)
+
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for line := range intermediate {
 			for _, normalized := range normalizeHTTPXLine(line) {
-				out <- normalized
+				if out != nil {
+					out <- normalized
+				}
 			}
 		}
 	}()
@@ -134,7 +133,6 @@ func forwardHTTPXOutput(out chan<- string) (chan<- string, func()) {
 		close(intermediate)
 		wg.Wait()
 	}
-
 	return intermediate, cleanup
 }
 
@@ -150,24 +148,30 @@ func runHTTPXWorkers(
 		return nil
 	}
 
+	// Determinar tamaño de lote real
 	batchSize := httpxBatchSize
 	if batchSize <= 0 || batchSize > len(combined) {
 		batchSize = len(combined)
 	}
 
+	// Calcular nº de lotes
+	numBatches := (len(combined) + batchSize - 1) / batchSize
+
+	// Ajustar workers a nº de lotes para evitar goroutines ociosas
 	workerCount := httpxWorkerCount
 	if workerCount <= 0 {
 		workerCount = 1
 	}
-
-	type batchRange struct {
-		start int
-		end   int
+	if numBatches < workerCount {
+		workerCount = numBatches
 	}
 
-	jobs := make(chan batchRange)
+	type batchRange struct{ start, end int }
+
+	jobs := make(chan batchRange, numBatches)
 	group, groupCtx := errgroup.WithContext(ctx)
 
+	// Productor de trabajos
 	group.Go(func() error {
 		defer close(jobs)
 		for start := 0; start < len(combined); start += batchSize {
@@ -175,17 +179,16 @@ func runHTTPXWorkers(
 			if end > len(combined) {
 				end = len(combined)
 			}
-
-			br := batchRange{start: start, end: end}
 			select {
 			case <-groupCtx.Done():
 				return nil
-			case jobs <- br:
+			case jobs <- batchRange{start: start, end: end}:
 			}
 		}
 		return nil
 	})
 
+	// Workers
 	for i := 0; i < workerCount; i++ {
 		group.Go(func() error {
 			for br := range jobs {
@@ -197,18 +200,22 @@ func runHTTPXWorkers(
 
 				tmpPath, cleanup, err := inputWriter(combined[br.start:br.end])
 				if err != nil {
+					if cleanup != nil {
+						cleanup()
+					}
 					return err
 				}
-
-				err = runCmd(groupCtx, bin, []string{
-					"-sc",
-					"-title",
-					"-content-type",
-					"-silent",
-					"-l",
-					tmpPath,
-				}, intermediate)
-				cleanup()
+				// Asegurar cleanup incluso si runCmd falla
+				func() {
+					defer cleanup()
+					err = runCmd(groupCtx, bin, []string{
+						"-sc",
+						"-title",
+						"-content-type",
+						"-silent",
+						"-l", tmpPath,
+					}, intermediate)
+				}()
 				if err != nil {
 					return err
 				}
@@ -217,11 +224,7 @@ func runHTTPXWorkers(
 		})
 	}
 
-	if err := group.Wait(); err != nil {
-		return err
-	}
-
-	return nil
+	return group.Wait()
 }
 
 func writeHTTPXInput(lines []string) (string, func(), error) {
@@ -229,21 +232,23 @@ func writeHTTPXInput(lines []string) (string, func(), error) {
 	if err != nil {
 		return "", nil, err
 	}
-
-	cleanup := func() {
-		os.Remove(tmpFile.Name())
-	}
+	cleanup := func() { _ = os.Remove(tmpFile.Name()) }
 
 	writer := bufio.NewWriter(tmpFile)
 	for _, line := range lines {
-		if _, err := writer.WriteString(line + "\n"); err != nil {
-			tmpFile.Close()
+		if _, err := writer.WriteString(line); err != nil {
+			_ = tmpFile.Close()
+			cleanup()
+			return "", nil, err
+		}
+		if err := writer.WriteByte('\n'); err != nil {
+			_ = tmpFile.Close()
 			cleanup()
 			return "", nil, err
 		}
 	}
 	if err := writer.Flush(); err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		cleanup()
 		return "", nil, err
 	}
@@ -251,7 +256,6 @@ func writeHTTPXInput(lines []string) (string, func(), error) {
 		cleanup()
 		return "", nil, err
 	}
-
 	return tmpFile.Name(), cleanup, nil
 }
 
@@ -315,7 +319,6 @@ func normalizeHTTPXLine(line string) []string {
 	for i := range out {
 		out[i] = "active: " + out[i]
 	}
-
 	return out
 }
 
@@ -358,7 +361,6 @@ func shouldSkipHTTPXInput(line string) bool {
 			return true
 		}
 	}
-
 	if strings.Contains(name, "sprite") {
 		switch ext {
 		case ".png", ".svg", ".jpg", ".jpeg", ".webp":
@@ -374,7 +376,6 @@ func extractHTTPXPath(raw string) string {
 	if trimmed == "" {
 		return ""
 	}
-
 	if strings.Contains(trimmed, "://") {
 		if parsed, err := url.Parse(trimmed); err == nil {
 			if parsed.Path != "" {
@@ -382,11 +383,9 @@ func extractHTTPXPath(raw string) string {
 			}
 		}
 	}
-
 	if idx := strings.Index(trimmed, "/"); idx != -1 {
 		return trimmed[idx:]
 	}
-
 	return ""
 }
 
@@ -394,21 +393,13 @@ func shouldForwardHTTPXRoute(hasStatus bool, status int) bool {
 	if !hasStatus {
 		return true
 	}
-	if status == 0 {
-		return false
-	}
-	if status == 404 {
+	if status == 0 || status == 404 {
 		return false
 	}
 	return true
 }
 
 func shouldEmitHTTPXDomain(hasStatus bool, status int) bool {
-	// Emit domains for any status so users can see redirects or erroring hosts
-	// discovered by httpx. This mirrors httpx's output and avoids hiding
-	// potentially interesting infrastructure such as 3xx redirectors.
-	// Even when httpx doesn't report a status we still want to keep the
-	// domain entry.
 	return true
 }
 
@@ -416,35 +407,27 @@ func parseHTTPXStatusCode(metas []string) (int, bool) {
 	if len(metas) == 0 {
 		return 0, false
 	}
-
 	status := strings.TrimSpace(metas[0])
 	if len(status) < 2 || status[0] != '[' || status[len(status)-1] != ']' {
 		return 0, false
 	}
-
 	inside := strings.TrimSpace(status[1 : len(status)-1])
 	if inside == "" {
 		return 0, false
 	}
-
-	// Some httpx status fields may include additional information (e.g. "301,301").
-	// Consider the leading numeric portion when deciding whether the target responded.
 	for i, r := range inside {
 		if !unicode.IsDigit(r) {
 			inside = inside[:i]
 			break
 		}
 	}
-
 	if inside == "" {
 		return 0, false
 	}
-
 	code, err := strconv.Atoi(inside)
 	if err != nil {
 		return 0, false
 	}
-
 	return code, true
 }
 
@@ -480,23 +463,19 @@ func extractHTTPXDomain(rawURL string) string {
 	if trimmed == "" {
 		return ""
 	}
-
 	if strings.Contains(trimmed, "://") {
-		parsed, err := url.Parse(trimmed)
-		if err == nil {
+		if parsed, err := url.Parse(trimmed); err == nil {
 			host := parsed.Hostname()
 			return strings.TrimSpace(host)
 		}
 	}
-
-	// Fallback: split on '/', then ':' for host:port.
+	// Fallback host[:port]
 	if idx := strings.Index(trimmed, "/"); idx != -1 {
 		trimmed = trimmed[:idx]
 	}
 	if idx := strings.Index(trimmed, ":"); idx != -1 {
 		trimmed = trimmed[:idx]
 	}
-
 	return strings.TrimSpace(trimmed)
 }
 
@@ -539,13 +518,11 @@ func splitHTTPXMeta(meta string) []string {
 			current.WriteRune(r)
 		}
 	}
-
 	flush()
 
 	for i, p := range parts {
 		parts[i] = strings.TrimSpace(p)
 	}
-
 	return parts
 }
 
@@ -553,8 +530,7 @@ func stripANSIEscapeSequences(s string) string {
 	if s == "" {
 		return s
 	}
-
+	// Elimina secuencias CSI y además cualquier ESC residual
 	cleaned := ansiEscapeSequences.ReplaceAllString(s, "")
-	cleaned = strings.ReplaceAll(cleaned, "\x1b", "")
-	return cleaned
+	return strings.ReplaceAll(cleaned, "\x1b", "")
 }

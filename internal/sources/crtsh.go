@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"passive-rec/internal/certs"
@@ -24,8 +24,14 @@ type crtshEntry struct {
 func CRTSH(ctx context.Context, domain string, out chan<- string) error {
 	logx.Debugf("crtsh query %s", domain)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		"https://crt.sh/?q=%25."+domain+"&output=json", nil)
+	u, _ := url.Parse("https://crt.sh/")
+	q := url.Values{}
+	// buscamos SAN que contenga subdominios del dominio objetivo: %.example.com
+	q.Set("q", "%."+domain)
+	q.Set("output", "json")
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return err
 	}
@@ -37,19 +43,19 @@ func CRTSH(ctx context.Context, domain string, out chan<- string) error {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+
+	if resp.StatusCode != http.StatusOK {
 		logx.Errorf("crtsh non-200: %d", resp.StatusCode)
 		return errors.New("crt.sh non-200")
 	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
+
 	var arr []crtshEntry
-	if err := json.Unmarshal(body, &arr); err != nil {
+	dec := json.NewDecoder(resp.Body)
+	if err := dec.Decode(&arr); err != nil {
 		logx.Errorf("crtsh json: %v", err)
 		return err
 	}
+
 	seen := make(map[string]struct{})
 	for _, entry := range arr {
 		record := certs.Record{
@@ -62,6 +68,7 @@ func CRTSH(ctx context.Context, domain string, out chan<- string) error {
 			SerialNumber: entry.SerialNumber,
 		}
 		record.Normalize()
+
 		key := record.Key()
 		if key == "" {
 			continue
@@ -77,5 +84,7 @@ func CRTSH(ctx context.Context, domain string, out chan<- string) error {
 		}
 		out <- "cert: " + encoded
 	}
+
+	logx.Tracef("crtsh %s: %d certificados únicos", domain, len(seen))
 	return nil
 }
