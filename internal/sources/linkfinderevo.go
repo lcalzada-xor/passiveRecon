@@ -816,7 +816,7 @@ func writeLinkfinderRaw(path string, payload linkfinderPayload) error {
 		fmt.Fprintln(bw, "[Resource] "+report.Resource)
 
 		if len(report.Endpoints) == 0 {
-			fmt.Fprintln(bw, "#   No endpoints were found.\n")
+			fmt.Fprintln(bw, "#   No endpoints were found.")
 			continue
 		}
 		for _, ep := range report.Endpoints {
