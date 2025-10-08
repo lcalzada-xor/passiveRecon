@@ -66,6 +66,13 @@ type Sink struct {
 	metricsMu      sync.Mutex
 	registry       *HandlerRegistry
 	ctx            *Context
+	recorder       StepRecorder
+}
+
+// StepRecorder recibe callbacks con la línea cruda emitida por cada herramienta.
+// Se usa para alimentar métricas agregadas a nivel de step.
+type StepRecorder interface {
+	RecordOutput(step, group, line string)
 }
 
 func NewSink(outdir string, active bool, target string, lineBuffer int) (*Sink, error) {
@@ -296,6 +303,9 @@ func (s *Sink) processLine(ln string) {
 	}
 	tool, raw := unwrapTool(ln)
 	line := strings.TrimSpace(raw)
+	if s.recorder != nil && tool != "" {
+		s.recorder.RecordOutput(tool, "", line)
+	}
 	if line == "" {
 		return
 	}
@@ -370,6 +380,14 @@ func (s *Sink) writerPair(key string) writerPair {
 }
 
 func (s *Sink) inActiveMode() bool { return s != nil && s.activeMode }
+
+// SetStepRecorder configura un callback opcional para métricas por herramienta.
+func (s *Sink) SetStepRecorder(rec StepRecorder) {
+	if s == nil {
+		return
+	}
+	s.recorder = rec
+}
 
 func (s *Sink) scopeAllowsDomain(domain string) bool {
 	if s == nil || s.scope == nil {

@@ -26,7 +26,8 @@ var (
 	httpxBatchSize   = 5000
 	httpxWorkerCount = runtime.NumCPU()
 
-	httpxMetaEmit = func(string) {}
+	httpxMetaEmit   = func(string) {}
+	HTTPXInputsHook = func(int) {}
 
 	lowPriorityHTTPXExtensions = map[string]struct{}{
 		".ico": {},
@@ -63,8 +64,10 @@ func HTTPX(ctx context.Context, outdir string, out chan<- string) error {
 		return err
 	}
 	if len(combined) == 0 {
+		HTTPXInputsHook(0)
 		return nil
 	}
+	HTTPXInputsHook(len(combined))
 
 	intermediate, cleanup := forwardHTTPXOutput(out)
 	defer cleanup()

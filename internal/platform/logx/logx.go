@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +50,9 @@ type Config struct {
 	prefix     string
 }
 
+// Fields representa pares clave-valor adicionales que se adjuntarán al log.
+type Fields map[string]any
+
 var cfg = &Config{
 	level:      LevelInfo,
 	out:        os.Stderr,
@@ -60,6 +64,16 @@ var cfg = &Config{
 	useUTC:     false,
 	prefix:     "",
 }
+
+var sampleRates = map[string]int{
+	"httpx": 25,
+	"dnsx":  25,
+}
+
+var sampleState = struct {
+	sync.Mutex
+	counters map[string]int64
+}{counters: make(map[string]int64)}
 
 // SetVerbosity mantiene compat con tu API anterior: 0=errores, 1=info, 2=debug, 3=trace
 func SetVerbosity(v int) {
@@ -177,6 +191,12 @@ func Infof(format string, a ...interface{})  { logf(LevelInfo, format, a...) }
 func Debugf(format string, a ...interface{}) { logf(LevelDebug, format, a...) }
 func Tracef(format string, a ...interface{}) { logf(LevelTrace, format, a...) }
 
+func Error(msg string, fields Fields) { logFields(LevelError, msg, fields) }
+func Warn(msg string, fields Fields)  { logFields(LevelWarn, msg, fields) }
+func Info(msg string, fields Fields)  { logFields(LevelInfo, msg, fields) }
+func Debug(msg string, fields Fields) { logFields(LevelDebug, msg, fields) }
+func Trace(msg string, fields Fields) { logFields(LevelTrace, msg, fields) }
+
 // Compat con API anterior V
 func V(level int, format string, a ...interface{}) {
 	switch {
@@ -192,10 +212,17 @@ func V(level int, format string, a ...interface{}) {
 }
 
 func logf(lvl Level, format string, a ...interface{}) {
-	// snapshot de config con RLock mínimo
+	logMessage(lvl, fmt.Sprintf(format, a...), nil, 3)
+}
+
+func logFields(lvl Level, msg string, fields Fields) {
+	logMessage(lvl, msg, fields, 3)
+}
+
+func logMessage(lvl Level, msg string, fields Fields, callerSkip int) {
 	cfg.mu.RLock()
 	min := cfg.level
-	if lvl > min && lvl != LevelError { // Error siempre imprime
+	if lvl > min && lvl != LevelError {
 		cfg.mu.RUnlock()
 		return
 	}
@@ -209,18 +236,19 @@ func logf(lvl Level, format string, a ...interface{}) {
 	prefix := cfg.prefix
 	cfg.mu.RUnlock()
 
+	if shouldSample(lvl, fields) {
+		return
+	}
+
 	now := time.Now()
 	if useUTC {
 		now = now.UTC()
 	}
 
-	msg := fmt.Sprintf(format, a...)
-
 	if jsonMode {
-		payload := map[string]any{
-			"level": levelMeta[lvl].label[1 : len(levelMeta[lvl].label)-1], // sin corchetes
-			"msg":   msg,
-		}
+		payload := make(map[string]any, 4+len(fields))
+		payload["level"] = levelMeta[lvl].label[1 : len(levelMeta[lvl].label)-1]
+		payload["msg"] = msg
 		if withTime {
 			payload["time"] = now.Format(tf)
 		}
@@ -228,10 +256,16 @@ func logf(lvl Level, format string, a ...interface{}) {
 			payload["prefix"] = prefix
 		}
 		if withCaller {
-			if file, line, ok := caller(3); ok {
+			if file, line, ok := caller(callerSkip); ok {
 				payload["file"] = file
 				payload["line"] = line
 			}
+		}
+		for k, v := range fields {
+			if k == "" {
+				continue
+			}
+			payload[k] = v
 		}
 		enc := json.NewEncoder(out)
 		_ = enc.Encode(payload)
@@ -251,13 +285,83 @@ func logf(lvl Level, format string, a ...interface{}) {
 	b.WriteString(label)
 	b.WriteByte(' ')
 	if withCaller {
-		if file, line, ok := caller(3); ok {
+		if file, line, ok := caller(callerSkip); ok {
 			fmt.Fprintf(&b, "(%s:%d) ", file, line)
 		}
 	}
 	b.WriteString(msg)
+	appendFormattedFields(&b, fields)
 	b.WriteByte('\n')
 	_, _ = out.Write(b.Bytes())
+}
+
+func appendFormattedFields(b *bytes.Buffer, fields Fields) {
+	if len(fields) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(fields))
+	for k := range fields {
+		if k == "" {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	if len(keys) == 0 {
+		return
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := fields[k]
+		b.WriteByte(' ')
+		b.WriteString(k)
+		b.WriteByte('=')
+		writeValue(b, v)
+	}
+}
+
+func writeValue(b *bytes.Buffer, v any) {
+	switch val := v.(type) {
+	case string:
+		if strings.ContainsAny(val, " \t") {
+			fmt.Fprintf(b, "%q", val)
+			return
+		}
+		b.WriteString(val)
+	case fmt.Stringer:
+		writeValue(b, val.String())
+	default:
+		fmt.Fprintf(b, "%v", val)
+	}
+}
+
+func shouldSample(lvl Level, fields Fields) bool {
+	if lvl < LevelDebug || len(fields) == 0 {
+		return false
+	}
+	toolRaw, ok := fields["tool"]
+	if !ok {
+		return false
+	}
+	tool, ok := toolRaw.(string)
+	if !ok {
+		return false
+	}
+	tool = strings.ToLower(strings.TrimSpace(tool))
+	if tool == "" {
+		return false
+	}
+	rate, ok := sampleRates[tool]
+	if !ok || rate <= 1 {
+		return false
+	}
+	sampleState.Lock()
+	defer sampleState.Unlock()
+	count := sampleState.counters[tool] + 1
+	sampleState.counters[tool] = count
+	if count%int64(rate) != 1 {
+		return true
+	}
+	return false
 }
 
 func labelFor(lvl Level, withColor bool) string {
