@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"passive-rec/internal/adapters/sources"
+	"passive-rec/internal/core/materializer"
 	"passive-rec/internal/core/pipeline"
 	"passive-rec/internal/core/runner"
 	"passive-rec/internal/platform/config"
@@ -118,6 +119,11 @@ func Run(cfg *config.Config) error {
 
 	sink.Flush()
 	executePostProcessing(ctx, cfg, sink, bar, unknown)
+	sink.Flush()
+
+	if err := materializer.Materialize(cfg.OutDir); err != nil {
+		return err
+	}
 
 	logx.Infof("modo active=%v; terminado", cfg.Active)
 	return nil

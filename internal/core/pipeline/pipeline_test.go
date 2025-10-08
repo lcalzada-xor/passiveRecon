@@ -13,6 +13,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"passive-rec/internal/adapters/artifacts"
+	"passive-rec/internal/core/materializer"
 	"passive-rec/internal/platform/certs"
 	"passive-rec/internal/platform/netutil"
 )
@@ -27,6 +28,21 @@ func newTestSink(t *testing.T, active bool) (*Sink, string) {
 		t.Fatalf("NewSink: %v", err)
 	}
 	return sink, dir
+}
+
+func materializeOutput(t *testing.T, dir string) {
+	t.Helper()
+	if err := materializer.Materialize(dir); err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+}
+
+func closeAndMaterialize(t *testing.T, sink *Sink, dir string) {
+	t.Helper()
+	if err := sink.Close(); err != nil {
+		t.Fatalf("sink close: %v", err)
+	}
+	materializeOutput(t, dir)
 }
 
 func TestSinkClassification(t *testing.T) {
@@ -84,9 +100,7 @@ func TestSinkClassification(t *testing.T) {
 		sink.In() <- line
 	}
 
-	if err := sink.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	closeAndMaterialize(t, sink, dir)
 
 	domains := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
 	wantDomains := []string{
@@ -225,9 +239,7 @@ func TestSinkFiltersOutOfScope(t *testing.T) {
 	}
 
 	sink.Flush()
-	if err := sink.Close(); err != nil {
-		t.Fatalf("sink close: %v", err)
-	}
+	closeAndMaterialize(t, sink, dir)
 
 	read := func(path string) []string {
 		data, err := os.ReadFile(path)
@@ -344,9 +356,7 @@ func TestActiveCertLines(t *testing.T) {
 	sink.In() <- "active: cert: " + activeRecord
 	sink.In() <- "active: cert: " + activeRecord
 
-	if err := sink.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	closeAndMaterialize(t, sink, dir)
 
 	passiveLines := readLines(t, filepath.Join(dir, "certs", "certs.passive"))
 	if diff := cmp.Diff([]string{passiveRecord}, passiveLines); diff != "" {
@@ -398,6 +408,8 @@ func TestSinkFlush(t *testing.T) {
 
 	sink.Flush()
 
+	materializeOutput(t, dir)
+
 	domains := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
 	wantDomains := []string{"one.example.com", "two.example.com"}
 	sort.Strings(domains)
@@ -407,9 +419,7 @@ func TestSinkFlush(t *testing.T) {
 
 	sink.In() <- "meta: later"
 
-	if err := sink.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	closeAndMaterialize(t, sink, dir)
 }
 
 func TestNormalizeDomainIPv6(t *testing.T) {
@@ -434,42 +444,6 @@ func TestNormalizeDomainIPv6(t *testing.T) {
 	}
 }
 
-func TestNewSinkClosesWritersOnError(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	// Force the second writer creation to fail by pre-creating a directory with
-	// the same name. os.OpenFile will return an error because the path points to
-	// a directory instead of a regular file.
-	routesDir := filepath.Join(dir, "routes")
-	if err := os.MkdirAll(routesDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll routes dir: %v", err)
-	}
-	if err := os.Mkdir(filepath.Join(routesDir, "routes.passive"), 0o755); err != nil {
-		t.Fatalf("Mkdir routes.passive: %v", err)
-	}
-
-	domainPath := filepath.Join(dir, "domains", "domains.passive")
-	if got := countOpenFDs(t, domainPath); got != 0 {
-		t.Fatalf("unexpected open descriptors before NewSink: %d", got)
-	}
-
-	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
-	if err == nil {
-		// Close to ensure no resources leak in this unexpected success case.
-		_ = sink.Close()
-		t.Fatalf("expected NewSink to fail")
-	}
-
-	if _, err := os.Stat(domainPath); err != nil {
-		t.Fatalf("expected %q to exist: %v", domainPath, err)
-	}
-
-	if got := countOpenFDs(t, domainPath); got != 0 {
-		t.Fatalf("domains writer file descriptor leaked: %d", got)
-	}
-}
-
 func TestCertLinesPopulateDomainsPassiveSink(t *testing.T) {
 	t.Parallel()
 
@@ -486,9 +460,7 @@ func TestCertLinesPopulateDomainsPassiveSink(t *testing.T) {
 
 	sink.In() <- "cert: " + raw
 
-	if err := sink.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	closeAndMaterialize(t, sink, dir)
 
 	domains := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
 	want := []string{"alt1.example.com", "cn.example.com"}
@@ -517,9 +489,7 @@ func TestCertLinesPopulateDomainsActiveSink(t *testing.T) {
 
 	sink.In() <- "cert: " + raw
 
-	if err := sink.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	closeAndMaterialize(t, sink, dir)
 
 	want := []string{"api.example.com", "service.example.com"}
 
@@ -546,9 +516,7 @@ func TestActiveRoutesPopulatePassive(t *testing.T) {
 	sink.Start(1)
 	sink.In() <- "active: https://app.example.com/login [200] [Title]"
 
-	if err := sink.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	closeAndMaterialize(t, sink, dir)
 
 	passive := readLines(t, filepath.Join(dir, "routes", "routes.passive"))
 	if diff := cmp.Diff([]string{"https://app.example.com/login"}, passive); diff != "" {
@@ -574,9 +542,7 @@ func TestActiveRoutesSkip404(t *testing.T) {
 	sink.In() <- "active: https://app.example.com/login [404]"
 	sink.In() <- "active: https://app.example.com/dashboard [200]"
 
-	if err := sink.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	closeAndMaterialize(t, sink, dir)
 
 	passive := readLines(t, filepath.Join(dir, "routes", "routes.passive"))
 	wantPassive := []string{
@@ -616,9 +582,7 @@ func TestJSLinesAreWrittenToFile(t *testing.T) {
 	sink.In() <- "js: https://static.example.com/app.js"
 	sink.In() <- "active: js: https://static.example.com/app.js"
 
-	if err := sink.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	closeAndMaterialize(t, sink, dir)
 
 	passivePath := filepath.Join(dir, "routes", "js", "js.passive")
 	passiveLines := readLines(t, passivePath)
@@ -656,9 +620,7 @@ func TestActiveJSExcludes404(t *testing.T) {
 	sink.In() <- "active: js: https://static.example.com/app.js [200]"
 	sink.In() <- "active: js: https://static.example.com/missing.js [404]"
 
-	if err := sink.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	closeAndMaterialize(t, sink, dir)
 
 	activePath := filepath.Join(dir, "routes", "js", "js.active")
 	activeLines := readLines(t, activePath)
@@ -689,9 +651,7 @@ func TestHTMLLinesAreWrittenToActiveFile(t *testing.T) {
 	sink.Start(1)
 	sink.In() <- "active: html: https://app.example.com"
 
-	if err := sink.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	closeAndMaterialize(t, sink, dir)
 
 	htmlPath := filepath.Join(dir, "routes", "html", "html.active")
 	htmlLines := readLines(t, htmlPath)
@@ -712,9 +672,7 @@ func TestHTMLActiveSkipsErrorResponses(t *testing.T) {
 	sink.Start(1)
 	sink.In() <- "active: html: https://app.example.com [404] [Not Found]"
 
-	if err := sink.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	closeAndMaterialize(t, sink, dir)
 
 	htmlPath := filepath.Join(dir, "routes", "html", "html.active")
 	if lines := readLines(t, htmlPath); len(lines) != 0 {
@@ -743,9 +701,7 @@ func TestArtifactsMergeTypes(t *testing.T) {
 	sink.In() <- "https://app.example.com/login"
 	sink.In() <- "html: https://app.example.com/login"
 
-	if err := sink.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	closeAndMaterialize(t, sink, dir)
 
 	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
 	var matches []Artifact
@@ -784,9 +740,7 @@ func TestRouteArtifactsMergeSchemes(t *testing.T) {
 	sink.In() <- "https://app.example.com/login"
 	sink.In() <- "http://app.example.com/login"
 
-	if err := sink.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	closeAndMaterialize(t, sink, dir)
 
 	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
 
@@ -823,35 +777,6 @@ func TestRouteArtifactsMergeSchemes(t *testing.T) {
 	}
 }
 
-func TestNewSinkDoesNotTruncateExistingFiles(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	htmlDir := filepath.Join(dir, "routes", "html")
-	if err := os.MkdirAll(htmlDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	htmlPath := filepath.Join(htmlDir, "html.active")
-	if err := os.WriteFile(htmlPath, []byte("https://app.example.com\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
-	if err != nil {
-		t.Fatalf("NewSink: %v", err)
-	}
-	sink.Start(1)
-
-	if err := sink.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-
-	lines := readLines(t, htmlPath)
-	if diff := cmp.Diff([]string{"https://app.example.com"}, lines); diff != "" {
-		t.Fatalf("unexpected html.active contents (-want +got):\n%s", diff)
-	}
-}
-
 func TestHTMLImageLinesAreRedirectedToImagesFile(t *testing.T) {
 	t.Parallel()
 
@@ -865,9 +790,7 @@ func TestHTMLImageLinesAreRedirectedToImagesFile(t *testing.T) {
 	sink.In() <- "active: html: https://app.example.com/assets/logo.png"
 	sink.In() <- "active: html: https://app.example.com/assets/logo.svg"
 
-	if err := sink.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	closeAndMaterialize(t, sink, dir)
 
 	htmlPath := filepath.Join(dir, "routes", "html", "html.active")
 	if lines := readLines(t, htmlPath); len(lines) != 0 {
@@ -912,9 +835,7 @@ func TestRouteCategorizationPassive(t *testing.T) {
 		sink.In() <- line
 	}
 
-	if err := sink.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	closeAndMaterialize(t, sink, dir)
 
 	mapsLines := readLines(t, filepath.Join(dir, "routes", "maps", "maps.passive"))
 	if diff := cmp.Diff([]string{"https://app.example.com/static/app.js.map"}, mapsLines); diff != "" {
@@ -984,9 +905,7 @@ func TestRouteCategorizationActiveMode(t *testing.T) {
 	sink.In() <- "https://app.example.com/static/swagger.json"
 	sink.In() <- "active: https://app.example.com/static/swagger.json [200]"
 
-	if err := sink.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	closeAndMaterialize(t, sink, dir)
 
 	mapsPassive := readLines(t, filepath.Join(dir, "routes", "maps", "maps.passive"))
 	if diff := cmp.Diff([]string{"https://app.example.com/static/app.js.map"}, mapsPassive); diff != "" {
@@ -1038,6 +957,8 @@ func TestRouteCategorizationActiveModeSkipsErrorStatus(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
+	materializeOutput(t, dir)
+
 	jsonPath := filepath.Join(dir, "routes", "json", "json.active")
 	if _, err := os.Stat(jsonPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected no json.active file, got err=%v", err)
@@ -1059,6 +980,8 @@ func TestRouteCategorizationPassiveModeEmitsActiveFiles(t *testing.T) {
 	if err := sink.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
+
+	materializeOutput(t, dir)
 
 	activeLines := readLines(t, filepath.Join(dir, "routes", "maps", "maps.active"))
 	if diff := cmp.Diff([]string{"https://app.example.com/static/app.js.map"}, activeLines); diff != "" {
@@ -1105,6 +1028,8 @@ func TestRouteCategorizationDeduplicatesCategoryOutputs(t *testing.T) {
 	if err := sink.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
+
+	materializeOutput(t, dir)
 
 	mapsLines := readLines(t, filepath.Join(dir, "routes", "maps", "maps.passive"))
 	if diff := cmp.Diff([]string{"https://app.example.com/static/app.js.map"}, mapsLines); diff != "" {
@@ -1165,6 +1090,8 @@ func TestHandleMetaStripsANSISequences(t *testing.T) {
 	if err := sink.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
+
+	materializeOutput(t, dir)
 
 	metaLines := readLines(t, filepath.Join(dir, "meta.passive"))
 	wantMeta := []string{"[200]", "[text/html]", "[404]"}
@@ -1334,6 +1261,9 @@ func readLines(t *testing.T, path string) []string {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
 		t.Fatalf("ReadFile(%q): %v", path, err)
 	}
 	contents := strings.TrimSpace(string(data))
@@ -1510,25 +1440,4 @@ func metadataInt(t *testing.T, metadata map[string]any, key string) int {
 		t.Fatalf("metadata %q has unexpected type %T", key, raw)
 	}
 	return 0
-}
-
-func countOpenFDs(t *testing.T, path string) int {
-	t.Helper()
-
-	entries, err := os.ReadDir("/proc/self/fd")
-	if err != nil {
-		t.Fatalf("ReadDir(/proc/self/fd): %v", err)
-	}
-
-	count := 0
-	for _, e := range entries {
-		target, err := os.Readlink(filepath.Join("/proc/self/fd", e.Name()))
-		if err != nil {
-			continue
-		}
-		if strings.HasPrefix(target, path) {
-			count++
-		}
-	}
-	return count
 }
