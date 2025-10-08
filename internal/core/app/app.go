@@ -22,6 +22,7 @@ type sink interface {
 	In() chan<- string
 	Flush()
 	Close() error
+	SetStepRecorder(pipeline.StepRecorder)
 }
 
 var (
@@ -104,18 +105,26 @@ func Run(cfg *config.Config) error {
 
 	metrics := newPipelineMetrics()
 	opts.metrics = metrics
+	sink.SetStepRecorder(metrics)
+	originalHTTPXHook := sources.HTTPXInputsHook
+	sources.HTTPXInputsHook = func(count int) {
+		if metrics != nil {
+			metrics.RecordInputs(toolHTTPX, "", int64(count))
+		}
+	}
+	defer func() { sources.HTTPXInputsHook = originalHTTPXHook }()
 
 	pipelineStart := time.Now()
 	runPipeline(ctx, steps, opts)
 	pipelineDuration := time.Since(pipelineStart)
 	logx.Infof("orquestador: pipeline ejecutado en %s", pipelineDuration.Round(time.Millisecond))
 
-	if metrics != nil {
-		logPipelineMetrics(metrics)
-		if err := writePipelineMetricsReport(cfg.OutDir, metrics, pipelineDuration); err != nil {
-			logx.Warnf("no se pudo escribir metrics: %v", err)
-		}
-	}
+        if metrics != nil {
+                logPipelineMetrics(metrics, runHash, pipelineDuration)
+                if err := writePipelineMetricsReport(cfg.OutDir, metrics, pipelineDuration); err != nil {
+                        logx.Warnf("no se pudo escribir metrics: %v", err)
+                }
+        }
 
 	sink.Flush()
 	executePostProcessing(ctx, cfg, sink, bar, unknown)

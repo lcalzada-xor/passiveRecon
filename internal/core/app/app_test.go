@@ -15,6 +15,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"passive-rec/internal/adapters/artifacts"
+	"passive-rec/internal/core/pipeline"
 	"passive-rec/internal/core/runner"
 	"passive-rec/internal/platform/config"
 )
@@ -360,9 +361,12 @@ func TestDedupeDomainListNormalizesAndFilters(t *testing.T) {
 		{Type: "domain", Value: "api.example.com", Up: true},
 	})
 
-	got, err := dedupeDomainList(dir)
+	got, total, err := dedupeDomainList(dir)
 	if err != nil {
 		t.Fatalf("dedupeDomainList returned error: %v", err)
+	}
+	if total != 8 {
+		t.Fatalf("expected raw total 8, got %d", total)
 	}
 
 	want := []string{"2001:db8::1", "api.example.com", "example.com", "login.example.com", "www.example.com"}
@@ -409,7 +413,7 @@ func TestDedupeDomainListWriteError(t *testing.T) {
 		t.Fatalf("mkdir conflicting path: %v", err)
 	}
 
-	if _, err := dedupeDomainList(dir); err == nil {
+	if _, _, err := dedupeDomainList(dir); err == nil {
 		t.Fatalf("expected error when dedupe output path is a directory")
 	} else {
 		var pathErr *os.PathError
@@ -420,12 +424,13 @@ func TestDedupeDomainListWriteError(t *testing.T) {
 }
 
 type testSink struct {
-	outdir  string
-	lines   chan string
-	pending []string
-	records []artifacts.Artifact
-	mu      sync.Mutex
-	onFlush func()
+	outdir   string
+	lines    chan string
+	pending  []string
+	records  []artifacts.Artifact
+	mu       sync.Mutex
+	onFlush  func()
+	recorder pipeline.StepRecorder
 }
 
 func newTestSink(outdir string) (*testSink, error) {
@@ -534,6 +539,10 @@ drained:
 func (s *testSink) Close() error {
 	close(s.lines)
 	return nil
+}
+
+func (s *testSink) SetStepRecorder(rec pipeline.StepRecorder) {
+	s.recorder = rec
 }
 
 func (s *testSink) appendArtifacts(records ...artifacts.Artifact) {

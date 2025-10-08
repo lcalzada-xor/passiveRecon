@@ -11,16 +11,16 @@ import (
 	"passive-rec/internal/platform/netutil"
 )
 
-func dedupeDomainList(outdir string) ([]string, error) {
+func dedupeDomainList(outdir string) ([]string, int, error) {
 	values, err := artifacts.CollectValues(outdir, "domain", artifacts.AnyState)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if err := writeDedupeFile(outdir, nil); err != nil {
-				return nil, err
+				return nil, 0, err
 			}
-			return nil, nil
+			return nil, 0, nil
 		}
-		return nil, err
+		return nil, 0, err
 	}
 
 	seen := make(map[string]struct{})
@@ -39,9 +39,9 @@ func dedupeDomainList(outdir string) ([]string, error) {
 
 	sort.Strings(domains)
 	if err := writeDedupeFile(outdir, domains); err != nil {
-		return nil, err
+		return nil, len(values), err
 	}
-	return domains, nil
+	return domains, len(values), nil
 }
 
 func writeDedupeFile(outdir string, domains []string) (err error) {

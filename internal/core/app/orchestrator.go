@@ -95,7 +95,7 @@ func emitMeta(opts orchestratorOptions, tool, msg string) {
 
 // toolInputChannel crea un proxy con buffer y cancelación para enviar al sink.
 // Mantiene la API pública (función no exportada) pero añade robustez interna.
-func toolInputChannel(ctx context.Context, s sink, tool string) (chan<- string, func()) {
+func toolInputChannel(ctx context.Context, s sink, tool, _ string, _ *pipelineMetrics) (chan<- string, func()) {
 	type toolAware interface {
 		InWithTool(string) (chan<- string, func())
 	}
@@ -286,7 +286,7 @@ func prepareStepTask(ctx context.Context, step toolStep, state *pipelineState, o
 		task = opts.bar.Wrap(step.Name, task)
 	}
 	if opts.metrics != nil {
-		task = opts.metrics.Wrap(step.Name, timeout, task)
+		task = opts.metrics.Wrap(step.Name, step.Group, timeout, task)
 	}
 
 	return func() error {
@@ -336,7 +336,7 @@ func runConcurrentSteps(ctx context.Context, group string, steps []toolStep, sta
 
 	start := time.Now()
 	if opts.metrics != nil {
-		// Podrías añadir un span por grupo en tu sistema de métricas si te interesa.
+		opts.metrics.RecordGroupStart(group, maxConc)
 	}
 	logx.Tracef("grupo %s: inicio con concurrencia=%d, steps=%d", group, maxConc, len(steps))
 
@@ -346,6 +346,9 @@ func runConcurrentSteps(ctx context.Context, group string, steps []toolStep, sta
 		task, ok := executeStep(ctx, step, state, opts)
 		if !ok {
 			continue
+		}
+		if opts.metrics != nil {
+			opts.metrics.RecordEnqueue(step.Name, group)
 		}
 		wg.Go(func() error {
 			// Control de concurrencia
@@ -362,6 +365,9 @@ func runConcurrentSteps(ctx context.Context, group string, steps []toolStep, sta
 
 	elapsed := time.Since(start).Round(time.Millisecond)
 	logx.Tracef("grupo %s: fin en %s", group, elapsed)
+	if opts.metrics != nil {
+		opts.metrics.RecordGroupEnd(group)
+	}
 }
 
 func computeStepTimeout(step toolStep, state *pipelineState, opts orchestratorOptions) int {
@@ -443,37 +449,55 @@ func requireDedupedDomains(message string) preconditionFunc {
 // --- Steps ----------------------------------------------------------------------
 
 func stepAmass(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(ctx, opts.sink, toolAmass)
+	if opts.metrics != nil {
+		opts.metrics.RecordInputs(toolAmass, "subdomain-sources", 1)
+	}
+	input, done := toolInputChannel(ctx, opts.sink, toolAmass, "subdomain-sources", opts.metrics)
 	defer done()
 	return sourceAmass(ctx, opts.cfg.Target, input, opts.cfg.Active)
 }
 
 func stepSubfinder(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(ctx, opts.sink, toolSubfinder)
+	if opts.metrics != nil {
+		opts.metrics.RecordInputs(toolSubfinder, "subdomain-sources", 1)
+	}
+	input, done := toolInputChannel(ctx, opts.sink, toolSubfinder, "subdomain-sources", opts.metrics)
 	defer done()
 	return sourceSubfinder(ctx, opts.cfg.Target, input)
 }
 
 func stepAssetfinder(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(ctx, opts.sink, toolAssetfinder)
+	if opts.metrics != nil {
+		opts.metrics.RecordInputs(toolAssetfinder, "subdomain-sources", 1)
+	}
+	input, done := toolInputChannel(ctx, opts.sink, toolAssetfinder, "subdomain-sources", opts.metrics)
 	defer done()
 	return sourceAssetfinder(ctx, opts.cfg.Target, input)
 }
 
 func stepRDAP(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(ctx, opts.sink, toolRDAP)
+	if opts.metrics != nil {
+		opts.metrics.RecordInputs(toolRDAP, "subdomain-sources", 1)
+	}
+	input, done := toolInputChannel(ctx, opts.sink, toolRDAP, "subdomain-sources", opts.metrics)
 	defer done()
 	return sourceRDAP(ctx, opts.cfg.Target, input)
 }
 
 func stepCRTSh(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(ctx, opts.sink, toolCRTSh)
+	if opts.metrics != nil {
+		opts.metrics.RecordInputs(toolCRTSh, "cert-sources", 1)
+	}
+	input, done := toolInputChannel(ctx, opts.sink, toolCRTSh, "cert-sources", opts.metrics)
 	defer done()
 	return sourceCRTSh(ctx, opts.cfg.Target, input)
 }
 
 func stepCensys(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(ctx, opts.sink, toolCensys)
+	if opts.metrics != nil {
+		opts.metrics.RecordInputs(toolCensys, "cert-sources", 1)
+	}
+	input, done := toolInputChannel(ctx, opts.sink, toolCensys, "cert-sources", opts.metrics)
 	defer done()
 	return sourceCensys(ctx, opts.cfg.Target, opts.cfg.CensysAPIID, opts.cfg.CensysAPISecret, input)
 }
@@ -481,12 +505,17 @@ func stepCensys(ctx context.Context, _ *pipelineState, opts orchestratorOptions)
 func stepDedupe(ctx context.Context, state *pipelineState, opts orchestratorOptions) error {
 	opts.sink.Flush()
 
-	domains, err := dedupeDomainList(opts.cfg.OutDir)
+	domains, total, err := dedupeDomainList(opts.cfg.OutDir)
 	if err != nil {
 		return err
 	}
 	state.DedupedDomains = domains
 	state.DomainListFile = filepath.Join("domains", "domains.dedupe")
+
+	if opts.metrics != nil {
+		opts.metrics.RecordInputs(toolDedupe, "", int64(total))
+		opts.metrics.RecordOutputCount(toolDedupe, "", int64(len(domains)))
+	}
 
 	emitMeta(opts, toolDedupe, fmt.Sprintf("dedupe retained %d domains", len(domains)))
 	if len(domains) == 0 {
@@ -494,7 +523,10 @@ func stepDedupe(ctx context.Context, state *pipelineState, opts orchestratorOpti
 	}
 
 	if opts.cfg.Active {
-		input, done := toolInputChannel(ctx, opts.sink, toolDNSX)
+		if opts.metrics != nil {
+			opts.metrics.RecordInputs(toolDNSX, "", int64(len(domains)))
+		}
+		input, done := toolInputChannel(ctx, opts.sink, toolDNSX, "", opts.metrics)
 		defer done()
 		if err := sourceDNSX(ctx, domains, opts.cfg.OutDir, input); err != nil {
 			return err
@@ -504,34 +536,38 @@ func stepDedupe(ctx context.Context, state *pipelineState, opts orchestratorOpti
 }
 
 func stepWayback(ctx context.Context, state *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(ctx, opts.sink, toolWayback)
+	if opts.metrics != nil {
+		opts.metrics.RecordInputs(toolWayback, "archive-sources", int64(len(state.DedupedDomains)))
+	}
+	input, done := toolInputChannel(ctx, opts.sink, toolWayback, "archive-sources", opts.metrics)
 	defer done()
 	return sourceWayback(ctx, state.DedupedDomains, input)
 }
 
 func stepGAU(ctx context.Context, state *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(ctx, opts.sink, toolGAU)
+	if opts.metrics != nil {
+		opts.metrics.RecordInputs(toolGAU, "archive-sources", int64(len(state.DedupedDomains)))
+	}
+	input, done := toolInputChannel(ctx, opts.sink, toolGAU, "archive-sources", opts.metrics)
 	defer done()
 	return sourceGAU(ctx, state.DedupedDomains, input)
 }
 
 func stepHTTPX(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
 	opts.sink.Flush()
-	input, done := toolInputChannel(ctx, opts.sink, toolHTTPX)
+	input, done := toolInputChannel(ctx, opts.sink, toolHTTPX, "", opts.metrics)
 	defer done()
-	err := sourceHTTPX(ctx, opts.cfg.OutDir, input)
-	opts.sink.Flush()
-	return err
+	return sourceHTTPX(ctx, opts.cfg.OutDir, input)
 }
 
 func stepSubJS(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(ctx, opts.sink, toolSubJS)
+	input, done := toolInputChannel(ctx, opts.sink, toolSubJS, "", opts.metrics)
 	defer done()
 	return sourceSubJS(ctx, opts.cfg.OutDir, input)
 }
 
 func stepLinkFinderEVO(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
-	input, done := toolInputChannel(ctx, opts.sink, toolLinkFinderEVO)
+	input, done := toolInputChannel(ctx, opts.sink, toolLinkFinderEVO, "", opts.metrics)
 	defer done()
 	return sourceLinkFinderEVO(ctx, opts.cfg.Target, opts.cfg.OutDir, input)
 }

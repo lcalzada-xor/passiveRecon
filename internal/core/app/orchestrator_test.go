@@ -27,10 +27,11 @@ func newNoopSink() *noopSink {
 	return &noopSink{ch: make(chan string, 10)}
 }
 
-func (s *noopSink) Start(int)         {}
-func (s *noopSink) In() chan<- string { return s.ch }
-func (s *noopSink) Flush()            {}
-func (s *noopSink) Close() error      { close(s.ch); return nil }
+func (s *noopSink) Start(int)                             {}
+func (s *noopSink) In() chan<- string                     { return s.ch }
+func (s *noopSink) Flush()                                {}
+func (s *noopSink) Close() error                          { close(s.ch); return nil }
+func (s *noopSink) SetStepRecorder(pipeline.StepRecorder) {}
 
 func TestRunPipelineConcurrentGroupProgress(t *testing.T) {
 	var buf bytes.Buffer
