@@ -152,8 +152,8 @@ func writeSubJSInput(lines []string) (string, func(), error) {
 	}
 
 	cleanup := func() {
-		tmpFile.Close()
-		os.Remove(tmpFile.Name())
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpFile.Name())
 	}
 
 	writer := bufio.NewWriter(tmpFile)
@@ -264,6 +264,8 @@ func doJSRequest(ctx context.Context, client *http.Client, method, url string) (
 	if err != nil {
 		return 0, err
 	}
-	resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	return resp.StatusCode, nil
 }

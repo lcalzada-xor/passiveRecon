@@ -45,7 +45,7 @@ func NormalizeDomain(line string) string {
 		// preferimos Hostname(); si no, usamos Host (para conservar literal).
 		hostPort := parsed.Host
 		hostname := parsed.Hostname()
-		if hostname != "" && !(strings.Count(hostPort, ":") > 1 && !strings.Contains(hostPort, "[")) {
+		if hostname != "" && (strings.Count(hostPort, ":") <= 1 || strings.Contains(hostPort, "[")) {
 			candidate = hostname
 		} else if hostPort != "" {
 			candidate = hostPort

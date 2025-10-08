@@ -265,7 +265,9 @@ func runSingleStep(ctx context.Context, step toolStep, state *pipelineState, opt
 	if !ok {
 		return
 	}
-	task()
+	if err := task(); err != nil && !errors.Is(err, runner.ErrMissingBinary) {
+		logx.Warnf("source error: %v", err)
+	}
 }
 
 func runConcurrentSteps(ctx context.Context, steps []toolStep, state *pipelineState, opts orchestratorOptions) {

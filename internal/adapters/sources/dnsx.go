@@ -85,7 +85,9 @@ func DNSX(ctx context.Context, domains []string, outDir string, out chan<- strin
 	}
 	// Cleanup garantizado del temp file
 	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
 
 	tmpWriter := bufio.NewWriter(tmpFile)
 	for _, domain := range cleaned {

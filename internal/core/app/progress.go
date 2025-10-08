@@ -40,7 +40,9 @@ func (p *progressBar) renderInitial() {
 
 	bar := strings.Repeat("░", p.width)
 	line := fmt.Sprintf("[%s] 0/%d iniciando...", bar, p.total)
-	fmt.Fprint(p.out, line)
+	if _, err := fmt.Fprint(p.out, line); err != nil {
+		return
+	}
 	p.lastLineLen = len(line)
 	p.lastRendered = line
 }
@@ -135,7 +137,9 @@ func (p *progressBar) StepDone(tool, status string) {
 
 	p.renderLocked(tool, label)
 	if p.current == p.total {
-		fmt.Fprintln(p.out)
+		if _, err := fmt.Fprintln(p.out); err != nil {
+			return
+		}
 		p.lastLineLen = 0
 		p.done = true
 		p.lastRendered = ""
@@ -199,7 +203,9 @@ func (p *progressBar) renderLocked(tool, status string) {
 	if padding > 0 {
 		line += strings.Repeat(" ", padding)
 	}
-	fmt.Fprint(p.out, line)
+	if _, err := fmt.Fprint(p.out, line); err != nil {
+		return
+	}
 	p.lastLineLen = len(line)
 	p.lastRendered = line
 }

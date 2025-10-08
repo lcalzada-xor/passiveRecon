@@ -316,8 +316,7 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 		return nil
 	}
 
-	// Semilla separada por ejecución para muestreos.
-	rand.Seed(time.Now().UnixNano())
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	for _, input := range inputs {
 		// Cancelación temprana por contexto.
@@ -356,7 +355,7 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 
 		absPath := inputPath
 
-		samplePath, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmpDir, input.label, data, limit)
+		samplePath, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmpDir, input.label, data, limit, rng)
 		if err != nil {
 			recordLinkfinderError(&firstErr, fmt.Errorf("sampling: %w", err))
 			_ = os.RemoveAll(tmpDir)
@@ -551,7 +550,7 @@ func writeLinkfinderInput(tmpDir, label string, data []byte) (string, error) {
 	return path, nil
 }
 
-func maybeSampleLinkfinderInput(tmpDir, label string, data []byte, limit int) (string, int, int, error) {
+func maybeSampleLinkfinderInput(tmpDir, label string, data []byte, limit int, rng *rand.Rand) (string, int, int, error) {
 	entries := parseLinkfinderEntries(data)
 	total := len(entries)
 	if limit <= 0 {
@@ -561,7 +560,7 @@ func maybeSampleLinkfinderInput(tmpDir, label string, data []byte, limit int) (s
 		return "", total, total, nil
 	}
 
-	sampled := sampleLinkfinderEntries(entries, limit)
+	sampled := sampleLinkfinderEntries(entries, limit, rng)
 	if len(sampled) == 0 {
 		return "", total, 0, nil
 	}
@@ -596,11 +595,14 @@ func parseLinkfinderEntries(data []byte) [][]byte {
 	return entries
 }
 
-func sampleLinkfinderEntries(entries [][]byte, limit int) [][]byte {
+func sampleLinkfinderEntries(entries [][]byte, limit int, rng *rand.Rand) [][]byte {
 	if limit <= 0 || len(entries) <= limit {
 		return entries
 	}
-	idxs := rand.Perm(len(entries))[:limit]
+	if rng == nil {
+		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+	}
+	idxs := rng.Perm(len(entries))[:limit]
 	sort.Ints(idxs)
 	sampled := make([][]byte, 0, limit)
 	for _, idx := range idxs {
@@ -807,30 +809,50 @@ func writeLinkfinderRaw(path string, payload linkfinderPayload) error {
 	var buf bytes.Buffer
 	bw := bufio.NewWriter(&buf)
 
-	fmt.Fprintln(bw, "# GoLinkfinderEVO raw results")
-	fmt.Fprintf(bw, "# Generated at: %s\n", payload.Meta.GeneratedAt.Format(time.RFC3339))
-	fmt.Fprintf(bw, "# Resources scanned: %d\n", payload.Meta.TotalResources)
-	fmt.Fprintf(bw, "# Total endpoints: %d\n\n", payload.Meta.TotalEndpoints)
+	if _, err := fmt.Fprintln(bw, "# GoLinkfinderEVO raw results"); err != nil {
+		return fmt.Errorf("write header: %w", err)
+	}
+	if _, err := fmt.Fprintf(bw, "# Generated at: %s\n", payload.Meta.GeneratedAt.Format(time.RFC3339)); err != nil {
+		return fmt.Errorf("write generated at: %w", err)
+	}
+	if _, err := fmt.Fprintf(bw, "# Resources scanned: %d\n", payload.Meta.TotalResources); err != nil {
+		return fmt.Errorf("write resources scanned: %w", err)
+	}
+	if _, err := fmt.Fprintf(bw, "# Total endpoints: %d\n\n", payload.Meta.TotalEndpoints); err != nil {
+		return fmt.Errorf("write total endpoints: %w", err)
+	}
 
 	for _, report := range payload.Resources {
-		fmt.Fprintln(bw, "[Resource] "+report.Resource)
+		if _, err := fmt.Fprintln(bw, "[Resource] "+report.Resource); err != nil {
+			return fmt.Errorf("write resource header: %w", err)
+		}
 
 		if len(report.Endpoints) == 0 {
-			fmt.Fprintln(bw, "#   No endpoints were found.")
+			if _, err := fmt.Fprintln(bw, "#   No endpoints were found."); err != nil {
+				return fmt.Errorf("write empty endpoints: %w", err)
+			}
 			continue
 		}
 		for _, ep := range report.Endpoints {
-			fmt.Fprintln(bw, ep.Link)
+			if _, err := fmt.Fprintln(bw, ep.Link); err != nil {
+				return fmt.Errorf("write endpoint link: %w", err)
+			}
 
 			if trimmed := strings.TrimSpace(ep.Context); trimmed != "" {
 				for _, line := range strings.Split(trimmed, "\n") {
-					fmt.Fprintln(bw, "#   "+line)
+					if _, err := fmt.Fprintln(bw, "#   "+line); err != nil {
+						return fmt.Errorf("write endpoint context: %w", err)
+					}
 				}
 			}
-			bw.WriteByte('\n')
+			if err := bw.WriteByte('\n'); err != nil {
+				return fmt.Errorf("write endpoint separator: %w", err)
+			}
 		}
 	}
-	_ = bw.Flush()
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush raw buffer: %w", err)
+	}
 
 	if err := os.WriteFile(path, buf.Bytes(), defaultFilePerm); err != nil {
 		return fmt.Errorf("write raw: %w", err)
@@ -1003,13 +1025,7 @@ func emitLinkfinderGFFindings(aggregate *linkfinderGFAggregate, out chan<- strin
 	}
 
 	for _, finding := range findings {
-		data, err := json.Marshal(payload{
-			Resource: finding.Resource,
-			Line:     finding.Line,
-			Evidence: finding.Evidence,
-			Context:  finding.Context,
-			Rules:    finding.Rules,
-		})
+		data, err := json.Marshal(payload(finding))
 		if err != nil {
 			return fmt.Errorf("marshal gf payload: %w", err)
 		}
@@ -1198,9 +1214,13 @@ func mergeAndWriteLinkfinderEntries(path string, newEntries []string) error {
 	var buf bytes.Buffer
 	bw := bufio.NewWriter(&buf)
 	for _, entry := range merged {
-		fmt.Fprintln(bw, entry)
+		if _, err := fmt.Fprintln(bw, entry); err != nil {
+			return fmt.Errorf("write merged entry: %w", err)
+		}
 	}
-	_ = bw.Flush()
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush merged buffer: %w", err)
+	}
 
 	if err := os.WriteFile(path, buf.Bytes(), defaultFilePerm); err != nil {
 		return fmt.Errorf("write merged: %w", err)

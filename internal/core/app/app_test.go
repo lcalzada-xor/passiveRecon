@@ -392,7 +392,9 @@ func writeArtifactsFile(t *testing.T, outdir string, records []artifacts.Artifac
 	if err != nil {
 		t.Fatalf("create artifacts.jsonl: %v", err)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	encoder := json.NewEncoder(file)
 	for _, artifact := range records {
@@ -587,7 +589,9 @@ func appendLine(path, line string) {
 	if err != nil {
 		panic(err)
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 	if _, err := f.WriteString(line + "\n"); err != nil {
 		panic(err)
 	}

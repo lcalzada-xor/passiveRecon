@@ -55,7 +55,7 @@ func inferToolFromMessage(msg string) string {
 
 var (
 	ansiEscapeSequence = regexp.MustCompile("\x1b\\[[0-9;]*[A-Za-z]")
-	ansiColorCode      = regexp.MustCompile("\\[[0-9;]*m")
+	ansiColorCode      = regexp.MustCompile(`\[[0-9;]*m`)
 	ansiOSCSequence    = regexp.MustCompile("\x1b\\][^\x07]*\x07")
 )
 

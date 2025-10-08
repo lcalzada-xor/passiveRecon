@@ -78,7 +78,9 @@ func writeArtifactsFile(t *testing.T, path string, artifacts []Artifact) {
 	if err != nil {
 		t.Fatalf("Create(%q): %v", path, err)
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	encoder := json.NewEncoder(f)
 	for _, artifact := range artifacts {

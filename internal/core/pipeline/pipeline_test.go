@@ -1350,7 +1350,9 @@ func readArtifactsFile(t *testing.T, path string) []Artifact {
 	if err != nil {
 		t.Fatalf("open artifacts %q: %v", path, err)
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)

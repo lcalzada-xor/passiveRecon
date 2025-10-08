@@ -302,7 +302,9 @@ func writeOrchestratorArtifacts(t *testing.T, outdir string, artifacts []artifac
 	if err != nil {
 		t.Fatalf("create artifacts.jsonl: %v", err)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	encoder := json.NewEncoder(file)
 	for _, artifact := range artifacts {

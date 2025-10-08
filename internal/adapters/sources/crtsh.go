@@ -21,7 +21,7 @@ type crtshEntry struct {
 	SerialNumber string `json:"serial_number"`
 }
 
-func CRTSH(ctx context.Context, domain string, out chan<- string) error {
+func CRTSH(ctx context.Context, domain string, out chan<- string) (err error) {
 	logx.Debugf("crtsh query %s", domain)
 
 	u, _ := url.Parse("https://crt.sh/")
@@ -42,7 +42,11 @@ func CRTSH(ctx context.Context, domain string, out chan<- string) error {
 		logx.Errorf("crtsh http: %v", err)
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		logx.Errorf("crtsh non-200: %d", resp.StatusCode)

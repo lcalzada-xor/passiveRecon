@@ -64,7 +64,7 @@ var (
 
 // RDAP queries the public RDAP service for the supplied target and emits summary
 // information and raw metadata lines into the sink.
-func RDAP(ctx context.Context, target string, out chan<- string) error {
+func RDAP(ctx context.Context, target string, out chan<- string) (err error) {
 	domain := normalizeRDAPDomain(target)
 	if domain == "" {
 		out <- "meta: rdap skipped (invalid domain)"
@@ -93,7 +93,11 @@ func RDAP(ctx context.Context, target string, out chan<- string) error {
 		out <- fmt.Sprintf("meta: rdap request failed: %v", err)
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 
 	switch resp.StatusCode {
 	case http.StatusOK:

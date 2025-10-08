@@ -96,7 +96,9 @@ func parseRequirements(path string) ([]requirement, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	var reqs []requirement
 	scanner := bufio.NewScanner(file)
@@ -172,7 +174,9 @@ func installFromGit(req requirement) error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() {
+		_ = os.RemoveAll(tempDir)
+	}()
 
 	clone := exec.Command("git", "clone", req.repo, tempDir)
 	clone.Stdout = os.Stdout

@@ -172,7 +172,9 @@ func TestConfigureRootCAs(t *testing.T) {
 	originalTransport := http.DefaultTransport
 	t.Cleanup(func() {
 		http.DefaultTransport = originalTransport
-		ConfigureRootCAs("")
+		if err := ConfigureRootCAs(""); err != nil {
+			t.Fatalf("cleanup ConfigureRootCAs: %v", err)
+		}
 	})
 
 	if err := ConfigureRootCAs(certPath); err != nil {

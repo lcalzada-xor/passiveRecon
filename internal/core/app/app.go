@@ -52,7 +52,11 @@ func Run(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	defer sink.Close()
+	defer func() {
+		if err := sink.Close(); err != nil {
+			logx.Warnf("sink close error: %v", err)
+		}
+	}()
 	sink.Start(cfg.Workers)
 
 	requested, ordered, unknown := normalizeRequestedTools(cfg)
