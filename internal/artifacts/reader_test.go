@@ -7,15 +7,13 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-
-	"passive-rec/internal/pipeline"
 )
 
 func TestCollectArtifactsByTypeMultiTypeRecords(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	artifact := pipeline.Artifact{
+	artifact := Artifact{
 		Type:   "route",
 		Types:  []string{"html"},
 		Value:  "https://app.example.com/login",
@@ -24,7 +22,7 @@ func TestCollectArtifactsByTypeMultiTypeRecords(t *testing.T) {
 	}
 
 	path := filepath.Join(dir, "artifacts.jsonl")
-	writeArtifactsFile(t, path, []pipeline.Artifact{artifact})
+	writeArtifactsFile(t, path, []Artifact{artifact})
 
 	selectors := map[string]ActiveState{
 		"route": PassiveOnly,
@@ -73,7 +71,7 @@ func TestCollectArtifactsByTypeMultiTypeRecords(t *testing.T) {
 	}
 }
 
-func writeArtifactsFile(t *testing.T, path string, artifacts []pipeline.Artifact) {
+func writeArtifactsFile(t *testing.T, path string, artifacts []Artifact) {
 	t.Helper()
 
 	f, err := os.Create(path)

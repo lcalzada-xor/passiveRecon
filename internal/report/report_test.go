@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"passive-rec/internal/artifacts"
 	"passive-rec/internal/certs"
 	"passive-rec/internal/config"
-	"passive-rec/internal/pipeline"
 )
 
 func TestGenerateCreatesHTMLReport(t *testing.T) {
@@ -48,7 +48,7 @@ func TestGenerateCreatesHTMLReport(t *testing.T) {
 		t.Fatalf("marshal certThree: %v", err)
 	}
 
-	writeArtifacts(t, dir, []pipeline.Artifact{
+	writeArtifacts(t, dir, []artifacts.Artifact{
 		{Type: "domain", Value: "app.example.com", Active: false, Up: true},
 		{Type: "domain", Value: "api.example.com", Active: false, Up: true},
 		{Type: "domain", Value: "static.test.com", Active: false, Up: true},
@@ -138,7 +138,7 @@ func TestGenerateIncludesActiveData(t *testing.T) {
 		t.Fatalf("marshal dns record: %v", err)
 	}
 
-	writeArtifacts(t, dir, []pipeline.Artifact{
+	writeArtifacts(t, dir, []artifacts.Artifact{
 		{Type: "domain", Value: "example.com", Active: false, Up: true},
 		{Type: "route", Value: "https://example.com", Active: false, Up: true},
 		{Type: "meta", Value: "passive: ok", Active: false, Up: true},
@@ -362,7 +362,7 @@ func TestBuildCertStatsGroupsMultiLevelTLDs(t *testing.T) {
 	}
 }
 
-func writeArtifacts(t *testing.T, dir string, artifacts []pipeline.Artifact) {
+func writeArtifacts(t *testing.T, dir string, artifacts []artifacts.Artifact) {
 	t.Helper()
 	var builder strings.Builder
 	for _, artifact := range artifacts {

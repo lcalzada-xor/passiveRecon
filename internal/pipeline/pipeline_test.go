@@ -12,9 +12,12 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"passive-rec/internal/artifacts"
 	"passive-rec/internal/certs"
 	"passive-rec/internal/netutil"
 )
+
+type Artifact = artifacts.Artifact
 
 func newTestSink(t *testing.T, active bool) (*Sink, string) {
 	t.Helper()
@@ -1418,17 +1421,18 @@ func containsType(types []string, typ string) bool {
 	return false
 }
 
-func findRouteArtifactByCanonical(t *testing.T, artifacts []Artifact, value string, active bool) Artifact {
+func findRouteArtifactByCanonical(t *testing.T, records []Artifact, value string, active bool) Artifact {
 	t.Helper()
-	canonical := canonicalRouteKey(value)
-	for _, art := range artifacts {
+	expectedKey := artifacts.KeyFor(artifacts.Artifact{Type: "route", Value: value, Active: active})
+	for _, art := range records {
 		if strings.TrimSpace(art.Type) != "route" {
 			continue
 		}
 		if art.Active != active {
 			continue
 		}
-		if canonicalRouteKey(art.Value) == canonical {
+		candidateKey := artifacts.KeyFor(artifacts.Artifact{Type: art.Type, Value: art.Value, Active: art.Active})
+		if candidateKey.Value == expectedKey.Value && candidateKey.Active == expectedKey.Active {
 			return art
 		}
 	}
