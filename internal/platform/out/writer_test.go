@@ -88,7 +88,9 @@ func TestWriteDomain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer w.Close()
+	defer func() {
+		_ = w.Close()
+	}()
 
 	inputs := []string{
 		"https://example.com",           // base
@@ -124,7 +126,9 @@ func TestWriteURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer w.Close()
+	defer func() {
+		_ = w.Close()
+	}()
 
 	inputs := []string{
 		"example.com/path",
@@ -157,7 +161,9 @@ func TestWriteRaw(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer w.Close()
+	defer func() {
+		_ = w.Close()
+	}()
 
 	inputs := []string{"line1", " line1 ", "line2"}
 	for _, in := range inputs {

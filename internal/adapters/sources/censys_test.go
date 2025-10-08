@@ -25,7 +25,7 @@ func TestCensysPagination(t *testing.T) {
 				t.Fatalf("unexpected query: %s", got)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{
+			if _, err := w.Write([]byte(`{
   "result": {
     "hits": [
       {
@@ -38,10 +38,12 @@ func TestCensysPagination(t *testing.T) {
     ],
     "links": {"next": "` + serverURL + `/api/v2/certificates/search?page=2"}
   }
-}`))
+}`)); err != nil {
+				t.Fatalf("write response page1: %v", err)
+			}
 		case "2":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{
+			if _, err := w.Write([]byte(`{
   "result": {
     "hits": [
       {
@@ -54,7 +56,9 @@ func TestCensysPagination(t *testing.T) {
     ],
     "links": {"next": ""}
   }
-}`))
+}`)); err != nil {
+				t.Fatalf("write response page2: %v", err)
+			}
 		default:
 			t.Fatalf("unexpected page: %s", r.URL.Query().Get("page"))
 		}
@@ -156,7 +160,7 @@ func TestCensysHTTPErrorIncludesMeta(t *testing.T) {
 func TestCensysDeduplicatesCaseInsensitive(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		if _, err := w.Write([]byte(`{
   "result": {
     "hits": [
       {
@@ -169,7 +173,9 @@ func TestCensysDeduplicatesCaseInsensitive(t *testing.T) {
     ],
     "links": {"next": ""}
   }
-}`))
+}`)); err != nil {
+			t.Fatalf("write case-insensitive response: %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -220,23 +226,27 @@ func TestCensysRelativeNextLink(t *testing.T) {
 
 		switch r.URL.Query().Get("page") {
 		case "", "1":
-			w.Write([]byte(`{
+			if _, err := w.Write([]byte(`{
   "result": {
     "hits": [
       {"name": "page1.example.com"}
     ],
     "links": {"next": "/api/v2/certificates/search?page=2"}
   }
-}`))
+}`)); err != nil {
+				t.Fatalf("write relative next page1: %v", err)
+			}
 		case "2":
-			w.Write([]byte(`{
+			if _, err := w.Write([]byte(`{
   "result": {
     "hits": [
       {"name": "page2.example.com"}
     ],
     "links": {"next": ""}
   }
-}`))
+}`)); err != nil {
+				t.Fatalf("write relative next page2: %v", err)
+			}
 		default:
 			t.Fatalf("unexpected page requested: %s", r.URL.Query().Get("page"))
 		}

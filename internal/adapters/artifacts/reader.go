@@ -78,7 +78,9 @@ func CollectArtifactsByType(outdir string, selectors map[string]ActiveState) (ma
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	buf := bufio.NewScanner(file)
 	buf.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)

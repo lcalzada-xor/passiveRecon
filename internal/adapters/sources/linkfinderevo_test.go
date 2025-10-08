@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"sort"
@@ -26,7 +27,9 @@ func writeLinkfinderArtifacts(t *testing.T, outdir string, data map[string][]str
 	if err != nil {
 		t.Fatalf("create artifacts.jsonl: %v", err)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	encoder := json.NewEncoder(file)
 	for typ, values := range data {
@@ -432,7 +435,8 @@ func TestMaybeSampleLinkfinderInputLimitsEntries(t *testing.T) {
 		builder.WriteString(fmt.Sprintf("file://example.com/%d\n", i))
 	}
 
-	path, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmp, "html", []byte(builder.String()), linkfinderMaxInputEntries)
+	rng := rand.New(rand.NewSource(1))
+	path, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmp, "html", []byte(builder.String()), linkfinderMaxInputEntries, rng)
 	if err != nil {
 		t.Fatalf("maybeSampleLinkfinderInput returned error: %v", err)
 	}
@@ -470,7 +474,8 @@ func TestMaybeSampleLinkfinderInputRespectsCustomLimit(t *testing.T) {
 	}
 
 	limit := 25
-	path, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmp, "html", []byte(builder.String()), limit)
+	rng := rand.New(rand.NewSource(2))
+	path, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmp, "html", []byte(builder.String()), limit, rng)
 	if err != nil {
 		t.Fatalf("maybeSampleLinkfinderInput returned error: %v", err)
 	}
@@ -498,7 +503,8 @@ func TestMaybeSampleLinkfinderInputNoopWhenBelowLimit(t *testing.T) {
 	tmp := t.TempDir()
 
 	data := []byte("file://example.com/1\nfile://example.com/2\n")
-	path, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmp, "html", data, linkfinderMaxInputEntries)
+	rng := rand.New(rand.NewSource(3))
+	path, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmp, "html", data, linkfinderMaxInputEntries, rng)
 	if err != nil {
 		t.Fatalf("maybeSampleLinkfinderInput returned error: %v", err)
 	}

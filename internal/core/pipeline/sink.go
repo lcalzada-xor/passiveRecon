@@ -365,10 +365,6 @@ func (s *Sink) writer(key string, active bool) sinkWriter {
 	return pair.writer(active)
 }
 
-func (s *Sink) writerPair(key string) writerPair {
-	return s.writers.pair(key)
-}
-
 func (s *Sink) inActiveMode() bool { return s != nil && s.activeMode }
 
 func (s *Sink) scopeAllowsDomain(domain string) bool {

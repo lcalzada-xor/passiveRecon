@@ -24,7 +24,9 @@ func writeSubJSArtifacts(t *testing.T, outdir string, artifacts []artifacts.Arti
 	if err != nil {
 		t.Fatalf("create artifacts.jsonl: %v", err)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	encoder := json.NewEncoder(file)
 	for _, artifact := range artifacts {
@@ -185,7 +187,9 @@ func TestSubJSAcceptsNonErrorStatuses(t *testing.T) {
 			w.WriteHeader(http.StatusFound)
 		case "/final.js":
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("console.log('ok');"))
+			if _, err := w.Write([]byte("console.log('ok');")); err != nil {
+				t.Fatalf("write final.js response: %v", err)
+			}
 		default:
 			http.NotFound(w, r)
 		}

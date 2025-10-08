@@ -302,7 +302,7 @@ func routeCategoryHandler(ctx *Context, spec CategorySpec, line string, isActive
 	if base == "" {
 		return false
 	}
-	if !(strings.Contains(base, "://") || strings.HasPrefix(base, "/") || strings.Contains(base, "/")) {
+	if !strings.Contains(base, "://") && !strings.HasPrefix(base, "/") && !strings.Contains(base, "/") {
 		return false
 	}
 	if !ctx.S.scopeAllowsRoute(base) {

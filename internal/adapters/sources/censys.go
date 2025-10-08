@@ -114,7 +114,11 @@ func Censys(ctx context.Context, domain, apiID, apiSecret string, out chan<- str
 		}
 		// Cierre seguro del body
 		func() {
-			defer resp.Body.Close()
+			defer func() {
+				if closeErr := resp.Body.Close(); closeErr != nil && err == nil {
+					err = closeErr
+				}
+			}()
 
 			if resp.StatusCode != http.StatusOK {
 				censysMeta(out, "unexpected HTTP status %d", resp.StatusCode)
