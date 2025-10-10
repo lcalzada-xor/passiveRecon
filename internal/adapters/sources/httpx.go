@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/url"
 	"os"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -17,6 +16,7 @@ import (
 
 	"passive-rec/internal/adapters/artifacts"
 	"passive-rec/internal/core/runner"
+	"passive-rec/internal/platform/urlutil"
 )
 
 const (
@@ -40,15 +40,7 @@ var (
 	httpxMetaEmit   = func(string) {}
 	HTTPXInputsHook = func(int) {}
 
-	lowPriorityHTTPXExtensions = map[string]struct{}{
-		".ico": {},
-		".cur": {},
-		".bmp": {},
-		".gif": {},
-		".pbm": {},
-		".pgm": {},
-		".pnm": {},
-	}
+	lowPriorityHTTPXExtensions = urlutil.LowPriorityExtensions
 
 	ansiEscapeSequences = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 )
@@ -311,66 +303,7 @@ func shouldSkipHTTPXInput(line string) bool {
 	if trimmed == "" {
 		return false
 	}
-
-	path := extractHTTPXPath(trimmed)
-	if path == "" {
-		return false
-	}
-
-	path = strings.ToLower(path)
-	if idx := strings.IndexAny(path, "?#"); idx != -1 {
-		path = path[:idx]
-	}
-
-	base := filepath.Base(path)
-	if base == "" || base == "/" || base == "." {
-		return false
-	}
-
-	if base == "thumbs.db" {
-		return true
-	}
-
-	ext := filepath.Ext(base)
-	if ext != "" {
-		if _, ok := lowPriorityHTTPXExtensions[ext]; ok {
-			return true
-		}
-	}
-
-	name := strings.TrimSuffix(base, ext)
-	if strings.Contains(name, "thumb") {
-		switch ext {
-		case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp":
-			return true
-		}
-	}
-	if strings.Contains(name, "sprite") {
-		switch ext {
-		case ".png", ".svg", ".jpg", ".jpeg", ".webp":
-			return true
-		}
-	}
-
-	return false
-}
-
-func extractHTTPXPath(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return ""
-	}
-	if strings.Contains(trimmed, "://") {
-		if parsed, err := url.Parse(trimmed); err == nil {
-			if parsed.Path != "" {
-				return parsed.Path
-			}
-		}
-	}
-	if idx := strings.Index(trimmed, "/"); idx != -1 {
-		return trimmed[idx:]
-	}
-	return ""
+	return urlutil.ShouldSkipByExtension(trimmed, lowPriorityHTTPXExtensions)
 }
 
 func shouldForwardHTTPXRoute(hasStatus bool, status int) bool {

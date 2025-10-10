@@ -1,4 +1,4 @@
-package sources
+package linkfinderevo
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 	"passive-rec/internal/adapters/routes"
 )
 
-func writeLinkfinderArtifacts(t *testing.T, outdir string, data map[string][]string) {
+func writeArtifacts(t *testing.T, outdir string, data map[string][]string) {
 	t.Helper()
 	path := filepath.Join(outdir, "artifacts.jsonl")
 	file, err := os.Create(path)
@@ -47,7 +47,7 @@ func sortedCopy(values []string) []string {
 	return cp
 }
 
-func TestClassifyLinkfinderEndpoint(t *testing.T) {
+func TestClassifyEndpoint(t *testing.T) {
 	tests := []struct {
 		name       string
 		input      string
@@ -67,7 +67,7 @@ func TestClassifyLinkfinderEndpoint(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := classifyLinkfinderEndpoint(tt.input)
+			got := classifyEndpoint(tt.input)
 			if got.isJS != tt.wantJS {
 				t.Fatalf("isJS mismatch: got %v want %v", got.isJS, tt.wantJS)
 			}
@@ -88,9 +88,9 @@ func TestClassifyLinkfinderEndpoint(t *testing.T) {
 }
 
 func TestEmitLinkfinderFindingsFeedsCategories(t *testing.T) {
-	reports := []linkfinderReport{{
+	reports := []report{{
 		Resource: "https://example.com/page.html",
-		Endpoints: []linkfinderEndpoint{
+		Endpoints: []endpoint{
 			{Link: "logo.svg"},
 			{Link: "https://example.com/sitemap.xml"},
 			{Link: "https://example.com/config.json"},
@@ -101,9 +101,9 @@ func TestEmitLinkfinderFindingsFeedsCategories(t *testing.T) {
 	}}
 
 	out := make(chan string, 20)
-	result, err := emitLinkfinderFindings(reports, out)
+	result, err := emitFindings(reports, out)
 	if err != nil {
-		t.Fatalf("emitLinkfinderFindings returned error: %v", err)
+		t.Fatalf("emitFindings returned error: %v", err)
 	}
 	close(out)
 
@@ -185,14 +185,14 @@ func TestNormalizeScope(t *testing.T) {
 }
 
 func TestWriteLinkfinderOutputsCreatesAllFormats(t *testing.T) {
-	agg := newLinkfinderAggregate()
-	agg.add("https://example.com/index.html", linkfinderEndpoint{Link: "https://example.com/api", Context: "fetch('/api')", Line: 10})
+	agg := newAggregate()
+	agg.add("https://example.com/index.html", endpoint{Link: "https://example.com/api", Context: "fetch('/api')", Line: 10})
 
 	tmp := t.TempDir()
 
 	out := make(chan string, 10)
-	if err := writeLinkfinderOutputs(tmp, agg, nil, out); err != nil {
-		t.Fatalf("writeLinkfinderOutputs returned error: %v", err)
+	if err := writeOutputs(tmp, agg, nil, out); err != nil {
+		t.Fatalf("writeOutputs returned error: %v", err)
 	}
 
 	findingsDir := filepath.Join(tmp, "routes", "linkFindings")
@@ -206,13 +206,13 @@ func TestWriteLinkfinderOutputsCreatesAllFormats(t *testing.T) {
 }
 
 func TestEmitLinkfinderGFFindings(t *testing.T) {
-	agg := newLinkfinderGFAggregate()
+	agg := newGFAggregate()
 	agg.add("https://example.com/app.js", 42, "fetch('/api')", "const data = fetch('/api')", []string{"xss"})
 	agg.add("https://example.com/app.js", 42, "fetch('/api')", "", []string{"sqli", "xss"})
 
 	out := make(chan string, 1)
-	if err := emitLinkfinderGFFindings(agg, out); err != nil {
-		t.Fatalf("emitLinkfinderGFFindings returned error: %v", err)
+	if err := emitGFFindings(agg, out); err != nil {
+		t.Fatalf("emitGFFindings returned error: %v", err)
 	}
 	close(out)
 
@@ -260,7 +260,7 @@ func TestEmitLinkfinderGFFindings(t *testing.T) {
 }
 
 func TestBuildLinkfinderArgsIncludesGF(t *testing.T) {
-	args := buildLinkfinderArgs("input", "example.com", "raw", "html", "json")
+	args := buildArgs("input", "example.com", "raw", "html", "json")
 	found := false
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--gf" && i+1 < len(args) && args[i+1] == "all" {
@@ -269,7 +269,7 @@ func TestBuildLinkfinderArgsIncludesGF(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("expected buildLinkfinderArgs to include --gf all, got %v", args)
+		t.Fatalf("expected buildArgs to include --gf all, got %v", args)
 	}
 }
 
@@ -286,8 +286,8 @@ func TestPersistLinkfinderGFArtifacts(t *testing.T) {
 		t.Fatalf("failed to write gf.json: %v", err)
 	}
 
-	if err := persistLinkfinderGFArtifacts(destDir, "html", srcDir); err != nil {
-		t.Fatalf("persistLinkfinderGFArtifacts returned error: %v", err)
+	if err := persistGFArtifacts(destDir, "html", srcDir); err != nil {
+		t.Fatalf("persistGFArtifacts returned error: %v", err)
 	}
 
 	wantFiles := []string{
@@ -304,8 +304,8 @@ func TestPersistLinkfinderGFArtifacts(t *testing.T) {
 		t.Fatalf("failed to remove gf.txt: %v", err)
 	}
 
-	if err := persistLinkfinderGFArtifacts(destDir, "html", srcDir); err != nil {
-		t.Fatalf("persistLinkfinderGFArtifacts returned error on cleanup: %v", err)
+	if err := persistGFArtifacts(destDir, "html", srcDir); err != nil {
+		t.Fatalf("persistGFArtifacts returned error on cleanup: %v", err)
 	}
 
 	if _, err := os.Stat(filepath.Join(destDir, "gf.html.txt")); !errors.Is(err, os.ErrNotExist) {
@@ -324,7 +324,7 @@ func TestPersistLinkfinderActiveOutputsMergesEntries(t *testing.T) {
 		t.Fatalf("failed to seed routes.active: %v", err)
 	}
 
-	emission := linkfinderEmissionResult{
+	emission := emissionResult{
 		Routes: []string{"https://existing.example", "https://example.com/new"},
 		JS:     []string{"https://example.com/app.js"},
 		HTML:   []string{"https://example.com/index.html"},
@@ -336,8 +336,8 @@ func TestPersistLinkfinderActiveOutputsMergesEntries(t *testing.T) {
 		},
 	}
 
-	if err := persistLinkfinderActiveOutputs(tmp, emission); err != nil {
-		t.Fatalf("persistLinkfinderActiveOutputs returned error: %v", err)
+	if err := persistActiveOutputs(tmp, emission); err != nil {
+		t.Fatalf("persistActiveOutputs returned error: %v", err)
 	}
 
 	gotRoutes := readLinesFromFile(t, existingRoutes)
@@ -416,8 +416,8 @@ func TestCleanLinkfinderEndpointLink(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			if got := cleanLinkfinderEndpointLink(tt.input); got != tt.want {
-				t.Fatalf("cleanLinkfinderEndpointLink(%q) = %q, want %q", tt.input, got, tt.want)
+			if got := cleanEndpointLink(tt.input); got != tt.want {
+				t.Fatalf("cleanEndpointLink(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -427,14 +427,14 @@ func TestMaybeSampleLinkfinderInputLimitsEntries(t *testing.T) {
 	tmp := t.TempDir()
 
 	var builder strings.Builder
-	total := linkfinderMaxInputEntries + 50
+	total := maxInputEntries + 50
 	for i := 0; i < total; i++ {
 		builder.WriteString(fmt.Sprintf("file://example.com/%d\n", i))
 	}
 
-	path, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmp, "html", []byte(builder.String()), linkfinderMaxInputEntries)
+	path, totalEntries, sampledEntries, err := maybeSampleInput(tmp, "html", []byte(builder.String()), maxInputEntries)
 	if err != nil {
-		t.Fatalf("maybeSampleLinkfinderInput returned error: %v", err)
+		t.Fatalf("maybeSampleInput returned error: %v", err)
 	}
 	if path == "" {
 		t.Fatalf("expected sampling to occur when total=%d", total)
@@ -442,8 +442,8 @@ func TestMaybeSampleLinkfinderInputLimitsEntries(t *testing.T) {
 	if totalEntries != total {
 		t.Fatalf("unexpected total entries: got %d want %d", totalEntries, total)
 	}
-	if sampledEntries != linkfinderMaxInputEntries {
-		t.Fatalf("unexpected sampled entries: got %d want %d", sampledEntries, linkfinderMaxInputEntries)
+	if sampledEntries != maxInputEntries {
+		t.Fatalf("unexpected sampled entries: got %d want %d", sampledEntries, maxInputEntries)
 	}
 
 	data, err := os.ReadFile(path)
@@ -451,8 +451,8 @@ func TestMaybeSampleLinkfinderInputLimitsEntries(t *testing.T) {
 		t.Fatalf("failed to read sample file: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) != linkfinderMaxInputEntries {
-		t.Fatalf("sample file has unexpected number of entries: got %d want %d", len(lines), linkfinderMaxInputEntries)
+	if len(lines) != maxInputEntries {
+		t.Fatalf("sample file has unexpected number of entries: got %d want %d", len(lines), maxInputEntries)
 	}
 	for _, line := range lines {
 		if strings.TrimSpace(line) != line {
@@ -470,9 +470,9 @@ func TestMaybeSampleLinkfinderInputRespectsCustomLimit(t *testing.T) {
 	}
 
 	limit := 25
-	path, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmp, "html", []byte(builder.String()), limit)
+	path, totalEntries, sampledEntries, err := maybeSampleInput(tmp, "html", []byte(builder.String()), limit)
 	if err != nil {
-		t.Fatalf("maybeSampleLinkfinderInput returned error: %v", err)
+		t.Fatalf("maybeSampleInput returned error: %v", err)
 	}
 	if totalEntries != 100 {
 		t.Fatalf("unexpected total entries: got %d want 100", totalEntries)
@@ -498,9 +498,9 @@ func TestMaybeSampleLinkfinderInputNoopWhenBelowLimit(t *testing.T) {
 	tmp := t.TempDir()
 
 	data := []byte("file://example.com/1\nfile://example.com/2\n")
-	path, totalEntries, sampledEntries, err := maybeSampleLinkfinderInput(tmp, "html", data, linkfinderMaxInputEntries)
+	path, totalEntries, sampledEntries, err := maybeSampleInput(tmp, "html", data, maxInputEntries)
 	if err != nil {
-		t.Fatalf("maybeSampleLinkfinderInput returned error: %v", err)
+		t.Fatalf("maybeSampleInput returned error: %v", err)
 	}
 	if path != "" {
 		t.Fatalf("expected no sampling, but got path %q", path)
@@ -515,15 +515,15 @@ func TestMaybeSampleLinkfinderInputNoopWhenBelowLimit(t *testing.T) {
 
 func TestLinkfinderEntryBudget(t *testing.T) {
 	ctxNoDeadline := context.Background()
-	maxTotal := 3 * linkfinderMaxInputEntries
-	if got := linkfinderEntryBudget(ctxNoDeadline, maxTotal); got != maxTotal {
+	maxTotal := 3 * maxInputEntries
+	if got := entryBudget(ctxNoDeadline, maxTotal); got != maxTotal {
 		t.Fatalf("expected full budget without deadline, got %d want %d", got, maxTotal)
 	}
 
 	deadline := time.Now().Add(3 * time.Second)
 	ctxWithDeadline, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
-	budget := linkfinderEntryBudget(ctxWithDeadline, maxTotal)
+	budget := entryBudget(ctxWithDeadline, maxTotal)
 	if budget <= 0 || budget > maxTotal {
 		t.Fatalf("unexpected budget with deadline: got %d", budget)
 	}
@@ -531,7 +531,7 @@ func TestLinkfinderEntryBudget(t *testing.T) {
 	farFuture := time.Now().Add(10 * time.Minute)
 	ctxFuture, cancelFuture := context.WithDeadline(context.Background(), farFuture)
 	defer cancelFuture()
-	if got := linkfinderEntryBudget(ctxFuture, maxTotal); got != maxTotal {
+	if got := entryBudget(ctxFuture, maxTotal); got != maxTotal {
 		t.Fatalf("expected budget to clamp to max for far deadline, got %d want %d", got, maxTotal)
 	}
 }
@@ -541,14 +541,14 @@ func TestLinkFinderEVOIntegrationGeneratesReports(t *testing.T) {
 		t.Skip("GoLinkfinderEVO binary not available for integration test")
 	}
 
-	prevFindBin := linkfinderFindBin
-	prevRunCmd := linkfinderRunCmd
+	prevFindBin := findBin
+	prevRunCmd := runCmd
 	t.Cleanup(func() {
-		linkfinderFindBin = prevFindBin
-		linkfinderRunCmd = prevRunCmd
+		findBin = prevFindBin
+		runCmd = prevRunCmd
 	})
 
-	linkfinderFindBin = func(names ...string) (string, bool) {
+	findBin = func(names ...string) (string, bool) {
 		return "/tmp/golinkfinder", true
 	}
 
@@ -580,7 +580,7 @@ func TestLinkFinderEVOIntegrationGeneratesReports(t *testing.T) {
 		t.Fatalf("failed to write crawl list: %v", err)
 	}
 
-	writeLinkfinderArtifacts(t, tmp, map[string][]string{
+	writeArtifacts(t, tmp, map[string][]string{
 		"html": {"file://" + sample},
 	})
 
@@ -588,7 +588,7 @@ func TestLinkFinderEVOIntegrationGeneratesReports(t *testing.T) {
 	defer cancel()
 
 	out := make(chan string, 10)
-	if err := LinkFinderEVO(ctx, "https://example.com", tmp, out); err != nil {
+	if err := Run(ctx, "https://example.com", tmp, out); err != nil {
 		t.Fatalf("LinkFinderEVO returned error: %v", err)
 	}
 
@@ -617,20 +617,20 @@ func TestLinkFinderEVOIntegrationGeneratesReports(t *testing.T) {
 }
 
 func TestLinkFinderEVOLimitsWorkloadByDeadline(t *testing.T) {
-	prevFindBin := linkfinderFindBin
-	prevRunCmd := linkfinderRunCmd
+	prevFindBin := findBin
+	prevRunCmd := runCmd
 	t.Cleanup(func() {
-		linkfinderFindBin = prevFindBin
-		linkfinderRunCmd = prevRunCmd
+		findBin = prevFindBin
+		runCmd = prevRunCmd
 	})
 
-	linkfinderFindBin = func(names ...string) (string, bool) {
+	findBin = func(names ...string) (string, bool) {
 		return "golinkfinder", true
 	}
 
 	var mu sync.Mutex
 	var processed []int
-	linkfinderRunCmd = func(ctx context.Context, dir string, name string, args []string, out chan<- string) error {
+	runCmd = func(ctx context.Context, dir string, name string, args []string, out chan<- string) error {
 		for i := 0; i < len(args); i++ {
 			if args[i] == "-i" && i+1 < len(args) {
 				data, err := os.ReadFile(args[i+1])
@@ -673,17 +673,17 @@ func TestLinkFinderEVOLimitsWorkloadByDeadline(t *testing.T) {
 		artifactsData[sub] = entries
 	}
 
-	writeLinkfinderArtifacts(t, tmp, artifactsData)
+	writeArtifacts(t, tmp, artifactsData)
 
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(2*time.Second))
 	defer cancel()
-	expectedBudget := linkfinderEntryBudget(ctx, 3*linkfinderMaxInputEntries)
+	expectedBudget := entryBudget(ctx, 3*maxInputEntries)
 	if expectedBudget >= 100 {
 		t.Fatalf("expected budget to be lower than input size, got %d", expectedBudget)
 	}
 
 	out := make(chan string, 20)
-	if err := LinkFinderEVO(ctx, "https://example.com", tmp, out); err != nil {
+	if err := Run(ctx, "https://example.com", tmp, out); err != nil {
 		t.Fatalf("LinkFinderEVO returned error: %v", err)
 	}
 

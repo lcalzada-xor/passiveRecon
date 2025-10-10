@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
 
+	apperrors "passive-rec/internal/platform/errors"
 	"passive-rec/internal/platform/logx"
 )
 
@@ -19,6 +21,8 @@ var ErrMissingBinary = errors.New("missing binary")
 // corto por binario para evitar bloqueos.
 func findBinaryMatchingVersion(match string, candidates ...string) (string, error) {
 	match = strings.ToLower(match)
+	searchPaths := os.Getenv("PATH")
+
 	for _, candidate := range candidates {
 		path, err := exec.LookPath(candidate)
 		if err != nil {
@@ -35,6 +39,11 @@ func findBinaryMatchingVersion(match string, candidates ...string) (string, erro
 		if strings.Contains(strings.ToLower(string(output)), match) {
 			return path, nil
 		}
+	}
+
+	// Retornar error mejorado si no se encuentra
+	if len(candidates) > 0 {
+		return "", apperrors.NewMissingBinaryError(candidates[0], strings.Split(searchPaths, ":")...)
 	}
 	return "", ErrMissingBinary
 }
@@ -130,7 +139,8 @@ func runCommand(ctx context.Context, name string, args []string, out chan<- stri
 
 	if err := cmd.Start(); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
-			return ErrMissingBinary
+			searchPaths := os.Getenv("PATH")
+			return apperrors.NewMissingBinaryError(name, strings.Split(searchPaths, ":")...)
 		}
 		logx.Errorf("start %s: %v", name, err)
 		return err
