@@ -1,7 +1,6 @@
 package sources
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"net/url"
@@ -72,7 +71,9 @@ func HTTPX(ctx context.Context, outdir string, out chan<- string) error {
 	intermediate, cleanup := forwardHTTPXOutput(out)
 	defer cleanup()
 
-	return runHTTPXWorkers(ctx, bin, combined, intermediate, httpxRunCmd, writeHTTPXInput)
+	return runHTTPXWorkers(ctx, bin, combined, intermediate, httpxRunCmd, func(lines []string) (string, func(), error) {
+		return artifacts.WriteTempInput("httpx", lines)
+	})
 }
 
 func collectHTTPXInputs(outdir string) ([]string, error) {
@@ -228,38 +229,6 @@ func runHTTPXWorkers(
 	}
 
 	return group.Wait()
-}
-
-func writeHTTPXInput(lines []string) (string, func(), error) {
-	tmpFile, err := os.CreateTemp("", "passive-rec-httpx-*.txt")
-	if err != nil {
-		return "", nil, err
-	}
-	cleanup := func() { _ = os.Remove(tmpFile.Name()) }
-
-	writer := bufio.NewWriter(tmpFile)
-	for _, line := range lines {
-		if _, err := writer.WriteString(line); err != nil {
-			_ = tmpFile.Close()
-			cleanup()
-			return "", nil, err
-		}
-		if err := writer.WriteByte('\n'); err != nil {
-			_ = tmpFile.Close()
-			cleanup()
-			return "", nil, err
-		}
-	}
-	if err := writer.Flush(); err != nil {
-		_ = tmpFile.Close()
-		cleanup()
-		return "", nil, err
-	}
-	if err := tmpFile.Close(); err != nil {
-		cleanup()
-		return "", nil, err
-	}
-	return tmpFile.Name(), cleanup, nil
 }
 
 func normalizeHTTPXLine(line string) []string {
