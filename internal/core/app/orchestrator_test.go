@@ -266,7 +266,7 @@ func TestRunPipelineConcurrentSourcesDedupesSink(t *testing.T) {
 	}
 }
 
-func TestStepDedupeRunsDNSXWhenActive(t *testing.T) {
+func TestStepDedupePreparesAndDNSXRunsWhenActive(t *testing.T) {
 	dir := t.TempDir()
 	writeOrchestratorArtifacts(t, dir, []artifacts.Artifact{{Type: "domain", Value: "one.example.com", Up: true}})
 
@@ -289,11 +289,21 @@ func TestStepDedupeRunsDNSXWhenActive(t *testing.T) {
 	t.Cleanup(func() { _ = sink.Close() })
 
 	cfg := &config.Config{OutDir: dir, Active: true}
-	opts := orchestratorOptions{cfg: cfg, sink: sink, requested: map[string]bool{"dedupe": true}}
+	opts := orchestratorOptions{cfg: cfg, sink: sink, requested: map[string]bool{"dedupe": true, "dnsx": true}}
 
 	state := &pipelineState{}
 	if err := stepDedupe(context.Background(), state, opts); err != nil {
 		t.Fatalf("stepDedupe returned error: %v", err)
+	}
+	if called != 0 {
+		t.Fatalf("expected dnsx to run in dedicated step, got %d calls during dedupe", called)
+	}
+	if len(state.DedupedDomains) != 1 || state.DedupedDomains[0] != "one.example.com" {
+		t.Fatalf("expected dedupe to populate domains, got %v", state.DedupedDomains)
+	}
+
+	if err := stepDNSX(context.Background(), state, opts); err != nil {
+		t.Fatalf("stepDNSX returned error: %v", err)
 	}
 	if called != 1 {
 		t.Fatalf("expected dnsx to be invoked once, got %d", called)

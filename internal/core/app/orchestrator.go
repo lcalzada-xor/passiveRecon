@@ -145,6 +145,13 @@ var defaultPipeline = []toolStep{
 	{Name: toolCensys, Group: "cert-sources", Run: stepCensys},
 	{Name: toolDedupe, Run: stepDedupe},
 	{
+		Name:                toolDNSX,
+		Run:                 stepDNSX,
+		RequiresActive:      true,
+		SkipInactiveMessage: "meta: dnsx skipped (requires --active)",
+		Precondition:        requireDedupedDomains("meta: dnsx skipped (no domains after dedupe)"),
+	},
+	{
 		Name:         toolWayback,
 		Group:        "archive-sources",
 		Run:          stepWayback,
@@ -521,17 +528,6 @@ func stepDedupe(ctx context.Context, state *pipelineState, opts orchestratorOpti
 	if len(domains) == 0 {
 		emitMeta(opts, toolDedupe, "dedupe produced no domains")
 	}
-
-	if opts.cfg.Active {
-		if opts.metrics != nil {
-			opts.metrics.RecordInputs(toolDNSX, "", int64(len(domains)))
-		}
-		input, done := toolInputChannel(ctx, opts.sink, toolDNSX, "", opts.metrics)
-		defer done()
-		if err := sourceDNSX(ctx, domains, opts.cfg.OutDir, input); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -558,6 +554,15 @@ func stepHTTPX(ctx context.Context, _ *pipelineState, opts orchestratorOptions) 
 	input, done := toolInputChannel(ctx, opts.sink, toolHTTPX, "", opts.metrics)
 	defer done()
 	return sourceHTTPX(ctx, opts.cfg.OutDir, input)
+}
+
+func stepDNSX(ctx context.Context, state *pipelineState, opts orchestratorOptions) error {
+	if opts.metrics != nil {
+		opts.metrics.RecordInputs(toolDNSX, "", int64(len(state.DedupedDomains)))
+	}
+	input, done := toolInputChannel(ctx, opts.sink, toolDNSX, "", opts.metrics)
+	defer done()
+	return sourceDNSX(ctx, state.DedupedDomains, opts.cfg.OutDir, input)
 }
 
 func stepSubJS(ctx context.Context, _ *pipelineState, opts orchestratorOptions) error {
