@@ -1,7 +1,6 @@
 package sources
 
 import (
-	"bufio"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -58,7 +57,7 @@ func SubJS(ctx context.Context, outdir string, out chan<- string) error {
 		return nil
 	}
 
-	tmpPath, cleanup, err := writeSubJSInput(inputs)
+	tmpPath, cleanup, err := artifacts.WriteTempInput("subjs", inputs)
 	if err != nil {
 		return err
 	}
@@ -143,35 +142,6 @@ func extractSubJSInput(line string) string {
 		return ""
 	}
 	return trimmed
-}
-
-func writeSubJSInput(lines []string) (string, func(), error) {
-	tmpFile, err := os.CreateTemp("", "passive-rec-subjs-*.txt")
-	if err != nil {
-		return "", nil, err
-	}
-
-	cleanup := func() {
-		tmpFile.Close()
-		os.Remove(tmpFile.Name())
-	}
-
-	writer := bufio.NewWriter(tmpFile)
-	for _, line := range lines {
-		if _, err := writer.WriteString(line + "\n"); err != nil {
-			cleanup()
-			return "", nil, err
-		}
-	}
-	if err := writer.Flush(); err != nil {
-		cleanup()
-		return "", nil, err
-	}
-	if err := tmpFile.Close(); err != nil {
-		cleanup()
-		return "", nil, err
-	}
-	return tmpFile.Name(), cleanup, nil
 }
 
 func validateJSURLs(ctx context.Context, urls []string) ([]string, error) {
