@@ -306,13 +306,36 @@ func LinkFinderEVO(ctx context.Context, target string, outdir string, out chan<-
 		{label: "crawl", values: valuesByType["crawl"]},
 	}
 
+	// Reportar estadísticas de input encontrado
+	totalInputs := 0
+	for _, input := range inputs {
+		if len(input.values) > 0 {
+			emit(out, fmt.Sprintf("active: meta: linkfinderevo found %d %s entries", len(input.values), input.label))
+			totalInputs += len(input.values)
+		}
+	}
+	if totalInputs == 0 {
+		emit(out, "active: meta: linkfinderevo skipped (no active html/js/crawl artifacts found)")
+		return nil
+	}
+
 	aggregate := newLinkfinderAggregate()
 	gfAggregate := newLinkfinderGFAggregate()
 	var firstErr error
 
-	totalBudget := linkfinderEntryBudget(ctx, len(inputs)*linkfinderMaxInputEntries)
+	maxEntries := len(inputs) * linkfinderMaxInputEntries
+	totalBudget := linkfinderEntryBudget(ctx, maxEntries)
+
+	emit(out, fmt.Sprintf("active: meta: linkfinderevo budget: %d entries (max: %d, inputs: %d)", totalBudget, maxEntries, totalInputs))
+
 	if totalBudget <= 0 {
-		emit(out, "active: meta: linkfinderevo skipped (insufficient time budget)")
+		deadline, hasDeadline := ctx.Deadline()
+		if hasDeadline {
+			remaining := time.Until(deadline)
+			emit(out, fmt.Sprintf("active: meta: linkfinderevo skipped (insufficient time budget, deadline in %s)", remaining.Round(time.Millisecond)))
+		} else {
+			emit(out, "active: meta: linkfinderevo skipped (insufficient time budget)")
+		}
 		return nil
 	}
 

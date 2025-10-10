@@ -183,6 +183,7 @@ var defaultPipeline = []toolStep{
 		Run:                 stepLinkFinderEVO,
 		RequiresActive:      true,
 		SkipInactiveMessage: "meta: linkfinderevo skipped (requires --active)",
+		Timeout:             timeoutLinkFinderEVO,
 	},
 }
 
@@ -621,6 +622,19 @@ func timeoutHTTPX(state *pipelineState, opts orchestratorOptions) int {
 		extra = 900
 	}
 	return base + extra
+}
+
+func timeoutLinkFinderEVO(state *pipelineState, opts orchestratorOptions) int {
+	base := baseTimeoutSeconds(opts.cfg.TimeoutS)
+	// LinkFinderEVO procesa archivos HTML/JS/crawl activos
+	// A 15 entradas/segundo y max 200 por tipo, necesita ~40s para procesar 600 entradas
+	// Agregamos tiempo generoso para manejar archivos grandes y análisis GF
+	extra := 300 // 5 minutos adicionales por defecto
+	timeout := base + extra
+	if timeout > maxToolTimeoutSeconds {
+		timeout = maxToolTimeoutSeconds
+	}
+	return timeout
 }
 
 // --- Unknown tools & cache messaging --------------------------------------------
