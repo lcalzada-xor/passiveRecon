@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,17 +38,41 @@ func Run(ctx context.Context, target string, outdir string, out chan<- string) e
 	}
 
 	selectors := map[string]artifacts.ActiveState{
-		"html":  artifacts.ActiveOnly,
-		"js":    artifacts.ActiveOnly,
-		"crawl": artifacts.ActiveOnly,
+		"html":  artifacts.AnyState,
+		"js":    artifacts.AnyState,
+		"crawl": artifacts.AnyState,
 	}
-	valuesByType, err := artifacts.CollectValuesByType(outdir, selectors)
+	artifactsByType, err := artifacts.CollectArtifactsByType(outdir, selectors)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			emit(out, "active: meta: linkfinderevo skipped (missing artifacts.jsonl)")
 			return nil
 		}
 		return fmt.Errorf("collect artifacts: %w", err)
+	}
+
+	valuesByType := make(map[string][]string, len(selectors))
+	for typ := range selectors {
+		valuesByType[typ] = nil
+	}
+	for typ, artifacts := range artifactsByType {
+		if len(artifacts) == 0 {
+			continue
+		}
+		values := make([]string, 0, len(artifacts))
+		for _, artifact := range artifacts {
+			if !artifact.Up {
+				continue
+			}
+			value := strings.TrimSpace(artifact.Value)
+			if value == "" {
+				continue
+			}
+			values = append(values, value)
+		}
+		if len(values) > 0 {
+			valuesByType[typ] = values
+		}
 	}
 
 	inputs := []struct {
