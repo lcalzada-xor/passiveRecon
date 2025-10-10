@@ -1,43 +1,205 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
-# Binaries for programs and plugins
+################################################################################
+# Go build artifacts
+################################################################################
+
+# Compiled binaries (programs and plugins)
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
 
-# Test binary, built with `go test -c`
+# Test binaries built with `go test -c`
 *.test
 
-# Code coverage profiles and other test artifacts
-*.out
-coverage.*
-*.coverprofile
-profile.cov
+# Output of go build
+passive-rec
+install-deps
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
-# Go workspace file
+# Go workspace files
 go.work
 go.work.sum
 
-# Passive Recon build artifacts
+################################################################################
+# Test and coverage artifacts
+################################################################################
+
+# Test output
+*.out
+
+# Coverage profiles
+coverage.*
+*.coverprofile
+profile.cov
+*.cover
+
+################################################################################
+# Passive Recon output directories
+################################################################################
+
+# Output directories (by target name)
+# Pattern: domain_com/ or subdomain_domain_com/
+*_com/
+*_com_*/
+*_net/
+*_net_*/
+*_org/
+*_org_*/
+*_io/
+*_io_*/
+*_dev/
+*_dev_*/
+*_es/
+*_es_*/
+*_uk/
+*_uk_*/
+
+# But allow internal project directories
+!internal/
+!cmd/
+
+# Specific output files at root level
 *.passive
-passive-rec
-**/report.html
-**/*_*/certs/
-**/*_*/domains/
-**/*_*/routes/
-**/*_*/dns/
-# Execution cache files
-**/.passive-cache.json
+*.active
+artifacts.jsonl
+metrics
+report.html
+.passive-cache.json
 
-# env file
+# Output subdirectories
+certs/
+domains/
+routes/
+dns/
+rdap/
+
+################################################################################
+# Reconnaissance tool temporary files
+################################################################################
+
+# httpx temporary files
+httpx-*.txt
+.httpx-*
+
+# amass temporary files
+amass_*.txt
+.amass/
+amass.ini
+
+# subfinder cache and config
+.subfinder/
+subfinder-*.txt
+
+# assetfinder temporary files
+assetfinder-*.txt
+
+# waybackurls/gau cache
+.wayback/
+.gau/
+
+# dnsx temporary files
+dnsx-*.txt
+
+# subjs temporary files
+subjs-*.txt
+
+# GoLinkFinderEVO temporary files
+gf-*.txt
+linkfindings/
+
+# General tool outputs
+*.tmp
+*.temp
+input-*.txt
+output-*.txt
+
+################################################################################
+# Credentials and secrets
+################################################################################
+
 .env
+.env.*
+!.env.example
+**/credentials.json
+**/secrets.yaml
+**/.api-keys
 
-# Editor/IDE
-# .idea/
-# .vscode/
+# API keys and tokens
+censys_*.txt
+shodan_*.txt
+
+################################################################################
+# Editor and IDE
+################################################################################
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# IntelliJ IDEA / GoLand
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Vim
+*.swp
+*.swo
+*~
+.vim/
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+################################################################################
+# Operating System
+################################################################################
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+
+# Linux
+.directory
+.Trash-*
+
+################################################################################
+# Logs and databases
+################################################################################
+
+*.log
+*.sql
+*.sqlite
+*.db
+
+################################################################################
+# Miscellaneous
+################################################################################
+
+# Compressed archives
+*.zip
+*.tar.gz
+*.tar.bz2
+*.tgz
+*.rar
+*.7z
+
+# Backup files
+*.bak
+*.backup
+*.orig

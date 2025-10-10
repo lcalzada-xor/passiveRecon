@@ -19,10 +19,22 @@ import (
 	"passive-rec/internal/core/runner"
 )
 
+const (
+	// httpxDefaultBatchSize determines how many URLs are processed in a single httpx invocation.
+	// Larger batches reduce overhead but may cause timeouts on slow systems.
+	httpxDefaultBatchSize = 5000
+
+	// httpxIntermediateBufferSize sets the channel buffer for httpx output forwarding.
+	// A generous buffer prevents blocking when processing bursts of responses.
+	httpxIntermediateBufferSize = 1024
+)
+
 var (
-	httpxBinFinder   = runner.HTTPXBin
-	httpxRunCmd      = runner.RunCommand
-	httpxBatchSize   = 5000
+	httpxBinFinder = runner.HTTPXBin
+	httpxRunCmd    = runner.RunCommand
+	// httpxBatchSize can be overridden for testing or tuning
+	httpxBatchSize = httpxDefaultBatchSize
+	// httpxWorkerCount defaults to number of CPUs but can be adjusted
 	httpxWorkerCount = runtime.NumCPU()
 
 	httpxMetaEmit   = func(string) {}
@@ -118,7 +130,7 @@ func collectHTTPXInputs(outdir string) ([]string, error) {
 
 func forwardHTTPXOutput(out chan<- string) (chan<- string, func()) {
 	// Buffer generoso para absorber ráfagas de httpx sin bloquear
-	intermediate := make(chan string, 1024)
+	intermediate := make(chan string, httpxIntermediateBufferSize)
 
 	var wg sync.WaitGroup
 	wg.Add(1)

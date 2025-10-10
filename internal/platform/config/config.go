@@ -9,12 +9,14 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -245,7 +247,8 @@ func cleanStringSlice(values []string) []string {
 // proxy URL is provided. The proxy string must include a scheme and host (for
 // example, http://127.0.0.1:8080). The function updates both uppercase and
 // lowercase variants so that external tools and Go's HTTP clients honor the
-// configuration.
+// configuration. It also performs basic validation of the proxy format and
+// warns if the proxy appears unreachable.
 func ApplyProxy(proxy string) error {
 	proxy = strings.TrimSpace(proxy)
 	if proxy == "" {
@@ -254,7 +257,24 @@ func ApplyProxy(proxy string) error {
 
 	parsed, err := url.Parse(proxy)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return fmt.Errorf("proxy inválido: %q", proxy)
+		return fmt.Errorf("proxy inválido: %q (debe incluir esquema y host, ej: http://127.0.0.1:8080)", proxy)
+	}
+
+	// Validar que el esquema sea HTTP o HTTPS
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("proxy inválido: esquema %q no soportado (solo http/https)", parsed.Scheme)
+	}
+
+	// Validar que el host tenga un formato válido
+	host := parsed.Hostname()
+	if host == "" {
+		return fmt.Errorf("proxy inválido: host vacío en %q", proxy)
+	}
+
+	// Intentar verificar conectividad básica (sin bloquear si falla)
+	if err := validateProxyConnectivity(parsed); err != nil {
+		log.Printf("advertencia: no se pudo verificar conectividad del proxy %s: %v", proxy, err)
+		log.Printf("continuando de todos modos, pero las peticiones pueden fallar si el proxy no está disponible")
 	}
 
 	envVars := []string{"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"}
@@ -263,6 +283,31 @@ func ApplyProxy(proxy string) error {
 			return fmt.Errorf("no se pudo configurar %s: %w", key, err)
 		}
 	}
+	return nil
+}
+
+// validateProxyConnectivity performs a basic connectivity check to the proxy.
+// Returns an error if the proxy is unreachable, but this is non-fatal.
+func validateProxyConnectivity(proxyURL *url.URL) error {
+	// Timeout corto para no retrasar el inicio
+	timeout := 3 * time.Second
+
+	// Intentar conectar al host del proxy
+	host := proxyURL.Host
+	if proxyURL.Port() == "" {
+		// Añadir puerto por defecto si no está especificado
+		if proxyURL.Scheme == "https" {
+			host = net.JoinHostPort(proxyURL.Hostname(), "443")
+		} else {
+			host = net.JoinHostPort(proxyURL.Hostname(), "80")
+		}
+	}
+
+	conn, err := net.DialTimeout("tcp", host, timeout)
+	if err != nil {
+		return fmt.Errorf("no se pudo conectar al proxy en %s: %w", host, err)
+	}
+	conn.Close()
 	return nil
 }
 

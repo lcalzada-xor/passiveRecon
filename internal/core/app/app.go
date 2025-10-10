@@ -119,12 +119,12 @@ func Run(cfg *config.Config) error {
 	pipelineDuration := time.Since(pipelineStart)
 	logx.Infof("orquestador: pipeline ejecutado en %s", pipelineDuration.Round(time.Millisecond))
 
-        if metrics != nil {
-                logPipelineMetrics(metrics, runHash, pipelineDuration)
-                if err := writePipelineMetricsReport(cfg.OutDir, metrics, pipelineDuration); err != nil {
-                        logx.Warnf("no se pudo escribir metrics: %v", err)
-                }
-        }
+	if metrics != nil {
+		logPipelineMetrics(metrics, runHash, pipelineDuration)
+		if err := writePipelineMetricsReport(cfg.OutDir, metrics, pipelineDuration); err != nil {
+			logx.Warnf("no se pudo escribir metrics: %v", err)
+		}
+	}
 
 	sink.Flush()
 	executePostProcessing(ctx, cfg, sink, bar, unknown)

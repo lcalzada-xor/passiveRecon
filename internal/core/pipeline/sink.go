@@ -11,7 +11,12 @@ import (
 )
 
 const (
-	defaultLineBuffer   = 1024
+	// defaultLineBuffer is the minimum channel buffer size for the sink's input channel.
+	// This provides baseline capacity to prevent blocking when workers are busy.
+	defaultLineBuffer = 1024
+
+	// lineBufferPerWorker allocates additional buffer space per worker thread.
+	// This scales the buffer based on concurrency to maintain throughput under load.
 	lineBufferPerWorker = 256
 )
 

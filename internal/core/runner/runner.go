@@ -50,12 +50,16 @@ func DNSXBin() (string, error) {
 	return findBinaryMatchingVersion("projectdiscovery", "dnsx")
 }
 
+// HasBin checks if a binary with the given name is available in the system PATH.
+// Returns true if the binary exists and is executable, false otherwise.
 func HasBin(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
 }
 
-// FindBin devuelve el primer binario disponible en PATH de la lista.
+// FindBin searches for the first available binary from the provided list of names.
+// It returns the name of the first binary found in PATH and true, or empty string
+// and false if none of the binaries are available.
 func FindBin(names ...string) (string, bool) {
 	for _, name := range names {
 		if HasBin(name) {
@@ -65,13 +69,17 @@ func FindBin(names ...string) (string, bool) {
 	return "", false
 }
 
+// RunCommand executes an external command and streams its stdout line-by-line to the
+// provided channel. The command respects context cancellation and will be terminated
+// if the context is cancelled. Returns ErrMissingBinary if the binary is not found,
+// or any other error encountered during execution.
 func RunCommand(ctx context.Context, name string, args []string, out chan<- string) error {
 	return runCommand(ctx, name, args, out, "")
 }
 
-// RunCommandWithDir ejecuta el comando en el directorio indicado.
-// Redirige stdout línea a línea al canal out. Si dir está vacío,
-// equivale a RunCommand.
+// RunCommandWithDir executes an external command in the specified working directory.
+// It behaves identically to RunCommand but sets the working directory before execution.
+// If dir is empty, it behaves exactly like RunCommand (uses the current directory).
 func RunCommandWithDir(ctx context.Context, dir string, name string, args []string, out chan<- string) error {
 	return runCommand(ctx, name, args, out, dir)
 }
@@ -192,7 +200,9 @@ readLoop:
 	return nil
 }
 
-// WithTimeout retorna un ctx con timeout (por defecto 120s).
+// WithTimeout creates a new context with a timeout derived from the parent context.
+// If seconds is less than or equal to 0, a default timeout of 120 seconds is used.
+// Returns the new context and a cancel function that should be called to release resources.
 func WithTimeout(parent context.Context, seconds int) (context.Context, context.CancelFunc) {
 	if seconds <= 0 {
 		seconds = 120

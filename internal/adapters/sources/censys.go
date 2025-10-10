@@ -5,17 +5,36 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"passive-rec/internal/platform/certs"
 	"passive-rec/internal/platform/logx"
 )
 
+const (
+	// censysRequestTimeout defines the maximum time allowed for a single Censys API request
+	censysRequestTimeout = 30 * time.Second
+)
+
 var (
-	censysBaseURL    = "https://search.censys.io/api/v2/certificates/search"
-	censysHTTPClient = http.DefaultClient
+	censysBaseURL = "https://search.censys.io/api/v2/certificates/search"
+	// censysHTTPClient is initialized with reasonable timeouts to prevent hanging requests
+	censysHTTPClient = &http.Client{
+		Timeout: censysRequestTimeout,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   10 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+	}
 )
 
 func censysMeta(out chan<- string, format string, args ...interface{}) {
@@ -114,7 +133,9 @@ func Censys(ctx context.Context, domain, apiID, apiSecret string, out chan<- str
 		}
 		// Cierre seguro del body
 		func() {
-			defer resp.Body.Close()
+			if resp != nil && resp.Body != nil {
+				defer resp.Body.Close()
+			}
 
 			if resp.StatusCode != http.StatusOK {
 				censysMeta(out, "unexpected HTTP status %d", resp.StatusCode)

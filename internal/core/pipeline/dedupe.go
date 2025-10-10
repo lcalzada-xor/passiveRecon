@@ -2,18 +2,31 @@ package pipeline
 
 import "sync"
 
-// Dedupe ofrece una deduplicación simple basada en espacios de claves.
+// Dedupe provides exact deduplication using an in-memory map.
+//
+// This implementation guarantees no false positives (every duplicate is caught)
+// but memory usage grows linearly with the number of unique items. For most
+// reconnaissance targets (< 100k unique items), this is the recommended approach.
+//
+// For very large scans (> 1M items) where memory is constrained and occasional
+// duplicates are acceptable, consider using BloomDedupe instead (see bloomdedupe.go).
+//
+// Memory usage comparison for 1 million unique 50-byte strings:
+//   - Dedupe (map):        ~100-150 MB (exact, no false positives)
+//   - BloomDedupe (0.01):  ~1.2 MB (probabilistic, ~1% false positive rate)
 type Dedupe struct {
 	mu   sync.Mutex
 	seen map[string]map[string]struct{}
 }
 
-// NewDedupe crea una instancia vacía lista para usarse.
+// NewDedupe creates an empty deduplicator ready for use.
 func NewDedupe() *Dedupe {
 	return &Dedupe{seen: make(map[string]map[string]struct{})}
 }
 
-// Seen marca la clave dentro del espacio indicado y devuelve true si ya se había registrado.
+// Seen marks the key within the specified namespace and returns true if it was already seen.
+// The namespace parameter allows maintaining separate deduplication sets (e.g., "domain:passive"
+// vs "domain:active") to avoid cross-contamination between different artifact types.
 func (d *Dedupe) Seen(space, key string) bool {
 	if d == nil || space == "" || key == "" {
 		return false
