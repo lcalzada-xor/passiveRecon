@@ -250,3 +250,59 @@ func TestSubJSAcceptsNonErrorStatuses(t *testing.T) {
 		}
 	}
 }
+
+func TestSubJSFiltersDownRoutes(t *testing.T) {
+	dir := t.TempDir()
+	writeSubJSArtifacts(t, dir, []artifacts.Artifact{
+		{Type: "route", Value: "https://app.example.com/working [200]", Active: true, Up: true},
+		{Type: "route", Value: "https://app.example.com/notfound [404]", Active: true, Up: false},
+		{Type: "route", Value: "https://app.example.com/error [500]", Active: true, Up: false},
+		{Type: "route", Value: "https://app.example.com/down [0]", Active: true, Up: false},
+	})
+
+	var inputFileContent string
+	originalFind := subjsFindBin
+	originalRun := subjsRunCmd
+	originalValidator := subjsValidator
+	subjsFindBin = func(names ...string) (string, bool) { return "/usr/bin/subjs", true }
+	subjsRunCmd = func(ctx context.Context, name string, args []string, out chan<- string) error {
+		if len(args) != 2 || args[0] != "-i" {
+			t.Fatalf("unexpected args: %v", args)
+		}
+		data, err := os.ReadFile(args[1])
+		if err != nil {
+			t.Fatalf("expected temp input file readable: %v", err)
+		}
+		inputFileContent = string(data)
+		out <- "https://app.example.com/static/app.js"
+		return nil
+	}
+	subjsValidator = func(ctx context.Context, urls []string) ([]string, error) {
+		return []string{"https://app.example.com/static/app.js"}, nil
+	}
+	t.Cleanup(func() {
+		subjsFindBin = originalFind
+		subjsRunCmd = originalRun
+		subjsValidator = originalValidator
+	})
+
+	out := make(chan string, 5)
+	if err := SubJS(context.Background(), dir, out); err != nil {
+		t.Fatalf("SubJS returned error: %v", err)
+	}
+
+	// Verificar que solo la URL con Up=true fue procesada
+	expectedInput := "https://app.example.com/working\n"
+	if inputFileContent != expectedInput {
+		t.Fatalf("unexpected input file content:\ngot:  %q\nwant: %q", inputFileContent, expectedInput)
+	}
+
+	select {
+	case line := <-out:
+		if line != "active: js: https://app.example.com/static/app.js" {
+			t.Fatalf("unexpected sink output: %q", line)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("expected sink output")
+	}
+}

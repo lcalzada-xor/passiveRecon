@@ -105,7 +105,7 @@ func SubJS(ctx context.Context, outdir string, out chan<- string) error {
 }
 
 func loadSubJSInput(outdir string) ([]string, error) {
-	values, err := artifacts.CollectValues(outdir, "route", artifacts.ActiveOnly)
+	values, err := artifacts.CollectValues(outdir, "route", artifacts.ActiveAndUp)
 	if err != nil {
 		return nil, err
 	}

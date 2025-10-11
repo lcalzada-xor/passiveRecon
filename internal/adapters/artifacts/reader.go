@@ -20,6 +20,10 @@ const (
 	ActiveOnly
 	// PassiveOnly restringe a artefactos marcados como pasivos.
 	PassiveOnly
+	// ActiveAndUp restringe a artefactos activos que están funcionando (up=true).
+	ActiveAndUp
+	// UpOnly restringe a artefactos que están funcionando (up=true), sin importar si son activos o pasivos.
+	UpOnly
 )
 
 func (s ActiveState) matches(active bool) bool {
@@ -28,9 +32,20 @@ func (s ActiveState) matches(active bool) bool {
 		return active
 	case PassiveOnly:
 		return !active
+	case ActiveAndUp:
+		return active
+	case UpOnly:
+		return true
 	default:
 		return true
 	}
+}
+
+func (s ActiveState) matchesUp(up bool) bool {
+	if s == ActiveAndUp || s == UpOnly {
+		return up
+	}
+	return true
 }
 
 // CollectValuesByType lee artifacts.jsonl desde el directorio proporcionado y
@@ -129,6 +144,9 @@ func CollectArtifactsByType(outdir string, selectors map[string]ActiveState) (ma
 				continue
 			}
 			if !state.matches(artifact.Active) {
+				continue
+			}
+			if !state.matchesUp(artifact.Up) {
 				continue
 			}
 			artifactCopy := artifact
