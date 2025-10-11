@@ -4,15 +4,12 @@ import (
 	"net"
 	"net/url"
 	"strings"
-
-	"golang.org/x/net/publicsuffix"
 )
 
 // Scope representa los límites canónicos de un escaneo.
 type Scope struct {
-	hostname    string // host normalizado tal cual lo dio el usuario (subdominios incluidos)
-	registrable string // eTLD+1 (ej.: foo.bar.co.uk -> bar.co.uk)
-	ip          net.IP // si el objetivo es una IP
+	hostname string // host normalizado tal cual lo dio el usuario (subdominios incluidos)
+	ip       net.IP // si el objetivo es una IP
 }
 
 // NewScope construye un Scope desde el target dado. Si no se puede
@@ -28,15 +25,9 @@ func NewScope(target string) *Scope {
 		return &Scope{hostname: normalized, ip: ip}
 	}
 
-	// Caso dominio: obtenemos el registrable (eTLD+1) si es posible
-	registrable := normalized
-	if effective, err := publicsuffix.EffectiveTLDPlusOne(normalized); err == nil && effective != "" {
-		registrable = strings.ToLower(effective)
-	}
-
+	// Caso dominio
 	return &Scope{
-		hostname:    normalized,
-		registrable: registrable,
+		hostname: normalized,
 	}
 }
 
@@ -65,18 +56,13 @@ func (s *Scope) AllowsDomain(candidate string) bool {
 		return false
 	}
 
-	// Si no tenemos registrable (caso raro), exigimos coincidencia exacta.
-	if s.registrable == "" {
-		return normalized == s.hostname
-	}
-
-	// Coincidencia exacta con el host completo o con el registrable
-	if normalized == s.hostname || normalized == s.registrable {
+	// Coincidencia exacta con el hostname
+	if normalized == s.hostname {
 		return true
 	}
 
-	// Subdominios bajo el registrable (p. ej. a.b.example.com)
-	return strings.HasSuffix(normalized, "."+s.registrable)
+	// Subdominios bajo el hostname (p. ej. si hostname es sub.example.com, permite a.sub.example.com)
+	return strings.HasSuffix(normalized, "."+s.hostname)
 }
 
 // AllowsRoute indica si una ruta/URL pertenece al scope.

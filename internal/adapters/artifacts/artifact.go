@@ -5,7 +5,11 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 )
+
+// CurrentSchemaVersion define la versión actual del schema de artifacts.
+const CurrentSchemaVersion = "1.0"
 
 // Artifact representa un hallazgo generado por el pipeline y serializado en el
 // manifiesto JSONL.
@@ -19,6 +23,9 @@ type Artifact struct {
 	Tool        string         `json:"tool,omitempty"`
 	Tools       []string       `json:"tools,omitempty"`
 	Occurrences int            `json:"occurrences,omitempty"`
+	FirstSeen   string         `json:"first_seen,omitempty"` // ISO 8601 timestamp
+	LastSeen    string         `json:"last_seen,omitempty"`  // ISO 8601 timestamp
+	Version     string         `json:"version,omitempty"`    // Schema version
 }
 
 // Key representa la identidad lógica de un artefacto normalizado.
@@ -52,6 +59,20 @@ func Normalize(tool string, artifact Artifact) (Artifact, bool) {
 	}
 	artifact.Tools = nil
 	artifact.Occurrences = 0
+
+	// Establecer versión del schema si no está presente
+	if artifact.Version == "" {
+		artifact.Version = CurrentSchemaVersion
+	}
+
+	// Establecer timestamp de primera vista si no está presente
+	if artifact.FirstSeen == "" {
+		artifact.FirstSeen = time.Now().UTC().Format(time.RFC3339)
+	}
+
+	// Actualizar timestamp de última vista
+	artifact.LastSeen = time.Now().UTC().Format(time.RFC3339)
+
 	return artifact, true
 }
 

@@ -1,128 +1,223 @@
 # passiveRecon
 
-Passive web enumeration.
+Passive web reconnaissance and enumeration toolkit.
 
-## Project structure
+## Table of Contents
 
-The repository follows a layered Go layout that separates binaries, core orchestration and infrastructure adapters:
+- [Overview](#overview)
+- [Project Structure](#project-structure)
+- [Installation](#installation)
+  - [Prerequisites](#prerequisites)
+  - [External Tools](#external-tools)
+- [Quick Start](#quick-start)
+- [Usage](#usage)
+  - [Basic Commands](#basic-commands)
+  - [Active Mode](#active-mode)
+  - [Proxy Configuration](#proxy-configuration)
+  - [HTML Reports](#html-reports)
+- [Configuration](#configuration)
+  - [Configuration File](#configuration-file)
+  - [Environment Variables](#environment-variables)
+  - [Available Options](#available-options)
+- [Output Format](#output-format)
+  - [Artifact Manifest](#artifact-manifest)
+  - [Field Reference](#field-reference)
+  - [Output Directory Structure](#output-directory-structure)
+- [Integrations](#integrations)
+  - [Censys](#censys)
+  - [RDAP](#rdap)
+  - [DNS Resolution (dnsx)](#dns-resolution-dnsx)
+  - [Link Discovery (GoLinkfinderEVO)](#link-discovery-golinkfinderevo)
+- [Development](#development)
+- [License](#license)
 
-- `cmd/` contiene las aplicaciones CLI, incluyendo `passive-rec` y utilidades auxiliares como `install-deps`.
-- `internal/core/` agrupa la lógica del dominio (aplicación, runner y pipeline) que orquesta la enumeración.
-- `internal/adapters/` reúne integraciones con el exterior como fuentes de datos, rutas, reportes y manejo de artefactos.
-- `internal/platform/` concentra utilidades de plataforma compartidas (configuración, logging, red, certificados y salida).
+---
 
-Esta organización mantiene las dependencias direccionadas desde el núcleo hacia los adaptadores y facilita ubicar las piezas según su responsabilidad.
+## Overview
 
-## External tools
+passiveRecon is a comprehensive passive reconnaissance framework designed to enumerate web assets and discover attack surface through multiple data sources. It aggregates findings from various OSINT tools and APIs, normalizes the output, and produces structured artifacts for further analysis.
 
-This project relies on several third-party reconnaissance utilities. You can ensure they are installed by running:
+**Key Features:**
+- **Passive & Active Modes**: Run passive enumeration or enable active verification
+- **Multi-source Aggregation**: Integrates with popular OSINT tools (subfinder, amass, etc.)
+- **Structured Output**: Consolidated JSONL manifest with temporal tracking
+- **Proxy Support**: Full HTTP/HTTPS proxy support with custom CA certificates
+- **HTML Reporting**: Generate visual summaries with statistics and charts
+- **Configurable**: YAML/JSON configuration files and CLI flags
+
+---
+
+## Project Structure
+
+The repository follows a clean architecture pattern with clear separation of concerns:
 
 ```
+.
+├── cmd/                    # CLI applications
+│   ├── passive-rec/       # Main reconnaissance binary
+│   └── install-deps/      # Dependency installer utility
+├── internal/
+│   ├── core/              # Core business logic
+│   │   ├── app/          # Application orchestration
+│   │   ├── pipeline/     # Data processing pipeline
+│   │   └── runner/       # Tool execution
+│   ├── adapters/          # External integrations
+│   │   ├── artifacts/    # Artifact management
+│   │   ├── report/       # Report generation
+│   │   ├── routes/       # Route categorization
+│   │   └── sources/      # Data source adapters
+│   └── platform/          # Shared utilities
+│       ├── config/       # Configuration handling
+│       ├── netutil/      # Network utilities
+│       └── certs/        # Certificate handling
+└── requirements.txt       # External tool dependencies
+```
+
+This organization keeps dependencies flowing from the core outward to adapters, making it easy to locate components by their responsibility.
+
+---
+
+## Installation
+
+### Prerequisites
+
+- **Go 1.21+**: Required to build and run the tool
+- **Git**: For cloning the repository
+- **Network Access**: To download external tools and query APIs
+
+### External Tools
+
+This project relies on third-party reconnaissance utilities. Install them automatically:
+
+```bash
 go run ./cmd/install-deps
 ```
 
-The command reads `requirements.txt`, checks if each binary is already available on your `PATH`, and uses `go install` to fetch any missing tools. The installation succeeds only if you have Go installed locally and network access to download the modules. Tools are installed into your `GOBIN` directory (or `$GOPATH/bin` if `GOBIN` is not set), so make sure that directory is exported in your `PATH`.
+This command:
+1. Reads `requirements.txt`
+2. Checks if each tool is available on your `PATH`
+3. Uses `go install` to fetch missing tools
+4. Installs to `$GOBIN` or `$GOPATH/bin`
 
-
-## Usage
-
-Generate the passive reconnaissance dataset with:
-
-```
-go run ./cmd/passive-rec -target example.com -outdir out
-```
-
-To render an HTML summary with totals, top domains and histograms sourced from the consolidated `artifacts.jsonl` manifest, add the `-report` flag:
-
-```
-go run ./cmd/passive-rec -target example.com -outdir out -report
+**Ensure your Go bin directory is in your PATH:**
+```bash
+export PATH="$PATH:$(go env GOPATH)/bin"
 ```
 
-The report is saved as `report.html` inside the selected output directory.
+---
 
-If you need to route all outbound HTTP/S requests (including third-party tools) through a proxy, provide its URL via `-proxy`:
+## Quick Start
 
-```
-go run ./cmd/passive-rec -target example.com -proxy http://127.0.0.1:8080
-```
+Run a basic passive scan:
 
-The value is used to populate the standard `HTTP(S)_PROXY` environment variables before invoking the pipeline. When your proxy
-performs TLS interception with its own certificate authority (for example Burp Suite or OWASP ZAP), point `-proxy-ca` to the
-PEM file containing that certificate so passive-rec trusts the man-in-the-middle tunnel:
-
-```
-go run ./cmd/passive-rec -target example.com -proxy http://127.0.0.1:8080 -proxy-ca ~/.config/burp/ca-cert.pem
+```bash
+go run ./cmd/passive-rec -target example.com -outdir ./output
 ```
 
-When the `--active` flag is enabled the pipeline now includes [dnsx](https://github.com/projectdiscovery/dnsx) and [GoLinkfinderEVO](https://github.com/lcalzada-xor/GoLinkfinderEVO).
-The dnsx integration resolves the deduplicated domain list, stores the raw JSONL output under `dns/dns.active` and enriches the collected artifacts with the discovered hosts.
-GoLinkfinderEVO inspects the active HTML, JavaScript and crawl lists, stores consolidated reports under `routes/linkFindings/` (`findings.json`, `findings.html` and `findings.raw`) and feeds the discovered endpoints back into the categorised `.active` artifacts.
-For reference, the raw GoLinkfinderEVO outputs from each input list are also preserved alongside the consolidated files as `findings.html.*`, `findings.js.*` and `findings.crawl.*`.
+Run with active verification and HTML report:
 
-The passive stage now queries the public RDAP directory for the target domain. Its summaries are appended to `meta.passive` while a copy of the raw metadata lives under `rdap/rdap.passive`, making it easier to review registrar, status and nameserver details alongside the rest of the reconnaissance output.
-
-### Artifact manifest
-
-Each execution now emits a consolidated manifest as `artifacts.jsonl` at the root of the output directory. Every line is a JSON
-object with the following shape:
-
-```json
-{
-  "type": "domain | route | js | html | image | maps | json | api | wasm | svg | crawl | meta-route | meta | rdap | certificate",
-  "value": "canonical artifact value",
-  "active": false,
-  "tool": "optional source name",
-  "metadata": {
-    "raw": "original line before normalisation",
-    "status": 200,
-    "names": ["alt1.example.com"],
-    "key": "sha256:..."
-  }
-}
+```bash
+go run ./cmd/passive-rec -target example.com -outdir ./output --active -report
 ```
 
-`type` denotes the sink that received the artifact and `value` stores the normalised representation that was written to the
-traditional `.passive`/`.active` files. The optional `metadata` object captures additional context such as HTTP status codes for
-active routes, the unmodified line seen on the pipeline, deduplication keys and certificate SAN lists. When available the
-`tool` attribute indicates the originating tool (for example `rdap`, `httpx` or `censys`). Consumers can iterate over the JSONL
-stream instead of reopening and parsing multiple `.passive` files when producing reports or dashboards. The HTML report also
-reads from this manifest directly, so the legacy `.active`/`.passive` lists are no longer required to render it.
+Use a configuration file:
 
-### Configuration file
-
-You can pre-populate the CLI flags with a YAML or JSON configuration file by passing its path through `--config`:
-
-```
+```bash
 go run ./cmd/passive-rec --config config.yaml
 ```
 
-If a value is present both in the config file and as a CLI flag, the CLI flag wins. Supported keys are:
+---
 
-| Campo              | Tipo                | Descripción                                      |
-|--------------------|---------------------|--------------------------------------------------|
-| `target`           | string              | Dominio objetivo                                 |
-| `outdir`           | string              | Directorio de salida                             |
-| `workers`          | int                 | Número de workers concurrentes                   |
-| `active`           | bool                | Ejecuta comprobaciones activas                   |
-| `tools`            | lista o CSV         | Herramientas a ejecutar                          |
-| `timeout`          | int                 | Timeout por herramienta en segundos              |
-| `verbosity`        | int                 | Nivel de verbosidad (0-3)                        |
-| `report`           | bool                | Genera informe HTML                              |
-| `proxy`            | string              | URL del proxy HTTP/HTTPS                         |
-| `proxy_ca`         | string              | Ruta a un certificado CA adicional para el proxy |
-| `censys_api_id`    | string              | Credencial Censys API ID                         |
-| `censys_api_secret`| string              | Credencial Censys API Secret                     |
+## Usage
 
-A YAML example:
+### Basic Commands
+
+**Passive reconnaissance:**
+```bash
+go run ./cmd/passive-rec -target example.com -outdir out
+```
+
+**Specify which tools to run:**
+```bash
+go run ./cmd/passive-rec -target example.com -outdir out -tools subfinder,amass
+```
+
+**Adjust timeout and verbosity:**
+```bash
+go run ./cmd/passive-rec -target example.com -timeout 300 -verbosity 2
+```
+
+### Active Mode
+
+Enable active verification with `--active` to:
+- Resolve discovered domains with **dnsx**
+- Extract links from HTML/JS with **GoLinkfinderEVO**
+- Verify HTTP status codes with **httpx**
+
+```bash
+go run ./cmd/passive-rec -target example.com -outdir out --active
+```
+
+**Active mode outputs:**
+- DNS resolutions: `dns/dns.active`
+- Link findings: `routes/linkFindings/findings.{json,html,raw}`
+- HTTP verification: Enriched artifacts with status codes
+
+### Proxy Configuration
+
+Route all HTTP/HTTPS traffic through a proxy:
+
+```bash
+go run ./cmd/passive-rec \
+  -target example.com \
+  -proxy http://127.0.0.1:8080
+```
+
+**With TLS interception (Burp/ZAP):**
+```bash
+go run ./cmd/passive-rec \
+  -target example.com \
+  -proxy http://127.0.0.1:8080 \
+  -proxy-ca ~/.config/burp/ca-cert.pem
+```
+
+The proxy settings apply to both the main tool and all external tools (subfinder, httpx, etc.).
+
+### HTML Reports
+
+Generate an HTML summary with statistics, top domains, and histograms:
+
+```bash
+go run ./cmd/passive-rec -target example.com -outdir out -report
+```
+
+The report is saved as `report.html` in the output directory and reads directly from `artifacts.jsonl`.
+
+---
+
+## Configuration
+
+### Configuration File
+
+Pre-populate CLI flags using YAML or JSON:
+
+```bash
+go run ./cmd/passive-rec --config config.yaml
+```
+
+**Precedence:** CLI flags override configuration file values.
+
+#### YAML Example
 
 ```yaml
 target: example.com
-outdir: out
+outdir: ./output
 workers: 10
 active: true
 tools:
   - subfinder
   - amass
+  - censys
 timeout: 180
 verbosity: 1
 report: true
@@ -132,15 +227,15 @@ censys_api_id: "${CENSYS_API_ID}"
 censys_api_secret: "${CENSYS_API_SECRET}"
 ```
 
-The same configuration in JSON:
+#### JSON Example
 
 ```json
 {
   "target": "example.com",
-  "outdir": "out",
+  "outdir": "./output",
   "workers": 10,
   "active": true,
-  "tools": ["subfinder", "amass"],
+  "tools": ["subfinder", "amass", "censys"],
   "timeout": 180,
   "verbosity": 1,
   "report": true,
@@ -151,16 +246,234 @@ The same configuration in JSON:
 }
 ```
 
-## Censys certificates integration
+### Environment Variables
 
-The `censys` source consumes the [Censys Search API](https://search.censys.io/api) to enumerate hosts from the certificate corpus. When certificate records are ingested their common name and SAN entries are now added to the domain artifacts, feeding both the passive list (and the active list when running in active mode). You must supply your account credentials through the new flags or environment variables:
+Sensitive values can be set via environment variables:
 
 ```bash
-passive-rec --tools censys --censys-api-id "$CENSYS_API_ID" --censys-api-secret "$CENSYS_API_SECRET"
-# or export them before running
-export CENSYS_API_ID=...
-export CENSYS_API_SECRET=...
-passive-rec --tools censys
+export CENSYS_API_ID="your-api-id"
+export CENSYS_API_SECRET="your-api-secret"
+export HTTP_PROXY="http://127.0.0.1:8080"
+export HTTPS_PROXY="http://127.0.0.1:8080"
 ```
 
-Censys enforces per-account rate limits (for example, free accounts currently offer 250 Search credits per month and strict request throttling). Review the [official limits](https://support.censys.io/hc/en-us/articles/360059995051-Rate-Limits-and-Quotas) that apply to your plan and adjust your `--timeout` or tool selection accordingly to avoid hitting those quotas.
+### Available Options
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `target` | string | Target domain to enumerate |
+| `outdir` | string | Output directory path |
+| `workers` | int | Number of concurrent workers |
+| `active` | bool | Enable active verification |
+| `tools` | list/CSV | Tools to execute (e.g., `subfinder,amass`) |
+| `timeout` | int | Timeout per tool in seconds |
+| `verbosity` | int | Log level (0=errors, 1=info, 2=debug, 3=trace) |
+| `report` | bool | Generate HTML report |
+| `proxy` | string | HTTP/HTTPS proxy URL |
+| `proxy_ca` | string | Path to custom CA certificate (PEM format) |
+| `censys_api_id` | string | Censys API ID |
+| `censys_api_secret` | string | Censys API Secret |
+
+---
+
+## Output Format
+
+### Artifact Manifest
+
+Each execution emits a consolidated manifest: **`artifacts.jsonl`**
+
+Every line is a JSON object representing a discovered artifact:
+
+```json
+{
+  "type": "domain",
+  "value": "api.example.com",
+  "active": true,
+  "up": true,
+  "tool": "subfinder",
+  "tools": ["subfinder", "amass"],
+  "occurrences": 2,
+  "first_seen": "2025-10-11T14:30:00Z",
+  "last_seen": "2025-10-11T14:35:00Z",
+  "version": "1.0",
+  "metadata": {
+    "raw": "api.example.com [200 OK]",
+    "status": 200
+  }
+}
+```
+
+### Field Reference
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | Artifact category (see types below) |
+| `value` | string | Normalized artifact value |
+| `active` | boolean | Whether discovered via active scan |
+| `up` | boolean | Whether artifact is responsive (active mode only) |
+| `tool` | string | Primary discovery tool |
+| `tools` | []string | All tools that discovered this artifact |
+| `occurrences` | int | Number of times artifact was seen |
+| `first_seen` | string | ISO 8601 timestamp of first discovery |
+| `last_seen` | string | ISO 8601 timestamp of last update |
+| `version` | string | Schema version (current: `1.0`) |
+| `metadata` | object | Additional context (see below) |
+
+#### Artifact Types
+
+- `domain` - Domain names
+- `route` - URL paths and endpoints
+- `js` - JavaScript files
+- `html` - HTML pages
+- `image` - Image resources
+- `maps` - Map/location resources
+- `json` - JSON endpoints
+- `api` - API endpoints
+- `wasm` - WebAssembly modules
+- `svg` - SVG files
+- `crawl` - Crawlable endpoints
+- `meta-route` - Meta/redirect routes
+- `meta` - Metadata entries
+- `rdap` - RDAP records
+- `certificate` - TLS certificates
+
+#### Metadata Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `raw` | string/[]string | Original unprocessed value(s) |
+| `status` | int | HTTP status code (active routes) |
+| `names` | []string | SAN entries (certificates) |
+| `key` | string | Deduplication key |
+
+**Benefits:**
+- **Temporal Analysis**: Track when artifacts appear/disappear across runs
+- **Multi-source Correlation**: See which tools found each artifact
+- **Programmatic Consumption**: Parse JSONL instead of multiple text files
+- **Forward Compatible**: Schema versioning for future migrations
+
+### Output Directory Structure
+
+```
+output/
+├── artifacts.jsonl          # Consolidated manifest
+├── report.html              # HTML summary (if -report enabled)
+├── domains/
+│   ├── domains.passive      # Passive domain discoveries
+│   └── domains.active       # Active domain discoveries
+├── routes/
+│   ├── routes.passive
+│   ├── routes.active
+│   ├── js.passive
+│   ├── js.active
+│   └── linkFindings/        # GoLinkfinderEVO outputs
+│       ├── findings.json
+│       ├── findings.html
+│       └── findings.raw
+├── dns/
+│   └── dns.active           # dnsx resolution output
+├── rdap/
+│   └── rdap.passive         # RDAP metadata
+└── meta/
+    ├── meta.passive
+    └── meta.active
+```
+
+---
+
+## Integrations
+
+### Censys
+
+Query the [Censys Search API](https://search.censys.io/api) for certificate enumeration.
+
+**Setup:**
+```bash
+export CENSYS_API_ID="your-id"
+export CENSYS_API_SECRET="your-secret"
+go run ./cmd/passive-rec -target example.com -tools censys
+```
+
+Or via flags:
+```bash
+go run ./cmd/passive-rec \
+  -target example.com \
+  -tools censys \
+  -censys-api-id "$CENSYS_API_ID" \
+  -censys-api-secret "$CENSYS_API_SECRET"
+```
+
+**Rate Limits:**
+- Free accounts: 250 search credits/month
+- Review [official limits](https://support.censys.io/hc/en-us/articles/360059995051-Rate-Limits-and-Quotas)
+- Adjust `-timeout` to avoid quota exhaustion
+
+Certificate common names and SANs are extracted and added to domain artifacts.
+
+### RDAP
+
+Passive stage automatically queries public RDAP directories for:
+- Registrar information
+- Domain status
+- Nameserver details
+
+**Output:**
+- Summary: Appended to `meta.passive`
+- Raw data: `rdap/rdap.passive`
+
+### DNS Resolution (dnsx)
+
+When `--active` is enabled, discovered domains are resolved using [dnsx](https://github.com/projectdiscovery/dnsx).
+
+**Features:**
+- Bulk DNS resolution
+- A/AAAA record extraction
+- CNAME following
+
+**Output:**
+- Raw JSONL: `dns/dns.active`
+- Enriched artifacts with discovered IPs
+
+### Link Discovery (GoLinkfinderEVO)
+
+Active mode runs [GoLinkfinderEVO](https://github.com/lcalzada-xor/GoLinkfinderEVO) on HTML/JS/crawl artifacts.
+
+**Process:**
+1. Collects active HTML, JavaScript, and crawl artifacts
+2. Extracts endpoints and URLs
+3. Categorizes findings (API, JSON, WASM, etc.)
+4. Feeds back into artifact pipeline
+
+**Output:**
+- Consolidated: `routes/linkFindings/findings.{json,html,raw}`
+- Per-type: `findings.html.*`, `findings.js.*`, `findings.crawl.*`
+
+---
+
+## Development
+
+**Run tests:**
+```bash
+go test ./...
+```
+
+**Build binary:**
+```bash
+go build -o passive-rec ./cmd/passive-rec
+```
+
+**Run with race detector:**
+```bash
+go run -race ./cmd/passive-rec -target example.com
+```
+
+**Lint:**
+```bash
+golangci-lint run
+```
+
+---
+
+## License
+
+[Add your license here]

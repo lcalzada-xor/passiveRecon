@@ -75,6 +75,17 @@ func (s *jsonlStore) Record(tool string, artifact artifacts.Artifact) {
 		artifacts.MergeMetadata(&rec.Artifact, normalized.Metadata)
 		artifacts.MergeTypes(&rec.Artifact, normalized.Type, normalized.Types)
 		rec.Artifact.Up = rec.Artifact.Up && normalized.Up
+
+		// Preservar FirstSeen original, actualizar LastSeen
+		if rec.Artifact.FirstSeen == "" {
+			rec.Artifact.FirstSeen = normalized.FirstSeen
+		}
+		rec.Artifact.LastSeen = normalized.LastSeen
+
+		// Actualizar versión si la nueva es diferente
+		if normalized.Version != "" {
+			rec.Artifact.Version = normalized.Version
+		}
 	}
 	rec.addTool(normalized.Tool)
 	rec.addTool(tool)

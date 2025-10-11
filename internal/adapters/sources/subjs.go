@@ -34,7 +34,7 @@ var (
 	}
 )
 
-// SubJS executes the subjs binary using the routes active list as input. It collects
+// SubJS executes the subjs binary using routes with up status as input. It collects
 // the discovered JavaScript URLs, validates that they respond with HTTP 200 and
 // writes the surviving URLs to the sink using the "active: js:" prefix so they
 // are tracked as active findings.
@@ -105,7 +105,7 @@ func SubJS(ctx context.Context, outdir string, out chan<- string) error {
 }
 
 func loadSubJSInput(outdir string) ([]string, error) {
-	values, err := artifacts.CollectValues(outdir, "route", artifacts.ActiveAndUp)
+	values, err := artifacts.CollectValues(outdir, "route", artifacts.UpOnly)
 	if err != nil {
 		return nil, err
 	}
