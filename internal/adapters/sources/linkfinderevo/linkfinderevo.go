@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -180,7 +182,9 @@ func Run(ctx context.Context, target string, outdir string, out chan<- string) e
 			recordError(&firstErr, fmt.Errorf("accumulate gf: %w", err))
 		}
 
-		shouldPersist := runErr == nil || errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded)
+		// Persistir resultados siempre que existan archivos, incluso si GoLinkfinderEVO falló.
+		// Esto evita perder resultados parciales cuando falla en una URL específica.
+		shouldPersist := true
 		if shouldPersist {
 			if err := persistArtifacts(findingsDir, input.label, rawPath, htmlPath, jsonPath); err != nil {
 				recordError(&firstErr, fmt.Errorf("persist artifacts: %w", err))
@@ -192,13 +196,12 @@ func Run(ctx context.Context, target string, outdir string, out chan<- string) e
 
 		if runErr != nil {
 			recordError(&firstErr, runErr)
+			// No hacer break: continuar procesando otros tipos de input (html, js, crawl)
+			// para no perder todos los resultados por un fallo en un tipo específico.
+			emit(out, fmt.Sprintf("active: meta: linkfinderevo error on %s (continuing with other inputs): %v", input.label, runErr))
 		}
 
 		_ = os.RemoveAll(tmpDir)
-
-		if runErr != nil {
-			break
-		}
 		if totalBudget == 0 {
 			emit(out, "active: meta: linkfinderevo stopped (time budget consumed)")
 			break

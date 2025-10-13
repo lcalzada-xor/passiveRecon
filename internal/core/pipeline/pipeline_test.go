@@ -23,7 +23,7 @@ type Artifact = artifacts.Artifact
 func newTestSink(t *testing.T, active bool) (*Sink, string) {
 	t.Helper()
 	dir := t.TempDir()
-	sink, err := NewSink(dir, active, "example.com", LineBufferSize(1))
+	sink, err := NewSink(dir, active, "example.com", "subdomains", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestSinkClassification(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	sink, err := NewSink(dir, false, "example.com", "subdomains", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestSinkFiltersOutOfScope(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com", LineBufferSize(2))
+	sink, err := NewSink(dir, false, "example.com", "subdomains", LineBufferSize(2))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestArtifactsCaptureSourcesAndOccurrences(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	sink, err := NewSink(dir, false, "example.com", "subdomains", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestSinkFlush(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com", LineBufferSize(2))
+	sink, err := NewSink(dir, false, "example.com", "subdomains", LineBufferSize(2))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -508,7 +508,7 @@ func TestActiveRoutesPopulatePassive(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	sink, err := NewSink(dir, false, "example.com", "subdomains", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -533,7 +533,7 @@ func TestActiveRoutesSkip404(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	sink, err := NewSink(dir, false, "example.com", "subdomains", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -573,7 +573,7 @@ func TestJSLinesAreWrittenToFile(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	sink, err := NewSink(dir, false, "example.com", "subdomains", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -611,7 +611,7 @@ func TestActiveJSExcludes404(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	sink, err := NewSink(dir, false, "example.com", "subdomains", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -643,7 +643,7 @@ func TestHTMLLinesAreWrittenToActiveFile(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	sink, err := NewSink(dir, false, "example.com", "subdomains", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -664,7 +664,7 @@ func TestHTMLActiveSkipsErrorResponses(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	sink, err := NewSink(dir, false, "example.com", "subdomains", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -781,7 +781,7 @@ func TestHTMLImageLinesAreRedirectedToImagesFile(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	sink, err := NewSink(dir, false, "example.com", "subdomains", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -812,7 +812,7 @@ func TestRouteCategorizationPassive(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	sink, err := NewSink(dir, false, "example.com", "subdomains", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -893,7 +893,7 @@ func TestRouteCategorizationActiveMode(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, true, "example.com", LineBufferSize(1))
+	sink, err := NewSink(dir, true, "example.com", "subdomains", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -945,7 +945,7 @@ func TestRouteCategorizationActiveModeSkipsErrorStatus(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, true, "example.com", LineBufferSize(1))
+	sink, err := NewSink(dir, true, "example.com", "subdomains", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -969,7 +969,7 @@ func TestRouteCategorizationPassiveModeEmitsActiveFiles(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	sink, err := NewSink(dir, false, "example.com", "subdomains", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -997,7 +997,7 @@ func TestRouteCategorizationDeduplicatesCategoryOutputs(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com", LineBufferSize(2))
+	sink, err := NewSink(dir, false, "example.com", "subdomains", LineBufferSize(2))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -1075,7 +1075,7 @@ func TestHandleMetaStripsANSISequences(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	sink, err := NewSink(dir, false, "example.com", "subdomains", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -1109,7 +1109,7 @@ func TestHandleGFFindingRecordsArtifact(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, true, "example.com", LineBufferSize(1))
+	sink, err := NewSink(dir, true, "example.com", "subdomains", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -1176,7 +1176,7 @@ func TestHandleRelationParsesDNSRecords(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink, err := NewSink(dir, false, "example.com", LineBufferSize(1))
+	sink, err := NewSink(dir, false, "example.com", "subdomains", LineBufferSize(1))
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}

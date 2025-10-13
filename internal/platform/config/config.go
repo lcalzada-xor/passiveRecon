@@ -34,6 +34,7 @@ type Config struct {
 	ProxyCACert     string
 	CensysAPIID     string
 	CensysAPISecret string
+	Scope           string
 }
 
 type fileConfig struct {
@@ -49,6 +50,7 @@ type fileConfig struct {
 	ProxyCACert     *string     `json:"proxy_ca" yaml:"proxy_ca"`
 	CensysAPIID     *string     `json:"censys_api_id" yaml:"censys_api_id"`
 	CensysAPISecret *string     `json:"censys_api_secret" yaml:"censys_api_secret"`
+	Scope           *string     `json:"scope" yaml:"scope"`
 }
 
 type stringList []string
@@ -114,6 +116,7 @@ func ParseFlags() *Config {
 	proxyCA := flag.String("proxy-ca", "", "Ruta a un certificado CA adicional para mitm proxies")
 	censysID := flag.String("censys-api-id", os.Getenv("CENSYS_API_ID"), "Censys API ID (o exporta CENSYS_API_ID)")
 	censysSecret := flag.String("censys-api-secret", os.Getenv("CENSYS_API_SECRET"), "Censys API secret (o exporta CENSYS_API_SECRET)")
+	scope := flag.String("scope", "subdomains", "Modo de scope: 'subdomains' (incluye subdominios) o 'domain' (solo dominio exacto)")
 
 	flag.Parse()
 
@@ -137,6 +140,7 @@ func ParseFlags() *Config {
 		ProxyCACert:     strings.TrimSpace(*proxyCA),
 		CensysAPIID:     strings.TrimSpace(*censysID),
 		CensysAPISecret: strings.TrimSpace(*censysSecret),
+		Scope:           strings.TrimSpace(*scope),
 	}
 
 	var fileCfg *fileConfig
@@ -194,6 +198,9 @@ func ParseFlags() *Config {
 		}
 		if fileCfg.CensysAPISecret != nil && !setFlags["censys-api-secret"] {
 			cfg.CensysAPISecret = strings.TrimSpace(*fileCfg.CensysAPISecret)
+		}
+		if fileCfg.Scope != nil && !setFlags["scope"] {
+			cfg.Scope = strings.TrimSpace(*fileCfg.Scope)
 		}
 	}
 

@@ -61,7 +61,7 @@ type StepRecorder interface {
 	RecordOutput(step, group, line string)
 }
 
-func NewSink(outdir string, active bool, target string, lineBuffer int) (*Sink, error) {
+func NewSink(outdir string, active bool, target string, scopeMode string, lineBuffer int) (*Sink, error) {
 	if lineBuffer <= 0 {
 		lineBuffer = defaultLineBuffer
 	}
@@ -76,7 +76,7 @@ func NewSink(outdir string, active bool, target string, lineBuffer int) (*Sink, 
 	s := &Sink{
 		artifacts:      store,
 		dedup:          dedup,
-		scope:          netutil.NewScope(target),
+		scope:          netutil.NewScope(target, scopeMode),
 		activeMode:     active,
 		lines:          make(chan string, lineBuffer),
 		handlerMetrics: make(map[string]*handlerStats),

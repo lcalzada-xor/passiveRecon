@@ -8,26 +8,43 @@ import (
 
 // Scope representa los límites canónicos de un escaneo.
 type Scope struct {
-	hostname string // host normalizado tal cual lo dio el usuario (subdominios incluidos)
-	ip       net.IP // si el objetivo es una IP
+	hostname      string // host normalizado tal cual lo dio el usuario (subdominios incluidos)
+	ip            net.IP // si el objetivo es una IP
+	mode          string // "domain" o "subdomains" (por defecto "subdomains")
+	strictDomain  bool   // true si mode == "domain", rechaza subdominios
 }
 
 // NewScope construye un Scope desde el target dado. Si no se puede
 // normalizar como dominio/IP válido, devuelve nil (sin filtrado).
-func NewScope(target string) *Scope {
+// El parámetro mode puede ser "domain" (solo dominio exacto) o "subdomains" (incluye subdominios).
+// Si mode está vacío, se usa "subdomains" por defecto.
+func NewScope(target string, mode string) *Scope {
 	normalized := NormalizeDomain(target)
 	if normalized == "" {
 		return nil
 	}
 
+	// Normalizar mode
+	mode = strings.TrimSpace(strings.ToLower(mode))
+	if mode == "" {
+		mode = "subdomains"
+	}
+
+	strictDomain := false
+	if mode == "domain" {
+		strictDomain = true
+	}
+
 	// Caso IP
 	if ip := net.ParseIP(normalized); ip != nil {
-		return &Scope{hostname: normalized, ip: ip}
+		return &Scope{hostname: normalized, ip: ip, mode: mode, strictDomain: strictDomain}
 	}
 
 	// Caso dominio
 	return &Scope{
-		hostname: normalized,
+		hostname:     normalized,
+		mode:         mode,
+		strictDomain: strictDomain,
 	}
 }
 
@@ -59,6 +76,11 @@ func (s *Scope) AllowsDomain(candidate string) bool {
 	// Coincidencia exacta con el hostname
 	if normalized == s.hostname {
 		return true
+	}
+
+	// Si strictDomain está activado (mode == "domain"), rechazamos subdominios
+	if s.strictDomain {
+		return false
 	}
 
 	// Subdominios bajo el hostname (p. ej. si hostname es sub.example.com, permite a.sub.example.com)

@@ -402,6 +402,14 @@ func baseTimeoutSeconds(configured int) int {
 }
 
 func shouldRunStep(step toolStep, state *pipelineState, opts orchestratorOptions) bool {
+	// Omitir herramientas de enumeración de subdominios cuando scope=domain
+	if opts.cfg != nil && strings.ToLower(strings.TrimSpace(opts.cfg.Scope)) == "domain" {
+		if isSubdomainEnumerationTool(step.Name) {
+			skipStep(step, opts, fmt.Sprintf("meta: %s skipped (scope=domain, herramienta de enumeración de subdominios)", step.Name))
+			return false
+		}
+	}
+
 	if step.RequiresActive && !opts.cfg.Active {
 		skipStep(step, opts, step.SkipInactiveMessage)
 		return false
@@ -703,6 +711,21 @@ func cacheSkipReason(completedAt time.Time) string {
 func producesDomainData(stepName string) bool {
 	switch stepName {
 	case toolAmass, toolSubfinder, toolAssetfinder, toolRDAP, toolCRTSh, toolCensys:
+		return true
+	default:
+		return false
+	}
+}
+
+// isSubdomainEnumerationTool indica si una herramienta está diseñada específicamente
+// para enumerar subdominios. Con scope=domain estas herramientas no aportan valor
+// ya que sus resultados serán filtrados de todas formas.
+//
+// Nota: crtsh y censys NO se omiten porque pueden devolver certificados del dominio
+// exacto que contienen información valiosa independientemente del scope.
+func isSubdomainEnumerationTool(stepName string) bool {
+	switch stepName {
+	case toolAmass, toolSubfinder, toolAssetfinder, toolRDAP:
 		return true
 	default:
 		return false

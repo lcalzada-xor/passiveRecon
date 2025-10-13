@@ -26,8 +26,8 @@ type sink interface {
 }
 
 var (
-	sinkFactory = func(outdir string, active bool, target string, lineBuffer int) (sink, error) {
-		return pipeline.NewSink(outdir, active, target, lineBuffer)
+	sinkFactory = func(outdir string, active bool, target string, scopeMode string, lineBuffer int) (sink, error) {
+		return pipeline.NewSink(outdir, active, target, scopeMode, lineBuffer)
 	}
 	sourceSubfinder     = sources.Subfinder
 	sourceAssetfinder   = sources.Assetfinder
@@ -56,7 +56,7 @@ func Run(cfg *config.Config) error {
 		workers = 1
 	}
 
-	sink, err := sinkFactory(cfg.OutDir, cfg.Active, cfg.Target, pipeline.LineBufferSize(workers))
+	sink, err := sinkFactory(cfg.OutDir, cfg.Active, cfg.Target, cfg.Scope, pipeline.LineBufferSize(workers))
 	if err != nil {
 		return err
 	}
@@ -102,6 +102,16 @@ func Run(cfg *config.Config) error {
 	}
 	buildStepsDuration := time.Since(buildStepsStart)
 	logx.Infof("orquestador: armado de steps en %s", buildStepsDuration.Round(time.Millisecond))
+
+	// Informar al usuario sobre optimización de scope
+	if strings.ToLower(strings.TrimSpace(cfg.Scope)) == "domain" {
+		logx.Infof("scope=domain: se omitirán herramientas de enumeración de subdominios (amass, subfinder, assetfinder, rdap)")
+		logx.Infof("scope=domain: crtsh y censys se ejecutarán para obtener certificados del dominio exacto")
+		// Inyectar el dominio target para que las herramientas restantes tengan algo que procesar
+		sink.In() <- cfg.Target
+		sink.Flush()
+		logx.Infof("dominio target inyectado: %s", cfg.Target)
+	}
 
 	metrics := newPipelineMetrics()
 	opts.metrics = metrics
