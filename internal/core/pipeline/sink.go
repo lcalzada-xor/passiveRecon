@@ -61,24 +61,44 @@ type StepRecorder interface {
 	RecordOutput(step, group, line string)
 }
 
+// SinkConfig contiene la configuración para crear un Sink.
+type SinkConfig struct {
+	Outdir     string
+	Active     bool
+	Target     string
+	ScopeMode  string
+	LineBuffer int
+}
+
 func NewSink(outdir string, active bool, target string, scopeMode string, lineBuffer int) (*Sink, error) {
-	if lineBuffer <= 0 {
-		lineBuffer = defaultLineBuffer
+	return NewSinkWithConfig(SinkConfig{
+		Outdir:     outdir,
+		Active:     active,
+		Target:     target,
+		ScopeMode:  scopeMode,
+		LineBuffer: lineBuffer,
+	})
+}
+
+func NewSinkWithConfig(cfg SinkConfig) (*Sink, error) {
+	if cfg.LineBuffer <= 0 {
+		cfg.LineBuffer = defaultLineBuffer
 	}
-	if err := os.MkdirAll(outdir, 0o755); err != nil {
+	if err := os.MkdirAll(cfg.Outdir, 0o755); err != nil {
 		return nil, err
 	}
 
-	artifactsPath := filepath.Join(outdir, "artifacts.jsonl")
-	store := newJSONLStore(artifactsPath)
+	artifactsPath := filepath.Join(cfg.Outdir, "artifacts.jsonl")
+	store := newJSONLStore(artifactsPath, cfg.Target)
+
 	dedup := NewDedupe()
 
 	s := &Sink{
 		artifacts:      store,
 		dedup:          dedup,
-		scope:          netutil.NewScope(target, scopeMode),
-		activeMode:     active,
-		lines:          make(chan string, lineBuffer),
+		scope:          netutil.NewScope(cfg.Target, cfg.ScopeMode),
+		activeMode:     cfg.Active,
+		lines:          make(chan string, cfg.LineBuffer),
 		handlerMetrics: make(map[string]*handlerStats),
 	}
 	s.cond = sync.NewCond(&s.procMu)

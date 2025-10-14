@@ -1,8 +1,6 @@
 package artifacts
 
 import (
-	"bufio"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -86,7 +84,7 @@ func CollectValuesByType(outdir string, selectors map[string]ActiveState) (map[s
 
 // CollectArtifactsByType lee artifacts.jsonl desde el directorio proporcionado y
 // devuelve los artefactos agrupados por tipo aplicando el filtro de actividad
-// indicado por selectors.
+// indicado por selectors. Soporta auto-detección de formato v1/v2.
 func CollectArtifactsByType(outdir string, selectors map[string]ActiveState) (map[string][]Artifact, error) {
 	path := filepath.Join(outdir, "artifacts.jsonl")
 	file, err := os.Open(path)
@@ -95,19 +93,22 @@ func CollectArtifactsByType(outdir string, selectors map[string]ActiveState) (ma
 	}
 	defer file.Close()
 
-	buf := bufio.NewScanner(file)
-	buf.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
+	// Usar ReaderV2 que soporta auto-detección de formato v1/v2
+	reader, err := NewReaderV2(file)
+	if err != nil {
+		return nil, fmt.Errorf("crear reader: %w", err)
+	}
 
 	result := make(map[string][]Artifact, len(selectors))
-	for buf.Scan() {
-		line := strings.TrimSpace(buf.Text())
-		if line == "" {
-			continue
-		}
 
-		var artifact Artifact
-		if err := json.Unmarshal([]byte(line), &artifact); err != nil {
-			return nil, fmt.Errorf("unmarshal artifact: %w", err)
+	for {
+		artifact, err := reader.ReadArtifact()
+		if err != nil {
+			// EOF es esperado al finalizar el archivo
+			if err.Error() == "EOF" {
+				break
+			}
+			return nil, fmt.Errorf("leer artifact: %w", err)
 		}
 
 		artifact.Value = strings.TrimSpace(artifact.Value)
@@ -166,9 +167,6 @@ func CollectArtifactsByType(outdir string, selectors map[string]ActiveState) (ma
 			}
 			result[typ] = append(result[typ], artifactCopy)
 		}
-	}
-	if err := buf.Err(); err != nil {
-		return nil, fmt.Errorf("scan artifacts: %w", err)
 	}
 
 	for typ := range selectors {

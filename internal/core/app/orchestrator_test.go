@@ -122,7 +122,13 @@ func TestRunPipelineConcurrentGroupProgress(t *testing.T) {
 func TestRunPipelineConcurrentSourcesDedupesSink(t *testing.T) {
 	dir := t.TempDir()
 
-	sink, err := pipeline.NewSink(dir, true, "example.com", "subdomains", pipeline.LineBufferSize(4))
+	sink, err := pipeline.NewSinkWithConfig(pipeline.SinkConfig{
+		Outdir:     dir,
+		Active:     true,
+		Target:     "example.com",
+		ScopeMode:  "subdomains",
+		LineBuffer: pipeline.LineBufferSize(4),
+	})
 	if err != nil {
 		t.Fatalf("NewSink: %v", err)
 	}
@@ -310,20 +316,12 @@ func TestStepDedupePreparesAndDNSXRunsWhenActive(t *testing.T) {
 	}
 }
 
-func writeOrchestratorArtifacts(t *testing.T, outdir string, artifacts []artifacts.Artifact) {
+func writeOrchestratorArtifacts(t *testing.T, outdir string, artifactsList []artifacts.Artifact) {
 	t.Helper()
 	path := filepath.Join(outdir, "artifacts.jsonl")
-	file, err := os.Create(path)
-	if err != nil {
-		t.Fatalf("create artifacts.jsonl: %v", err)
-	}
-	defer file.Close()
-
-	encoder := json.NewEncoder(file)
-	for _, artifact := range artifacts {
-		if err := encoder.Encode(artifact); err != nil {
-			t.Fatalf("encode artifact: %v", err)
-		}
+	writer := artifacts.NewWriterV2(path, "test.com")
+	if err := writer.WriteArtifacts(artifactsList); err != nil {
+		t.Fatalf("write artifacts: %v", err)
 	}
 }
 

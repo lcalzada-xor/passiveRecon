@@ -1,8 +1,6 @@
 package artifacts
 
 import (
-	"encoding/json"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -74,16 +72,8 @@ func TestCollectArtifactsByTypeMultiTypeRecords(t *testing.T) {
 func writeArtifactsFile(t *testing.T, path string, artifacts []Artifact) {
 	t.Helper()
 
-	f, err := os.Create(path)
-	if err != nil {
-		t.Fatalf("Create(%q): %v", path, err)
-	}
-	defer f.Close()
-
-	encoder := json.NewEncoder(f)
-	for _, artifact := range artifacts {
-		if err := encoder.Encode(artifact); err != nil {
-			t.Fatalf("Encode artifact: %v", err)
-		}
+	writer := NewWriterV2(path, "test.com")
+	if err := writer.WriteArtifacts(artifacts); err != nil {
+		t.Fatalf("WriteArtifacts(%q): %v", path, err)
 	}
 }

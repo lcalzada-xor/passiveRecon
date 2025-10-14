@@ -5,10 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 

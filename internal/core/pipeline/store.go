@@ -1,9 +1,6 @@
 package pipeline
 
 import (
-	"bufio"
-	"encoding/json"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -41,17 +38,19 @@ func (rec *artifactRecord) addTool(tool string) {
 }
 
 type jsonlStore struct {
-	mu    sync.Mutex
-	path  string
-	index map[artifacts.Key]*artifactRecord
-	order []artifacts.Key
-	dirty bool
+	mu     sync.Mutex
+	path   string
+	index  map[artifacts.Key]*artifactRecord
+	order  []artifacts.Key
+	dirty  bool
+	target string // Target domain/IP para header v2
 }
 
-func newJSONLStore(path string) *jsonlStore {
+func newJSONLStore(path string, target string) *jsonlStore {
 	return &jsonlStore{
-		path:  path,
-		index: make(map[artifacts.Key]*artifactRecord),
+		path:   path,
+		target: target,
+		index:  make(map[artifacts.Key]*artifactRecord),
 	}
 }
 
@@ -133,30 +132,16 @@ func (s *jsonlStore) Flush() error {
 		records = append(records, art)
 	}
 	s.dirty = false
+	path := s.path
+	target := s.target
 	s.mu.Unlock()
-	if s.path == "" {
+
+	// Escribir en formato v2.0 (único formato)
+	if path == "" {
 		return nil
 	}
-	f, err := os.OpenFile(s.path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-	if err != nil {
-		return err
-	}
-	writer := bufio.NewWriter(f)
-	for _, art := range records {
-		encoded, err := json.Marshal(art)
-		if err != nil {
-			continue
-		}
-		if _, err := writer.Write(encoded); err != nil {
-			continue
-		}
-		_ = writer.WriteByte('\n')
-	}
-	if err := writer.Flush(); err != nil {
-		_ = f.Close()
-		return err
-	}
-	return f.Close()
+	writer := artifacts.NewWriterV2(path, target)
+	return writer.WriteArtifacts(records)
 }
 
 func (s *jsonlStore) Close() error {

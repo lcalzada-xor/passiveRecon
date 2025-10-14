@@ -2,7 +2,6 @@ package sources
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -17,20 +16,12 @@ import (
 	"passive-rec/internal/core/runner"
 )
 
-func writeSubJSArtifacts(t *testing.T, outdir string, artifacts []artifacts.Artifact) {
+func writeSubJSArtifacts(t *testing.T, outdir string, artifactsList []artifacts.Artifact) {
 	t.Helper()
 	path := filepath.Join(outdir, "artifacts.jsonl")
-	file, err := os.Create(path)
-	if err != nil {
-		t.Fatalf("create artifacts.jsonl: %v", err)
-	}
-	defer file.Close()
-
-	encoder := json.NewEncoder(file)
-	for _, artifact := range artifacts {
-		if err := encoder.Encode(artifact); err != nil {
-			t.Fatalf("encode artifact: %v", err)
-		}
+	writer := artifacts.NewWriterV2(path, "test.com")
+	if err := writer.WriteArtifacts(artifactsList); err != nil {
+		t.Fatalf("write artifacts: %v", err)
 	}
 }
 

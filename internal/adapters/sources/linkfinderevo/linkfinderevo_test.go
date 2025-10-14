@@ -22,19 +22,15 @@ import (
 func writeArtifacts(t *testing.T, outdir string, data map[string][]string) {
 	t.Helper()
 	path := filepath.Join(outdir, "artifacts.jsonl")
-	file, err := os.Create(path)
-	if err != nil {
-		t.Fatalf("create artifacts.jsonl: %v", err)
-	}
-	defer file.Close()
-
-	encoder := json.NewEncoder(file)
+	var artifactsList []artifacts.Artifact
 	for typ, values := range data {
 		for _, value := range values {
-			if err := encoder.Encode(artifacts.Artifact{Type: typ, Value: value, Active: true, Up: true}); err != nil {
-				t.Fatalf("encode artifact: %v", err)
-			}
+			artifactsList = append(artifactsList, artifacts.Artifact{Type: typ, Value: value, Active: true, Up: true})
 		}
+	}
+	writer := artifacts.NewWriterV2(path, "test.com")
+	if err := writer.WriteArtifacts(artifactsList); err != nil {
+		t.Fatalf("write artifacts: %v", err)
 	}
 }
 

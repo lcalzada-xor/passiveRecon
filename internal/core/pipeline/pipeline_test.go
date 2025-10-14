@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"os"
@@ -359,13 +358,35 @@ func TestActiveCertLines(t *testing.T) {
 	closeAndMaterialize(t, sink, dir)
 
 	passiveLines := readLines(t, filepath.Join(dir, "certs", "certs.passive"))
-	if diff := cmp.Diff([]string{passiveRecord}, passiveLines); diff != "" {
-		t.Fatalf("unexpected certs.passive contents (-want +got):\n%s", diff)
+	if len(passiveLines) != 1 {
+		t.Fatalf("expected 1 passive cert line, got %d", len(passiveLines))
+	}
+	wantPassiveCert, err := certs.Parse(passiveRecord)
+	if err != nil {
+		t.Fatalf("parse expected passive cert: %v", err)
+	}
+	gotPassiveCert, err := certs.Parse(passiveLines[0])
+	if err != nil {
+		t.Fatalf("parse actual passive cert: %v", err)
+	}
+	if diff := cmp.Diff(wantPassiveCert, gotPassiveCert); diff != "" {
+		t.Fatalf("unexpected passive cert (-want +got):\n%s", diff)
 	}
 
 	activeLines := readLines(t, filepath.Join(dir, "certs", "certs.active"))
-	if diff := cmp.Diff([]string{activeRecord}, activeLines); diff != "" {
-		t.Fatalf("unexpected certs.active contents (-want +got):\n%s", diff)
+	if len(activeLines) != 1 {
+		t.Fatalf("expected 1 active cert line, got %d", len(activeLines))
+	}
+	wantActiveCert, err := certs.Parse(activeRecord)
+	if err != nil {
+		t.Fatalf("parse expected active cert: %v", err)
+	}
+	gotActiveCert, err := certs.Parse(activeLines[0])
+	if err != nil {
+		t.Fatalf("parse actual active cert: %v", err)
+	}
+	if diff := cmp.Diff(wantActiveCert, gotActiveCert); diff != "" {
+		t.Fatalf("unexpected active cert (-want +got):\n%s", diff)
 	}
 
 	passiveDomains := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
@@ -1282,25 +1303,23 @@ func readArtifactsFile(t *testing.T, path string) []Artifact {
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
+	reader, err := artifacts.NewReaderV2(f)
+	if err != nil {
+		t.Fatalf("create reader for %q: %v", path, err)
+	}
 
-	var artifacts []Artifact
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
+	var result []Artifact
+	for {
+		art, err := reader.ReadArtifact()
+		if err != nil {
+			if err.Error() == "EOF" {
+				break
+			}
+			t.Fatalf("read artifact from %q: %v", path, err)
 		}
-		var artifact Artifact
-		if err := json.Unmarshal([]byte(line), &artifact); err != nil {
-			t.Fatalf("unmarshal artifact %q: %v", line, err)
-		}
-		artifacts = append(artifacts, artifact)
+		result = append(result, art)
 	}
-	if err := scanner.Err(); err != nil {
-		t.Fatalf("scan artifacts: %v", err)
-	}
-	return artifacts
+	return result
 }
 
 func requireArtifact(t *testing.T, artifacts []Artifact, typ, value string, active bool) Artifact {

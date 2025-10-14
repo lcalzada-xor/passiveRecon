@@ -1,8 +1,6 @@
 package materializer
 
 import (
-	"bufio"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -183,8 +181,11 @@ func Materialize(outdir string) error {
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
+	// Usar ReaderV2 que soporta auto-detección de formato v1/v2
+	reader, err := artifacts.NewReaderV2(file)
+	if err != nil {
+		return fmt.Errorf("crear reader: %w", err)
+	}
 
 	type writerPair struct {
 		passive *fileWriter
@@ -216,15 +217,14 @@ func Materialize(outdir string) error {
 		return pair
 	}
 
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-
-		var art artifacts.Artifact
-		if err := json.Unmarshal([]byte(line), &art); err != nil {
-			return fmt.Errorf("unmarshal artifact: %w", err)
+	for {
+		art, err := reader.ReadArtifact()
+		if err != nil {
+			// EOF es esperado al finalizar el archivo
+			if err.Error() == "EOF" {
+				break
+			}
+			return fmt.Errorf("leer artifact: %w", err)
 		}
 
 		art.Type = strings.TrimSpace(art.Type)
@@ -253,9 +253,6 @@ func Materialize(outdir string) error {
 				}
 			}
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("scan artifacts: %w", err)
 	}
 
 	return nil

@@ -362,18 +362,13 @@ func TestBuildCertStatsGroupsMultiLevelTLDs(t *testing.T) {
 	}
 }
 
-func writeArtifacts(t *testing.T, dir string, artifacts []artifacts.Artifact) {
+func writeArtifacts(t *testing.T, dir string, artifactsList []artifacts.Artifact) {
 	t.Helper()
-	var builder strings.Builder
-	for _, artifact := range artifacts {
-		data, err := json.Marshal(artifact)
-		if err != nil {
-			t.Fatalf("marshal artifact: %v", err)
-		}
-		builder.Write(data)
-		builder.WriteByte('\n')
+	path := filepath.Join(dir, "artifacts.jsonl")
+	writer := artifacts.NewWriterV2(path, "test.com")
+	if err := writer.WriteArtifacts(artifactsList); err != nil {
+		t.Fatalf("write artifacts: %v", err)
 	}
-	writeFixture(t, filepath.Join(dir, "artifacts.jsonl"), builder.String())
 }
 
 func writeFixture(t *testing.T, path, contents string) {

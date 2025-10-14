@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/url"
 	"os"
@@ -392,17 +391,9 @@ func TestDedupeDomainListNormalizesAndFilters(t *testing.T) {
 func writeArtifactsFile(t *testing.T, outdir string, records []artifacts.Artifact) {
 	t.Helper()
 	path := filepath.Join(outdir, "artifacts.jsonl")
-	file, err := os.Create(path)
-	if err != nil {
-		t.Fatalf("create artifacts.jsonl: %v", err)
-	}
-	defer file.Close()
-
-	encoder := json.NewEncoder(file)
-	for _, artifact := range records {
-		if err := encoder.Encode(artifact); err != nil {
-			t.Fatalf("encode artifact: %v", err)
-		}
+	writer := artifacts.NewWriterV2(path, "test.com")
+	if err := writer.WriteArtifacts(records); err != nil {
+		t.Fatalf("write artifacts: %v", err)
 	}
 }
 
@@ -554,16 +545,9 @@ func (s *testSink) appendArtifacts(records ...artifacts.Artifact) {
 	snapshot := append([]artifacts.Artifact(nil), s.records...)
 	s.mu.Unlock()
 
-	var builder strings.Builder
-	for _, artifact := range snapshot {
-		data, err := json.Marshal(artifact)
-		if err != nil {
-			panic(err)
-		}
-		builder.Write(data)
-		builder.WriteByte('\n')
-	}
-	if err := os.WriteFile(filepath.Join(s.outdir, "artifacts.jsonl"), []byte(builder.String()), 0o644); err != nil {
+	path := filepath.Join(s.outdir, "artifacts.jsonl")
+	writer := artifacts.NewWriterV2(path, "test.com")
+	if err := writer.WriteArtifacts(snapshot); err != nil {
 		panic(err)
 	}
 }

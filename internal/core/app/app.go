@@ -27,7 +27,13 @@ type sink interface {
 
 var (
 	sinkFactory = func(outdir string, active bool, target string, scopeMode string, lineBuffer int) (sink, error) {
-		return pipeline.NewSink(outdir, active, target, scopeMode, lineBuffer)
+		return pipeline.NewSinkWithConfig(pipeline.SinkConfig{
+			Outdir:     outdir,
+			Active:     active,
+			Target:     target,
+			ScopeMode:  scopeMode,
+			LineBuffer: lineBuffer,
+		})
 	}
 	sourceSubfinder     = sources.Subfinder
 	sourceAssetfinder   = sources.Assetfinder

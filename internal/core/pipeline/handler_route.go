@@ -319,6 +319,10 @@ func writeRouteCategories(ctx *Context, route string, isActive bool, tool string
 	}
 	for _, cat := range categories {
 		switch cat {
+		case routes.CategoryJS:
+			HandleCategory(ctx, categorySpecs["js"], "js:"+route, isActive, tool)
+		case routes.CategoryHTML:
+			HandleCategory(ctx, categorySpecs["html"], "html:"+route, isActive, tool)
 		case routes.CategoryMaps:
 			HandleCategory(ctx, categorySpecs["maps"], "maps:"+route, isActive, tool)
 		case routes.CategoryJSON:
