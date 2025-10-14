@@ -103,13 +103,15 @@ func TestSinkClassification(t *testing.T) {
 
 	domains := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
 	wantDomains := []string{
-		"example.com",
-		"www.example.com",
 		"alt1.example.com",
 		"alt2.example.com",
-		"direct-cert.example.com",
 		"alt3.example.com",
+		"direct-cert.example.com",
+		"example.com",
+		"www.example.com",
 	}
+	sort.Strings(domains)
+	sort.Strings(wantDomains)
 	if diff := cmp.Diff(wantDomains, domains); diff != "" {
 		t.Fatalf("unexpected domains (-want +got):\n%s", diff)
 	}
@@ -124,6 +126,8 @@ func TestSinkClassification(t *testing.T) {
 		"http://example.com/about",
 		"http://sub.example.com/path",
 	}
+	sort.Strings(routes)
+	sort.Strings(wantRoutes)
 	if diff := cmp.Diff(wantRoutes, routes); diff != "" {
 		t.Fatalf("unexpected routes (-want +got):\n%s", diff)
 	}
@@ -515,11 +519,13 @@ func TestCertLinesPopulateDomainsActiveSink(t *testing.T) {
 	want := []string{"api.example.com", "service.example.com"}
 
 	passive := readLines(t, filepath.Join(dir, "domains", "domains.passive"))
+	sort.Strings(passive)
 	if diff := cmp.Diff(want, passive); diff != "" {
 		t.Fatalf("unexpected domains.passive contents (-want +got):\n%s", diff)
 	}
 
 	active := readLines(t, filepath.Join(dir, "domains", "domains.active"))
+	sort.Strings(active)
 	if diff := cmp.Diff(want, active); diff != "" {
 		t.Fatalf("unexpected domains.active contents (-want +got):\n%s", diff)
 	}
@@ -570,6 +576,8 @@ func TestActiveRoutesSkip404(t *testing.T) {
 		"https://app.example.com/login",
 		"https://app.example.com/dashboard",
 	}
+	sort.Strings(passive)
+	sort.Strings(wantPassive)
 	if diff := cmp.Diff(wantPassive, passive); diff != "" {
 		t.Fatalf("unexpected routes.passive contents (-want +got):\n%s", diff)
 	}
@@ -896,6 +904,8 @@ func TestRouteCategorizationPassive(t *testing.T) {
 		"https://app.example.com/robots.txt",
 		"https://app.example.com/sitemap.xml",
 	}
+	sort.Strings(crawlLines)
+	sort.Strings(wantCrawl)
 	if diff := cmp.Diff(wantCrawl, crawlLines); diff != "" {
 		t.Fatalf("unexpected crawl.passive contents (-want +got):\n%s", diff)
 	}
@@ -905,6 +915,8 @@ func TestRouteCategorizationPassive(t *testing.T) {
 		"https://app.example.com/backup.tar.gz?download=1",
 		"https://app.example.com/debug?token=secret",
 	}
+	sort.Strings(metaLines)
+	sort.Strings(wantMeta)
 	if diff := cmp.Diff(wantMeta, metaLines); diff != "" {
 		t.Fatalf("unexpected meta.passive contents (-want +got):\n%s", diff)
 	}
@@ -1082,6 +1094,8 @@ func TestRouteCategorizationDeduplicatesCategoryOutputs(t *testing.T) {
 		"https://app.example.com/robots.txt",
 		"https://app.example.com/sitemap.xml",
 	}
+	sort.Strings(crawlLines)
+	sort.Strings(wantCrawl)
 	if diff := cmp.Diff(wantCrawl, crawlLines); diff != "" {
 		t.Fatalf("unexpected crawl.passive contents (-want +got):\n%s", diff)
 	}
@@ -1116,6 +1130,8 @@ func TestHandleMetaStripsANSISequences(t *testing.T) {
 
 	metaLines := readLines(t, filepath.Join(dir, "meta.passive"))
 	wantMeta := []string{"[200]", "[text/html]", "[404]"}
+	sort.Strings(metaLines)
+	sort.Strings(wantMeta)
 	if diff := cmp.Diff(wantMeta, metaLines); diff != "" {
 		t.Fatalf("unexpected meta.passive contents (-want +got):\n%s", diff)
 	}
@@ -1325,12 +1341,32 @@ func readArtifactsFile(t *testing.T, path string) []Artifact {
 func requireArtifact(t *testing.T, artifacts []Artifact, typ, value string, active bool) Artifact {
 	t.Helper()
 	for _, a := range artifacts {
-		if a.Type == typ && a.Value == value && a.Active == active {
+		if a.Type != typ || a.Active != active {
+			continue
+		}
+		// For certificates, compare by normalizing JSON (field order may vary)
+		if typ == "certificate" && jsonEqual(value, a.Value) {
+			return a
+		}
+		// For other types, exact string match
+		if a.Value == value {
 			return a
 		}
 	}
 	t.Fatalf("artifact not found type=%q value=%q active=%v", typ, value, active)
 	return Artifact{}
+}
+
+// jsonEqual compares two JSON strings for semantic equality (ignoring field order)
+func jsonEqual(a, b string) bool {
+	var objA, objB map[string]interface{}
+	if err := json.Unmarshal([]byte(a), &objA); err != nil {
+		return false
+	}
+	if err := json.Unmarshal([]byte(b), &objB); err != nil {
+		return false
+	}
+	return cmp.Equal(objA, objB)
 }
 
 func metadataStringSlice(t *testing.T, metadata map[string]any, key string) []string {

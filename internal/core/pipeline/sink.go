@@ -89,7 +89,7 @@ func NewSinkWithConfig(cfg SinkConfig) (*Sink, error) {
 	}
 
 	artifactsPath := filepath.Join(cfg.Outdir, "artifacts.jsonl")
-	store := newJSONLStore(artifactsPath, cfg.Target)
+	store := NewOptimizedStore(artifactsPath, cfg.Target)
 
 	dedup := NewDedupe()
 
