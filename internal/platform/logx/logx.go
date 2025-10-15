@@ -1,18 +1,16 @@
 package logx
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"runtime"
-	"sort"
 	"strings"
 	"sync"
-	"time"
+
+	"github.com/rs/zerolog"
 )
 
+// Level representa el nivel de logging (compatible con API anterior)
 type Level uint8
 
 const (
@@ -23,46 +21,23 @@ const (
 	LevelTrace
 )
 
-type levelInfo struct {
-	label string
-	color string
-}
-
-var levelMeta = map[Level]levelInfo{
-	LevelError: {label: "[ERROR]", color: "\x1b[31m"},
-	LevelWarn:  {label: "[WARN]", color: "\x1b[33m"},
-	LevelInfo:  {label: "[INFO]", color: "\x1b[36m"},
-	LevelDebug: {label: "[DEBUG]", color: "\x1b[35m"},
-	LevelTrace: {label: "[TRACE]", color: "\x1b[90m"},
-}
-
-// Config runtime segura con RWMutex
-type Config struct {
-	mu         sync.RWMutex
-	level      Level
-	out        io.Writer
-	color      bool
-	jsonMode   bool
-	withCaller bool
-	timeFormat string
-	withTime   bool
-	useUTC     bool
-	prefix     string
-}
-
-// Fields representa pares clave-valor adicionales que se adjuntarán al log.
+// Fields representa pares clave-valor para structured logging
 type Fields map[string]any
 
+// Config gestiona la configuración global del logger
+type Config struct {
+	mu     sync.RWMutex
+	logger zerolog.Logger
+	level  Level
+}
+
 var cfg = &Config{
-	level:      LevelInfo,
-	out:        os.Stderr,
-	color:      true,
-	jsonMode:   false,
-	withCaller: false,
-	timeFormat: time.RFC3339,
-	withTime:   true,
-	useUTC:     false,
-	prefix:     "",
+	logger: zerolog.New(zerolog.ConsoleWriter{
+		Out:        os.Stderr,
+		TimeFormat: "2006-01-02T15:04:05-07:00",
+		NoColor:    false,
+	}).With().Timestamp().Logger(),
+	level: LevelInfo,
 }
 
 var sampleRates = map[string]int{
@@ -75,7 +50,7 @@ var sampleState = struct {
 	counters map[string]int64
 }{counters: make(map[string]int64)}
 
-// SetVerbosity mantiene compat con tu API anterior: 0=errores, 1=info, 2=debug, 3=trace
+// SetVerbosity configura el nivel según la API antigua: 0=errors, 1=info, 2=debug, 3=trace
 func SetVerbosity(v int) {
 	switch {
 	case v <= 0:
@@ -89,14 +64,33 @@ func SetVerbosity(v int) {
 	}
 }
 
-// SetLevel cambia el nivel mínimo visible
+// SetLevel cambia el nivel mínimo de logging
 func SetLevel(l Level) {
 	cfg.mu.Lock()
+	defer cfg.mu.Unlock()
 	cfg.level = l
-	cfg.mu.Unlock()
+
+	// Mapear a niveles de zerolog
+	var zlevel zerolog.Level
+	switch l {
+	case LevelError:
+		zlevel = zerolog.ErrorLevel
+	case LevelWarn:
+		zlevel = zerolog.WarnLevel
+	case LevelInfo:
+		zlevel = zerolog.InfoLevel
+	case LevelDebug:
+		zlevel = zerolog.DebugLevel
+	case LevelTrace:
+		zlevel = zerolog.TraceLevel
+	default:
+		zlevel = zerolog.InfoLevel
+	}
+
+	zerolog.SetGlobalLevel(zlevel)
 }
 
-// ParseLevel permite setear por string: "error", "warn", "info", "debug", "trace"
+// ParseLevel convierte string a Level
 func ParseLevel(s string) (Level, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "error", "err":
@@ -114,90 +108,232 @@ func ParseLevel(s string) (Level, error) {
 	}
 }
 
-// SetOutput redirige la salida (nil usa stderr)
+// SetOutput redirige la salida del logger
 func SetOutput(w io.Writer) {
 	cfg.mu.Lock()
+	defer cfg.mu.Unlock()
+
 	if w == nil {
-		cfg.out = os.Stderr
-	} else {
-		cfg.out = w
+		w = os.Stderr
 	}
-	cfg.mu.Unlock()
+
+	// Recrear logger con nuevo writer
+	cfg.logger = zerolog.New(zerolog.ConsoleWriter{
+		Out:        w,
+		TimeFormat: "2006-01-02T15:04:05-07:00",
+		NoColor:    false,
+	}).With().Timestamp().Logger()
 }
 
-// AddOutput envía el log a otro writer además del actual
+// AddOutput no soportado directamente en zerolog, usar MultiLevelWriter en caller
 func AddOutput(w io.Writer) {
 	if w == nil {
 		return
 	}
 	cfg.mu.Lock()
-	cfg.out = io.MultiWriter(cfg.out, w)
-	cfg.mu.Unlock()
+	defer cfg.mu.Unlock()
+
+	// Usar MultiLevelWriter de zerolog
+	multi := zerolog.MultiLevelWriter(
+		zerolog.ConsoleWriter{
+			Out:        os.Stderr,
+			TimeFormat: "2006-01-02T15:04:05-07:00",
+			NoColor:    false,
+		},
+		w,
+	)
+
+	cfg.logger = zerolog.New(multi).With().Timestamp().Logger()
+	SetLevel(cfg.level)
 }
 
-// EnableColors activa o desactiva colores ANSI
+// EnableColors activa/desactiva colores ANSI
 func EnableColors(enabled bool) {
 	cfg.mu.Lock()
-	cfg.color = enabled
-	cfg.mu.Unlock()
+	defer cfg.mu.Unlock()
+
+	// Recrear console writer con opción de color
+	cfg.logger = zerolog.New(zerolog.ConsoleWriter{
+		Out:        os.Stderr,
+		TimeFormat: "2006-01-02T15:04:05-07:00",
+		NoColor:    !enabled,
+	}).With().Timestamp().Logger()
 }
 
-// SetJSON habilita salida JSON estructurada
+// SetJSON habilita output JSON estructurado
 func SetJSON(enabled bool) {
 	cfg.mu.Lock()
-	cfg.jsonMode = enabled
-	cfg.mu.Unlock()
+	defer cfg.mu.Unlock()
+
+	if enabled {
+		cfg.logger = zerolog.New(os.Stderr).With().Timestamp().Logger()
+	} else {
+		cfg.logger = zerolog.New(zerolog.ConsoleWriter{
+			Out:        os.Stderr,
+			TimeFormat: "2006-01-02T15:04:05-07:00",
+			NoColor:    false,
+		}).With().Timestamp().Logger()
+	}
 }
 
-// SetCaller muestra archivo:línea
+// SetCaller habilita mostrar archivo:línea
 func SetCaller(enabled bool) {
 	cfg.mu.Lock()
-	cfg.withCaller = enabled
-	cfg.mu.Unlock()
+	defer cfg.mu.Unlock()
+
+	if enabled {
+		cfg.logger = cfg.logger.With().Caller().Logger()
+	}
 }
 
-// SetTimeFormat cambia el formato de tiempo (ej: time.DateTime)
+// SetTimeFormat cambia formato de timestamp (no-op en zerolog, usa formato fijo)
 func SetTimeFormat(tf string) {
-	cfg.mu.Lock()
-	cfg.timeFormat = tf
-	cfg.mu.Unlock()
+	// No-op: zerolog usa su propio formato
 }
 
-// SetTimestamps muestra u oculta timestamp
+// SetTimestamps habilita/deshabilita timestamps
 func SetTimestamps(enabled bool) {
-	cfg.mu.Lock()
-	cfg.withTime = enabled
-	cfg.mu.Unlock()
+	// zerolog siempre incluye timestamps en modo With().Timestamp()
+	// Para deshabilitar habría que recrear sin .Timestamp()
+	if !enabled {
+		cfg.mu.Lock()
+		defer cfg.mu.Unlock()
+		cfg.logger = zerolog.New(zerolog.ConsoleWriter{
+			Out:        os.Stderr,
+			TimeFormat: "",
+			NoColor:    false,
+		})
+	}
 }
 
 // SetUTC fuerza timestamps en UTC
 func SetUTC(enabled bool) {
-	cfg.mu.Lock()
-	cfg.useUTC = enabled
-	cfg.mu.Unlock()
+	// zerolog por defecto usa time.Now(), no hay override simple
+	// Esta es una no-op para mantener compatibilidad de API
 }
 
-// SetPrefix añade un prefijo al comienzo del mensaje
+// SetPrefix añade un prefijo (implementado como field constante)
 func SetPrefix(p string) {
-	cfg.mu.Lock()
-	cfg.prefix = p
-	cfg.mu.Unlock()
+	if p != "" {
+		cfg.mu.Lock()
+		defer cfg.mu.Unlock()
+		cfg.logger = cfg.logger.With().Str("prefix", p).Logger()
+	}
 }
 
-// Atajos de nivel
-func Errorf(format string, a ...interface{}) { logf(LevelError, format, a...) }
-func Warnf(format string, a ...interface{})  { logf(LevelWarn, format, a...) }
-func Infof(format string, a ...interface{})  { logf(LevelInfo, format, a...) }
-func Debugf(format string, a ...interface{}) { logf(LevelDebug, format, a...) }
-func Tracef(format string, a ...interface{}) { logf(LevelTrace, format, a...) }
+// Atajos de nivel - API compatible con logx original
+func Errorf(format string, a ...interface{}) {
+	cfg.mu.RLock()
+	logger := cfg.logger
+	cfg.mu.RUnlock()
+	logger.Error().Msgf(format, a...)
+}
 
-func Error(msg string, fields Fields) { logFields(LevelError, msg, fields) }
-func Warn(msg string, fields Fields)  { logFields(LevelWarn, msg, fields) }
-func Info(msg string, fields Fields)  { logFields(LevelInfo, msg, fields) }
-func Debug(msg string, fields Fields) { logFields(LevelDebug, msg, fields) }
-func Trace(msg string, fields Fields) { logFields(LevelTrace, msg, fields) }
+func Warnf(format string, a ...interface{}) {
+	cfg.mu.RLock()
+	logger := cfg.logger
+	cfg.mu.RUnlock()
+	logger.Warn().Msgf(format, a...)
+}
 
-// Compat con API anterior V
+func Infof(format string, a ...interface{}) {
+	cfg.mu.RLock()
+	logger := cfg.logger
+	cfg.mu.RUnlock()
+	logger.Info().Msgf(format, a...)
+}
+
+func Debugf(format string, a ...interface{}) {
+	cfg.mu.RLock()
+	logger := cfg.logger
+	cfg.mu.RUnlock()
+	logger.Debug().Msgf(format, a...)
+}
+
+func Tracef(format string, a ...interface{}) {
+	cfg.mu.RLock()
+	logger := cfg.logger
+	cfg.mu.RUnlock()
+	logger.Trace().Msgf(format, a...)
+}
+
+// Funciones con fields estructurados
+func Error(msg string, fields Fields) {
+	if shouldSampleFields(LevelError, fields) {
+		return
+	}
+	cfg.mu.RLock()
+	logger := cfg.logger
+	cfg.mu.RUnlock()
+
+	event := logger.Error()
+	for k, v := range fields {
+		event = event.Interface(k, v)
+	}
+	event.Msg(msg)
+}
+
+func Warn(msg string, fields Fields) {
+	if shouldSampleFields(LevelWarn, fields) {
+		return
+	}
+	cfg.mu.RLock()
+	logger := cfg.logger
+	cfg.mu.RUnlock()
+
+	event := logger.Warn()
+	for k, v := range fields {
+		event = event.Interface(k, v)
+	}
+	event.Msg(msg)
+}
+
+func Info(msg string, fields Fields) {
+	if shouldSampleFields(LevelInfo, fields) {
+		return
+	}
+	cfg.mu.RLock()
+	logger := cfg.logger
+	cfg.mu.RUnlock()
+
+	event := logger.Info()
+	for k, v := range fields {
+		event = event.Interface(k, v)
+	}
+	event.Msg(msg)
+}
+
+func Debug(msg string, fields Fields) {
+	if shouldSampleFields(LevelDebug, fields) {
+		return
+	}
+	cfg.mu.RLock()
+	logger := cfg.logger
+	cfg.mu.RUnlock()
+
+	event := logger.Debug()
+	for k, v := range fields {
+		event = event.Interface(k, v)
+	}
+	event.Msg(msg)
+}
+
+func Trace(msg string, fields Fields) {
+	if shouldSampleFields(LevelTrace, fields) {
+		return
+	}
+	cfg.mu.RLock()
+	logger := cfg.logger
+	cfg.mu.RUnlock()
+
+	event := logger.Trace()
+	for k, v := range fields {
+		event = event.Interface(k, v)
+	}
+	event.Msg(msg)
+}
+
+// V mantiene compatibilidad con API anterior de verbosity
 func V(level int, format string, a ...interface{}) {
 	switch {
 	case level <= 0:
@@ -211,130 +347,8 @@ func V(level int, format string, a ...interface{}) {
 	}
 }
 
-func logf(lvl Level, format string, a ...interface{}) {
-	logMessage(lvl, fmt.Sprintf(format, a...), nil, 3)
-}
-
-func logFields(lvl Level, msg string, fields Fields) {
-	logMessage(lvl, msg, fields, 3)
-}
-
-func logMessage(lvl Level, msg string, fields Fields, callerSkip int) {
-	cfg.mu.RLock()
-	min := cfg.level
-	if lvl > min && lvl != LevelError {
-		cfg.mu.RUnlock()
-		return
-	}
-	out := cfg.out
-	color := cfg.color
-	jsonMode := cfg.jsonMode
-	withCaller := cfg.withCaller
-	tf := cfg.timeFormat
-	withTime := cfg.withTime
-	useUTC := cfg.useUTC
-	prefix := cfg.prefix
-	cfg.mu.RUnlock()
-
-	if shouldSample(lvl, fields) {
-		return
-	}
-
-	now := time.Now()
-	if useUTC {
-		now = now.UTC()
-	}
-
-	if jsonMode {
-		payload := make(map[string]any, 4+len(fields))
-		payload["level"] = levelMeta[lvl].label[1 : len(levelMeta[lvl].label)-1]
-		payload["msg"] = msg
-		if withTime {
-			payload["time"] = now.Format(tf)
-		}
-		if prefix != "" {
-			payload["prefix"] = prefix
-		}
-		if withCaller {
-			if file, line, ok := caller(callerSkip); ok {
-				payload["file"] = file
-				payload["line"] = line
-			}
-		}
-		for k, v := range fields {
-			if k == "" {
-				continue
-			}
-			payload[k] = v
-		}
-		enc := json.NewEncoder(out)
-		_ = enc.Encode(payload)
-		return
-	}
-
-	var b bytes.Buffer
-	if withTime {
-		b.WriteString(now.Format(tf))
-		b.WriteByte(' ')
-	}
-	if prefix != "" {
-		b.WriteString(prefix)
-		b.WriteByte(' ')
-	}
-	label := labelFor(lvl, color)
-	b.WriteString(label)
-	b.WriteByte(' ')
-	if withCaller {
-		if file, line, ok := caller(callerSkip); ok {
-			fmt.Fprintf(&b, "(%s:%d) ", file, line)
-		}
-	}
-	b.WriteString(msg)
-	appendFormattedFields(&b, fields)
-	b.WriteByte('\n')
-	_, _ = out.Write(b.Bytes())
-}
-
-func appendFormattedFields(b *bytes.Buffer, fields Fields) {
-	if len(fields) == 0 {
-		return
-	}
-	keys := make([]string, 0, len(fields))
-	for k := range fields {
-		if k == "" {
-			continue
-		}
-		keys = append(keys, k)
-	}
-	if len(keys) == 0 {
-		return
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		v := fields[k]
-		b.WriteByte(' ')
-		b.WriteString(k)
-		b.WriteByte('=')
-		writeValue(b, v)
-	}
-}
-
-func writeValue(b *bytes.Buffer, v any) {
-	switch val := v.(type) {
-	case string:
-		if strings.ContainsAny(val, " \t") {
-			fmt.Fprintf(b, "%q", val)
-			return
-		}
-		b.WriteString(val)
-	case fmt.Stringer:
-		writeValue(b, val.String())
-	default:
-		fmt.Fprintf(b, "%v", val)
-	}
-}
-
-func shouldSample(lvl Level, fields Fields) bool {
+// shouldSampleFields implementa sampling para reducir noise en logs debug
+func shouldSampleFields(lvl Level, fields Fields) bool {
 	if lvl < LevelDebug || len(fields) == 0 {
 		return false
 	}
@@ -364,29 +378,18 @@ func shouldSample(lvl Level, fields Fields) bool {
 	return false
 }
 
-func labelFor(lvl Level, withColor bool) string {
-	info, ok := levelMeta[lvl]
-	if !ok {
-		return "[LOG]"
+// logFields es un helper para mantener compatibilidad con helpers.go
+func logFields(lvl Level, msg string, fields Fields) {
+	switch lvl {
+	case LevelError:
+		Error(msg, fields)
+	case LevelWarn:
+		Warn(msg, fields)
+	case LevelInfo:
+		Info(msg, fields)
+	case LevelDebug:
+		Debug(msg, fields)
+	case LevelTrace:
+		Trace(msg, fields)
 	}
-	if !withColor {
-		return info.label
-	}
-	return info.color + info.label + "\x1b[0m"
-}
-
-func caller(skip int) (file string, line int, ok bool) {
-	// runtime.Caller devuelve ruta completa; nos quedamos con el tail
-	_, f, ln, ok := runtime.Caller(skip)
-	if !ok {
-		return "", 0, false
-	}
-	// tail
-	for i := len(f) - 1; i >= 0; i-- {
-		if f[i] == '/' || f[i] == '\\' {
-			f = f[i+1:]
-			break
-		}
-	}
-	return f, ln, true
 }

@@ -32,8 +32,8 @@ func TestToV2_BasicArtifact(t *testing.T) {
 		t.Errorf("Expected value 'example.com', got '%v'", v2.V)
 	}
 
-	if v2.St != StateInactiveUp {
-		t.Errorf("Expected state '%s', got '%s'", StateInactiveUp, v2.St)
+	if v2.S != StateInactiveUp {
+		t.Errorf("Expected state '%s', got '%s'", StateInactiveUp, v2.S)
 	}
 
 	if v2.Tl != "crtsh" {

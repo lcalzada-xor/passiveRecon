@@ -60,13 +60,14 @@ const (
 )
 
 type orchestratorOptions struct {
-	cfg       *config.Config
-	sink      sink
-	requested map[string]bool
-	bar       *progressBar
-	metrics   *pipelineMetrics
-	cache     *executionCache
-	runHash   string
+	cfg        *config.Config
+	sink       sink
+	requested  map[string]bool
+	bar        *progressBar
+	metrics    *pipelineMetrics
+	cache      *executionCache
+	runHash    string
+	checkpoint *CheckpointManager
 }
 
 type pipelineState struct {
@@ -244,6 +245,18 @@ func executeStep(ctx context.Context, step toolStep, state *pipelineState, opts 
 }
 
 func isStepRequested(step toolStep, opts orchestratorOptions) bool {
+	// Verificar si la tool ya fue completada en un checkpoint previo
+	if opts.checkpoint != nil && opts.checkpoint.IsToolCompleted(step.Name) {
+		if opts.metrics != nil {
+			opts.metrics.RecordSkip(step.Name, "completado en ejecución previa (resumiendo)")
+		}
+		if opts.bar != nil {
+			opts.bar.StepDone(step.Name, "resumido")
+		}
+		emitMeta(opts, step.Name, "resumiendo desde checkpoint (ya completado)")
+		return false
+	}
+
 	if opts.requested[step.Name] {
 		return true
 	}
@@ -314,6 +327,11 @@ func prepareStepTask(ctx context.Context, step toolStep, state *pipelineState, o
 			return nil
 		}
 
+		// Marcar tool como completada en checkpoint
+		if opts.checkpoint != nil {
+			opts.checkpoint.MarkToolCompleted(step.Name)
+		}
+
 		if opts.cache != nil && opts.runHash != "" {
 			if markErr := opts.cache.MarkComplete(step.Name, opts.runHash); markErr != nil {
 				logx.Warnf("no se pudo actualizar cache para %s: %v", step.Name, markErr)
@@ -379,12 +397,29 @@ func runConcurrentSteps(ctx context.Context, group string, steps []toolStep, sta
 }
 
 func computeStepTimeout(step toolStep, state *pipelineState, opts orchestratorOptions) int {
+	// 1. Verificar si hay timeout específico configurado para esta tool
+	if opts.cfg != nil && len(opts.cfg.ToolTimeouts) > 0 {
+		if customTimeout, ok := opts.cfg.ToolTimeouts[step.Name]; ok && customTimeout > 0 {
+			timeout := customTimeout
+			if timeout < minToolTimeoutSeconds {
+				timeout = minToolTimeoutSeconds
+			}
+			if timeout > maxToolTimeoutSeconds {
+				timeout = maxToolTimeoutSeconds
+			}
+			return timeout
+		}
+	}
+
+	// 2. Si la tool tiene función de timeout dinámico, usarla
 	timeout := baseTimeoutSeconds(opts.cfg.TimeoutS)
 	if step.Timeout != nil {
 		if custom := step.Timeout(state, opts); custom > 0 {
 			timeout = custom
 		}
 	}
+
+	// 3. Aplicar límites
 	if timeout < minToolTimeoutSeconds {
 		timeout = minToolTimeoutSeconds
 	}

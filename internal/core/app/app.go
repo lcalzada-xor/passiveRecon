@@ -90,13 +90,48 @@ func Run(cfg *config.Config) error {
 
 	ctx := context.Background()
 	runHash := computeRunHash(cfg, ordered)
+
+	// Inicializar checkpoint manager
+	var checkpointMgr *CheckpointManager
+	if cfg.CheckpointInterval > 0 {
+		interval := time.Duration(cfg.CheckpointInterval) * time.Second
+		checkpointMgr = NewCheckpointManager(cfg.OutDir, runHash, cfg.Target, interval)
+
+		// Si resume está habilitado, intentar cargar checkpoint previo
+		if cfg.Resume {
+			if loaded, err := checkpointMgr.Load(); err != nil {
+				logx.Warnf("no se pudo cargar checkpoint: %v", err)
+			} else if loaded != nil {
+				// Validar que el checkpoint corresponde al mismo target y runHash
+				if loaded.Target == cfg.Target && loaded.RunHash == runHash {
+					logx.Infof("resumiendo desde checkpoint: %d tools completadas", len(loaded.CompletedTools))
+					logx.Infof("checkpoint: %s", checkpointMgr.GetProgress())
+				} else {
+					logx.Warnf("checkpoint inválido: target o configuración no coinciden")
+					checkpointMgr = NewCheckpointManager(cfg.OutDir, runHash, cfg.Target, interval)
+				}
+			}
+		}
+
+		// Iniciar auto-save
+		checkpointMgr.StartAutoSave()
+		defer func() {
+			checkpointMgr.StopAutoSave()
+			// Guardar checkpoint final
+			if err := checkpointMgr.Save(); err != nil {
+				logx.Warnf("no se pudo guardar checkpoint final: %v", err)
+			}
+		}()
+	}
+
 	opts := orchestratorOptions{
-		cfg:       cfg,
-		sink:      sink,
-		requested: requested,
-		bar:       bar,
-		cache:     execCache,
-		runHash:   runHash,
+		cfg:        cfg,
+		sink:       sink,
+		requested:  requested,
+		bar:        bar,
+		cache:      execCache,
+		runHash:    runHash,
+		checkpoint: checkpointMgr,
 	}
 
 	buildStepsStart := time.Now()
@@ -148,6 +183,15 @@ func Run(cfg *config.Config) error {
 
 	if err := materializer.Materialize(cfg.OutDir); err != nil {
 		return err
+	}
+
+	// Eliminar checkpoint al completar exitosamente
+	if checkpointMgr != nil {
+		if err := checkpointMgr.Remove(); err != nil {
+			logx.Warnf("no se pudo eliminar checkpoint: %v", err)
+		} else {
+			logx.Debugf("checkpoint eliminado después de completar exitosamente")
+		}
 	}
 
 	logx.Infof("modo active=%v; terminado", cfg.Active)

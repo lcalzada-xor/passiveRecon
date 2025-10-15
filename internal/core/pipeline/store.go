@@ -229,6 +229,10 @@ func newShardedStore(path string, target string, shardCount int) *shardedStore {
 func (s *shardedStore) getShard(key artifacts.Key) *jsonlStore {
 	h := fnv.New32a()
 	h.Write([]byte(key.Type))
+	if key.Subtype != "" {
+		h.Write([]byte(":"))
+		h.Write([]byte(key.Subtype))
+	}
 	h.Write([]byte(key.Value))
 	if key.Active {
 		h.Write([]byte("active"))

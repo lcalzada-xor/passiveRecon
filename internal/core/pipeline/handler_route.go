@@ -290,19 +290,28 @@ func routeCategoryHandler(ctx *Context, spec CategorySpec, line string, isActive
 			_ = ctx.Dedup.Seen(keyspace, key)
 		}
 	}
+	// Detectar categorías especializadas
+	var hasSpecializedCategory bool
 	if !isActive || shouldCategorizeActiveRoute(line, base) {
+		categories := routes.DetectCategories(base)
+		hasSpecializedCategory = len(categories) > 0
 		writeRouteCategories(ctx, base, isActive, tool)
 	}
-	if len(metadata) == 0 {
-		metadata = nil
+
+	// Solo crear el artifact "route" si NO tiene una categoría especializada
+	// Las categorías especializadas (image, css, etc.) ya fueron creadas por writeRouteCategories
+	if !hasSpecializedCategory {
+		if len(metadata) == 0 {
+			metadata = nil
+		}
+		ctx.Store.Record(tool, artifacts.Artifact{
+			Type:     spec.ArtifactType,
+			Value:    base,
+			Active:   isActive,
+			Up:       true,
+			Metadata: metadata,
+		})
 	}
-	ctx.Store.Record(tool, artifacts.Artifact{
-		Type:     spec.ArtifactType,
-		Value:    base,
-		Active:   isActive,
-		Up:       true,
-		Metadata: metadata,
-	})
 	return true
 }
 
@@ -337,6 +346,18 @@ func writeRouteCategories(ctx *Context, route string, isActive bool, tool string
 			HandleCategory(ctx, categorySpecs["crawl"], "crawl:"+route, isActive, tool)
 		case routes.CategoryMeta:
 			HandleCategory(ctx, categorySpecs["meta-route"], "meta-route:"+route, isActive, tool)
+		case routes.CategoryImages:
+			HandleCategory(ctx, categorySpecs["image"], "image:"+route, isActive, tool)
+		case routes.CategoryCSS:
+			HandleCategory(ctx, categorySpecs["css"], "css:"+route, isActive, tool)
+		case routes.CategoryFonts:
+			HandleCategory(ctx, categorySpecs["font"], "font:"+route, isActive, tool)
+		case routes.CategoryVideo:
+			HandleCategory(ctx, categorySpecs["video"], "video:"+route, isActive, tool)
+		case routes.CategoryDocs:
+			HandleCategory(ctx, categorySpecs["doc"], "doc:"+route, isActive, tool)
+		case routes.CategoryArchives:
+			HandleCategory(ctx, categorySpecs["archive"], "archive:"+route, isActive, tool)
 		}
 	}
 }
@@ -356,6 +377,8 @@ func init() {
 		"js": {
 			Name:             "js",
 			Prefix:           "js:",
+			PassiveKeyspace:  keyspaceRoutePassive,
+			ActiveKeyspace:   keyspaceRouteActive,
 			ArtifactType:     "js",
 			IncludeRouteType: true,
 			NormalizePassive: false,
@@ -442,6 +465,66 @@ func init() {
 			ArtifactType:     "meta-route",
 			IncludeRouteType: true,
 			NormalizePassive: false,
+			CheckScope:       true,
+		},
+		"image": {
+			Name:             "image",
+			Prefix:           "image:",
+			PassiveKeyspace:  keyspaceImagePassive,
+			ActiveKeyspace:   keyspaceImageActive,
+			ArtifactType:     "image",
+			IncludeRouteType: true,
+			NormalizePassive: false,
+			CheckScope:       true,
+		},
+		"css": {
+			Name:             "css",
+			Prefix:           "css:",
+			PassiveKeyspace:  keyspaceCSSPassive,
+			ActiveKeyspace:   keyspaceCSSActive,
+			ArtifactType:     "css",
+			IncludeRouteType: true,
+			NormalizePassive: true,
+			CheckScope:       true,
+		},
+		"font": {
+			Name:             "font",
+			Prefix:           "font:",
+			PassiveKeyspace:  keyspaceFontPassive,
+			ActiveKeyspace:   keyspaceFontActive,
+			ArtifactType:     "font",
+			IncludeRouteType: true,
+			NormalizePassive: true,
+			CheckScope:       true,
+		},
+		"video": {
+			Name:             "video",
+			Prefix:           "video:",
+			PassiveKeyspace:  keyspaceVideoPassive,
+			ActiveKeyspace:   keyspaceVideoActive,
+			ArtifactType:     "video",
+			IncludeRouteType: true,
+			NormalizePassive: true,
+			CheckScope:       true,
+		},
+		"doc": {
+			Name:             "doc",
+			Prefix:           "doc:",
+			PassiveKeyspace:  keyspaceDocPassive,
+			ActiveKeyspace:   keyspaceDocActive,
+			ArtifactType:     "doc",
+			IncludeRouteType: true,
+			NormalizePassive: true,
+			CheckScope:       true,
+		},
+		"archive": {
+			Name:             "archive",
+			Prefix:           "archive:",
+			PassiveKeyspace:  keyspaceArchivePassive,
+			ActiveKeyspace:   keyspaceArchiveActive,
+			ArtifactType:     "archive",
+			IncludeRouteType: true,
+			NormalizePassive: true,
 			CheckScope:       true,
 		},
 	}

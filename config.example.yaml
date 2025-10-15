@@ -1,26 +1,26 @@
-# passiveRecon Configuration Example
-# Copy to config.yaml and customize for your needs
-# CLI flags override these values
+# PassiveRecon - Ejemplo de Configuración
+# Documentación: https://github.com/yourusername/passiveRecon
 
-# Target domain to enumerate (required)
-target: example.com
+# Target domain para reconnaissance
+target: "example.com"
 
-# Output directory for results
-outdir: ./output
+# Directorio de salida para resultados
+outdir: "./results"
 
-# Number of concurrent workers
+# Número de workers concurrentes
 workers: 6
 
-# Enable active verification (dnsx, httpx, linkfinderevo)
-active: false
+# Habilitar modo activo (httpx, dnsx, etc.)
+active: true
 
-# Tools to execute (comma-separated or list format)
+# Herramientas a ejecutar (en orden)
 tools:
   - amass
   - subfinder
   - assetfinder
   - rdap
   - crtsh
+  - censys
   - dedupe
   - dnsx
   - waybackurls
@@ -29,24 +29,38 @@ tools:
   - subjs
   - linkfinderevo
 
-# Timeout per tool in seconds
+# Timeout global por defecto (segundos)
 timeout: 120
 
-# Verbosity level (0=silent, 1=info, 2=debug, 3=trace)
+# Timeouts específicos por herramienta (segundos)
+# Estos sobrescriben el timeout global para herramientas específicas
+tool_timeouts:
+  amass: 300          # 5 minutos - amass puede tardar en enumerar subdominios
+  waybackurls: 240    # 4 minutos - wayback puede ser lento con muchos dominios
+  gau: 240            # 4 minutos - similar a waybackurls
+  httpx: 600          # 10 minutos - necesita tiempo para probar todos los dominios
+  linkfinderevo: 400  # 6.5 minutos - análisis de JS puede ser intensivo
+  subfinder: 180      # 3 minutos - múltiples fuentes
+  crtsh: 180          # 3 minutos - consultas a base de datos CT
+  censys: 180         # 3 minutos - API rate limits
+
+# Nivel de verbosidad (0=silent, 1=info, 2=debug, 3=trace)
 verbosity: 1
 
-# Generate HTML report
-report: false
+# Generar reporte HTML al finalizar
+report: true
 
-# Proxy configuration (optional)
-# proxy: http://127.0.0.1:8080
+# Configuración de proxy (opcional)
+# proxy: "http://127.0.0.1:8080"
+# proxy_ca: "/path/to/ca-cert.pem"
 
-# Custom CA certificate for MITM proxies (optional)
-# proxy_ca: ~/.config/burp/ca-cert.pem
+# Credenciales Censys API (opcional)
+# censys_api_id: "your-api-id"
+# censys_api_secret: "your-api-secret"
 
-# Censys API credentials (optional, can use environment variables)
-# censys_api_id: "${CENSYS_API_ID}"
-# censys_api_secret: "${CENSYS_API_SECRET}"
+# Modo de scope: "subdomains" (incluye subdominios) o "domain" (solo dominio exacto)
+scope: "subdomains"
 
-# Scope mode: 'subdomains' (includes subdomains) or 'domain' (exact domain only)
-scope: subdomains
+# Checkpoint para resume capability
+resume: false
+checkpoint_interval: 30  # Guardar checkpoint cada 30 segundos

@@ -733,28 +733,40 @@ func TestArtifactsMergeTypes(t *testing.T) {
 	closeAndMaterialize(t, sink, dir)
 
 	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+
+	// With the new type system, these are separate artifacts with different keys
+	// route artifact: Type="route", Subtype=""
+	// html artifact: Type="resource", Subtype="html"
 	var matches []Artifact
 	for _, art := range artifacts {
 		if art.Value == "https://app.example.com/login" && !art.Active {
 			matches = append(matches, art)
 		}
 	}
-	if len(matches) != 1 {
-		t.Fatalf("expected single artifact for route/html, got %d", len(matches))
+	if len(matches) != 2 {
+		t.Fatalf("expected 2 artifacts for route and html, got %d", len(matches))
 	}
 
-	combined := matches[0]
-	switch combined.Type {
-	case "route":
-		if !containsType(combined.Types, "html") {
-			t.Fatalf("expected route artifact to include html as secondary type, got %v", combined.Types)
+	// Verify we have both a route and an html artifact
+	var hasRoute, hasHTML bool
+	for _, art := range matches {
+		if art.Type == "route" && art.Subtype == "" {
+			hasRoute = true
 		}
-	case "html":
-		if !containsType(combined.Types, "route") {
-			t.Fatalf("expected html artifact to include route as secondary type, got %v", combined.Types)
+		if art.Type == "resource" && art.Subtype == "html" {
+			hasHTML = true
+			// HTML artifact should have "html" in the legacy Types field
+			if !containsType(art.Types, "html") {
+				t.Fatalf("expected html artifact to have 'html' in Types field, got %v", art.Types)
+			}
 		}
-	default:
-		t.Fatalf("unexpected primary type: %q", combined.Type)
+	}
+
+	if !hasRoute {
+		t.Fatalf("expected route artifact not found")
+	}
+	if !hasHTML {
+		t.Fatalf("expected html artifact not found")
 	}
 }
 
@@ -832,6 +844,8 @@ func TestHTMLImageLinesAreRedirectedToImagesFile(t *testing.T) {
 		"https://app.example.com/assets/logo.png",
 		"https://app.example.com/assets/logo.svg",
 	}
+	sort.Strings(imagesLines)
+	sort.Strings(wantImages)
 	if diff := cmp.Diff(wantImages, imagesLines); diff != "" {
 		t.Fatalf("unexpected images.active contents (-want +got):\n%s", diff)
 	}
@@ -876,6 +890,8 @@ func TestRouteCategorizationPassive(t *testing.T) {
 		"https://app.example.com/static/app.jsonld",
 		"https://app.example.com/static/manifest.json",
 	}
+	sort.Strings(jsonLines)
+	sort.Strings(wantJSON)
 	if diff := cmp.Diff(wantJSON, jsonLines); diff != "" {
 		t.Fatalf("unexpected json.passive contents (-want +got):\n%s", diff)
 	}
@@ -885,6 +901,8 @@ func TestRouteCategorizationPassive(t *testing.T) {
 		"https://app.example.com/static/swagger.yaml",
 		"https://app.example.com/static/swagger.json",
 	}
+	sort.Strings(apiLines)
+	sort.Strings(wantAPI)
 	if diff := cmp.Diff(wantAPI, apiLines); diff != "" {
 		t.Fatalf("unexpected api.passive contents (-want +got):\n%s", diff)
 	}
@@ -1177,7 +1195,15 @@ func TestHandleGFFindingRecordsArtifact(t *testing.T) {
 		t.Fatalf("expected gfFinding artifact to be valid")
 	}
 
-	if diff := cmp.Diff([]string{"sqli", "xss"}, art.Types); diff != "" {
+	// With the new type system, Types contains:
+	// 1. The legacy type "gfFinding" (from Normalize())
+	// 2. The rule types "sqli", "xss"
+	wantTypes := []string{"gfFinding", "sqli", "xss"}
+	gotTypes := make([]string, len(art.Types))
+	copy(gotTypes, art.Types)
+	sort.Strings(gotTypes)
+	sort.Strings(wantTypes)
+	if diff := cmp.Diff(wantTypes, gotTypes); diff != "" {
 		t.Fatalf("unexpected gfFinding types (-want +got):\n%s", diff)
 	}
 
@@ -1423,12 +1449,53 @@ func readArtifactsFile(t *testing.T, path string) []Artifact {
 
 func requireArtifact(t *testing.T, artifacts []Artifact, typ, value string, active bool) Artifact {
 	t.Helper()
+
+	// Convert legacy type names to Type+Subtype if needed
+	searchType := typ
+	searchSubtype := ""
+
+	// Check if this is a legacy type that needs conversion
+	legacyTypes := map[string]struct {
+		typ     string
+		subtype string
+	}{
+		"js":         {"resource", "javascript"},
+		"html":       {"resource", "html"},
+		"css":        {"resource", "css"},
+		"image":      {"resource", "image"},
+		"font":       {"resource", "font"},
+		"video":      {"resource", "video"},
+		"doc":        {"resource", "document"},
+		"archive":    {"resource", "archive"},
+		"json":       {"data", "json"},
+		"xml":        {"data", "xml"},
+		"api":        {"endpoint", "rest"},
+		"graphql":    {"endpoint", "graphql"},
+		"maps":       {"meta", "sourcemap"},
+		"wasm":       {"meta", "wasm"},
+		"svg":        {"meta", "svg"},
+		"crawl":      {"meta", "crawl"},
+		"meta-route": {"meta", "route"},
+		"gfFinding":  {"finding", "gf"},
+		"keyFinding": {"finding", "secret"},
+	}
+
+	if newTypes, isLegacy := legacyTypes[typ]; isLegacy {
+		searchType = newTypes.typ
+		searchSubtype = newTypes.subtype
+	}
+
 	for _, a := range artifacts {
-		if a.Type != typ || a.Active != active {
+		// Match by Type and Subtype
+		if a.Type != searchType || a.Active != active {
 			continue
 		}
+		if searchSubtype != "" && a.Subtype != searchSubtype {
+			continue
+		}
+
 		// For certificates, compare by normalizing JSON (field order may vary)
-		if typ == "certificate" && jsonEqual(value, a.Value) {
+		if searchType == "certificate" && jsonEqual(value, a.Value) {
 			return a
 		}
 		// For other types, exact string match
@@ -1436,7 +1503,7 @@ func requireArtifact(t *testing.T, artifacts []Artifact, typ, value string, acti
 			return a
 		}
 	}
-	t.Fatalf("artifact not found type=%q value=%q active=%v", typ, value, active)
+	t.Fatalf("artifact not found type=%q value=%q active=%v (searched as type=%q subtype=%q)", typ, value, active, searchType, searchSubtype)
 	return Artifact{}
 }
 

@@ -22,35 +22,41 @@ import (
 )
 
 type Config struct {
-	Target          string
-	OutDir          string
-	Workers         int
-	Active          bool
-	Tools           []string
-	TimeoutS        int
-	Verbosity       int
-	Report          bool
-	Proxy           string
-	ProxyCACert     string
-	CensysAPIID     string
-	CensysAPISecret string
-	Scope           string
+	Target             string
+	OutDir             string
+	Workers            int
+	Active             bool
+	Tools              []string
+	TimeoutS           int
+	ToolTimeouts       map[string]int // Timeouts específicos por herramienta (segundos)
+	Verbosity          int
+	Report             bool
+	Proxy              string
+	ProxyCACert        string
+	CensysAPIID        string
+	CensysAPISecret    string
+	Scope              string
+	Resume             bool // Reanudar desde checkpoint
+	CheckpointInterval int  // Intervalo de checkpoint en segundos
 }
 
 type fileConfig struct {
-	Target          *string     `json:"target" yaml:"target"`
-	OutDir          *string     `json:"outdir" yaml:"outdir"`
-	Workers         *int        `json:"workers" yaml:"workers"`
-	Active          *bool       `json:"active" yaml:"active"`
-	Tools           *stringList `json:"tools" yaml:"tools"`
-	TimeoutS        *int        `json:"timeout" yaml:"timeout"`
-	Verbosity       *int        `json:"verbosity" yaml:"verbosity"`
-	Report          *bool       `json:"report" yaml:"report"`
-	Proxy           *string     `json:"proxy" yaml:"proxy"`
-	ProxyCACert     *string     `json:"proxy_ca" yaml:"proxy_ca"`
-	CensysAPIID     *string     `json:"censys_api_id" yaml:"censys_api_id"`
-	CensysAPISecret *string     `json:"censys_api_secret" yaml:"censys_api_secret"`
-	Scope           *string     `json:"scope" yaml:"scope"`
+	Target             *string         `json:"target" yaml:"target"`
+	OutDir             *string         `json:"outdir" yaml:"outdir"`
+	Workers            *int            `json:"workers" yaml:"workers"`
+	Active             *bool           `json:"active" yaml:"active"`
+	Tools              *stringList     `json:"tools" yaml:"tools"`
+	TimeoutS           *int            `json:"timeout" yaml:"timeout"`
+	ToolTimeouts       map[string]int  `json:"tool_timeouts" yaml:"tool_timeouts"`
+	Verbosity          *int            `json:"verbosity" yaml:"verbosity"`
+	Report             *bool           `json:"report" yaml:"report"`
+	Proxy              *string         `json:"proxy" yaml:"proxy"`
+	ProxyCACert        *string         `json:"proxy_ca" yaml:"proxy_ca"`
+	CensysAPIID        *string         `json:"censys_api_id" yaml:"censys_api_id"`
+	CensysAPISecret    *string         `json:"censys_api_secret" yaml:"censys_api_secret"`
+	Scope              *string         `json:"scope" yaml:"scope"`
+	Resume             *bool           `json:"resume" yaml:"resume"`
+	CheckpointInterval *int            `json:"checkpoint_interval" yaml:"checkpoint_interval"`
 }
 
 type stringList []string
@@ -117,6 +123,8 @@ func ParseFlags() *Config {
 	censysID := flag.String("censys-api-id", os.Getenv("CENSYS_API_ID"), "Censys API ID (o exporta CENSYS_API_ID)")
 	censysSecret := flag.String("censys-api-secret", os.Getenv("CENSYS_API_SECRET"), "Censys API secret (o exporta CENSYS_API_SECRET)")
 	scope := flag.String("scope", "subdomains", "Modo de scope: 'subdomains' (incluye subdominios) o 'domain' (solo dominio exacto)")
+	resume := flag.Bool("resume", false, "Reanudar desde último checkpoint")
+	checkpointInterval := flag.Int("checkpoint-interval", 30, "Intervalo de checkpoint en segundos")
 
 	flag.Parse()
 
@@ -128,19 +136,22 @@ func ParseFlags() *Config {
 	list := cleanStringSlice(strings.Split(*tools, ","))
 
 	cfg := &Config{
-		Target:          strings.TrimSpace(*target),
-		OutDir:          strings.TrimSpace(*outdir),
-		Workers:         *workers,
-		Active:          *active,
-		Tools:           list,
-		TimeoutS:        *timeout,
-		Verbosity:       *verbosity,
-		Report:          *report,
-		Proxy:           strings.TrimSpace(*proxy),
-		ProxyCACert:     strings.TrimSpace(*proxyCA),
-		CensysAPIID:     strings.TrimSpace(*censysID),
-		CensysAPISecret: strings.TrimSpace(*censysSecret),
-		Scope:           strings.TrimSpace(*scope),
+		Target:             strings.TrimSpace(*target),
+		OutDir:             strings.TrimSpace(*outdir),
+		Workers:            *workers,
+		Active:             *active,
+		Tools:              list,
+		TimeoutS:           *timeout,
+		ToolTimeouts:       make(map[string]int),
+		Verbosity:          *verbosity,
+		Report:             *report,
+		Proxy:              strings.TrimSpace(*proxy),
+		ProxyCACert:        strings.TrimSpace(*proxyCA),
+		CensysAPIID:        strings.TrimSpace(*censysID),
+		CensysAPISecret:    strings.TrimSpace(*censysSecret),
+		Scope:              strings.TrimSpace(*scope),
+		Resume:             *resume,
+		CheckpointInterval: *checkpointInterval,
 	}
 
 	var fileCfg *fileConfig
@@ -181,6 +192,9 @@ func ParseFlags() *Config {
 		if fileCfg.TimeoutS != nil && !setFlags["timeout"] {
 			cfg.TimeoutS = *fileCfg.TimeoutS
 		}
+		if len(fileCfg.ToolTimeouts) > 0 {
+			cfg.ToolTimeouts = fileCfg.ToolTimeouts
+		}
 		if fileCfg.Verbosity != nil && !setFlags["v"] {
 			cfg.Verbosity = *fileCfg.Verbosity
 		}
@@ -201,6 +215,12 @@ func ParseFlags() *Config {
 		}
 		if fileCfg.Scope != nil && !setFlags["scope"] {
 			cfg.Scope = strings.TrimSpace(*fileCfg.Scope)
+		}
+		if fileCfg.Resume != nil && !setFlags["resume"] {
+			cfg.Resume = *fileCfg.Resume
+		}
+		if fileCfg.CheckpointInterval != nil && !setFlags["checkpoint-interval"] {
+			cfg.CheckpointInterval = *fileCfg.CheckpointInterval
 		}
 	}
 

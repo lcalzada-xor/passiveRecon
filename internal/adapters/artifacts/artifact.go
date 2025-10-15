@@ -29,7 +29,9 @@ const (
 // Artifact representa un hallazgo generado por el pipeline (formato interno v1).
 type Artifact struct {
 	Type        string         `json:"type"`
-	Types       []string       `json:"types,omitempty"`
+	Subtype     string         `json:"subtype,omitempty"`    // Subtipo específico (nuevo sistema)
+	Types       []string       `json:"types,omitempty"`      // Tipos secundarios (sistema legacy)
+	Tags        []string       `json:"tags,omitempty"`       // Tags adicionales (nuevo sistema)
 	Value       string         `json:"value"`
 	Active      bool           `json:"active"`
 	Up          bool           `json:"up"`
@@ -44,9 +46,10 @@ type Artifact struct {
 
 // Key representa la identidad lógica de un artefacto normalizado.
 type Key struct {
-	Type   string
-	Value  string
-	Active bool
+	Type    string // Tipo principal
+	Subtype string // Subtipo específico (nuevo sistema)
+	Value   string
+	Active  bool
 }
 
 // HeaderV2 representa la primera línea del archivo artifacts v2.
@@ -61,15 +64,17 @@ type HeaderV2 struct {
 
 // ArtifactV2 representa un hallazgo en formato v2 (compacto).
 type ArtifactV2 struct {
-	T   string         `json:"t"`             // Type (domain, certificate, route, etc.)
-	V   interface{}    `json:"v"`             // Value (string o object según tipo)
-	St  string         `json:"st"`            // State (up, down, active_up, active_down)
-	Tl  string         `json:"tl,omitempty"`  // Tool name (primary)
-	Tls []string       `json:"tls,omitempty"` // Tools array (all tools that found this artifact)
-	N   int            `json:"n,omitempty"`   // Occurrences count
-	Ts  []int64        `json:"ts,omitempty"`  // Timestamps relativos en milisegundos [first_seen] o [first_seen, last_seen]
-	Ty  []string       `json:"ty,omitempty"`  // Secondary types (opcional)
-	M   map[string]any `json:"m,omitempty"`   // Metadata adicional (opcional)
+	T   string         `json:"t"`              // Type (domain, certificate, route, etc.)
+	St  string         `json:"st,omitempty"`   // Subtype (javascript, html, rest, etc.) - Nuevo sistema
+	V   interface{}    `json:"v"`              // Value (string o object según tipo)
+	S   string         `json:"s"`              // State (up, down, active_up, active_down)
+	Tl  string         `json:"tl,omitempty"`   // Tool name (primary)
+	Tls []string       `json:"tls,omitempty"`  // Tools array (all tools that found this artifact)
+	N   int            `json:"n,omitempty"`    // Occurrences count
+	Ts  []int64        `json:"ts,omitempty"`   // Timestamps relativos en milisegundos [first_seen] o [first_seen, last_seen]
+	Ty  []string       `json:"ty,omitempty"`   // Secondary types (legacy, opcional)
+	Tags []string      `json:"tags,omitempty"` // Tags adicionales (opcional)
+	M   map[string]any `json:"m,omitempty"`    // Metadata adicional (opcional)
 }
 
 // CertificateV2 representa un certificado SSL/TLS en formato compacto.
@@ -95,16 +100,18 @@ type GFFindingV2 struct {
 // ToV2 convierte un Artifact v1 a ArtifactV2 (formato compacto).
 func ToV2(v1 Artifact, baseTime time.Time) ArtifactV2 {
 	v2 := ArtifactV2{
-		T:   v1.Type,
-		Tl:  v1.Tool,
-		Tls: v1.Tools,
-		N:   v1.Occurrences,
-		Ty:  v1.Types,
-		M:   v1.Metadata,
+		T:    v1.Type,
+		St:   v1.Subtype,
+		Tl:   v1.Tool,
+		Tls:  v1.Tools,
+		N:    v1.Occurrences,
+		Ty:   v1.Types,
+		Tags: v1.Tags,
+		M:    v1.Metadata,
 	}
 
 	// Convertir estado
-	v2.St = stateToV2(v1.Active, v1.Up)
+	v2.S = stateToV2(v1.Active, v1.Up)
 
 	// Convertir value según el tipo
 	v2.V = convertValueToV2(v1.Type, v1.Value, v1.Metadata)
@@ -122,7 +129,9 @@ func ToV2(v1 Artifact, baseTime time.Time) ArtifactV2 {
 func ToV1(v2 ArtifactV2, baseTime time.Time) Artifact {
 	v1 := Artifact{
 		Type:        v2.T,
+		Subtype:     v2.St,
 		Types:       v2.Ty,
+		Tags:        v2.Tags,
 		Tool:        v2.Tl,
 		Tools:       v2.Tls,
 		Occurrences: v2.N,
@@ -131,7 +140,7 @@ func ToV1(v2 ArtifactV2, baseTime time.Time) Artifact {
 	}
 
 	// Convertir estado
-	v1.Active, v1.Up = stateFromV2(v2.St)
+	v1.Active, v1.Up = stateFromV2(v2.S)
 
 	// Convertir value
 	v1.Value = convertValueToV1(v2.V)
@@ -536,9 +545,21 @@ func NewHeaderV2(target string, tools []string) HeaderV2 {
 // exitoso.
 func Normalize(tool string, artifact Artifact) (Artifact, bool) {
 	artifact.Type = strings.TrimSpace(artifact.Type)
+	artifact.Subtype = strings.TrimSpace(artifact.Subtype)
 	artifact.Value = strings.TrimSpace(artifact.Value)
 	if artifact.Value == "" {
 		return Artifact{}, false
+	}
+
+	// Capa de compatibilidad: convertir tipos legacy a Type+Subtype
+	if artifact.Subtype == "" && isLegacyType(artifact.Type) {
+		newType, newSubtype := convertLegacyTypeForKey(artifact.Type)
+		// Preservar el tipo legacy en Types para compatibilidad
+		if artifact.Type != newType {
+			artifact.Types = append(artifact.Types, artifact.Type)
+		}
+		artifact.Type = newType
+		artifact.Subtype = newSubtype
 	}
 
 	primary, extras, ok := consolidateTypes(artifact.Type, artifact.Types...)
@@ -547,6 +568,26 @@ func Normalize(tool string, artifact Artifact) (Artifact, bool) {
 	}
 	artifact.Type = primary
 	artifact.Types = extras
+
+	// Normalizar Tags (eliminar duplicados y vacíos)
+	if len(artifact.Tags) > 0 {
+		tagSet := make(map[string]struct{})
+		cleanedTags := make([]string, 0, len(artifact.Tags))
+		for _, tag := range artifact.Tags {
+			tag = strings.TrimSpace(tag)
+			if tag != "" {
+				if _, exists := tagSet[tag]; !exists {
+					tagSet[tag] = struct{}{}
+					cleanedTags = append(cleanedTags, tag)
+				}
+			}
+		}
+		if len(cleanedTags) > 0 {
+			artifact.Tags = cleanedTags
+		} else {
+			artifact.Tags = nil
+		}
+	}
 
 	artifact.Metadata = normalizeMetadata(artifact.Metadata)
 	artifact.Tool = strings.TrimSpace(artifact.Tool)
@@ -574,17 +615,32 @@ func Normalize(tool string, artifact Artifact) (Artifact, bool) {
 
 // KeyFor devuelve la clave de deduplicación asociada al artefacto indicado.
 func KeyFor(artifact Artifact) Key {
-	category := keyCategory(artifact.Type)
-	key := Key{
-		Type:   category,
-		Value:  strings.TrimSpace(artifact.Value),
-		Active: artifact.Active,
+	// Usar Type+Subtype directamente del artifact
+	typ := strings.TrimSpace(artifact.Type)
+	subtype := strings.TrimSpace(artifact.Subtype)
+
+	// Fallback: si no hay Subtype, intentar inferirlo desde el sistema legacy
+	if subtype == "" && typ != "" {
+		// Si el tipo es legacy, convertirlo
+		if isLegacyType(typ) {
+			typ, subtype = convertLegacyTypeForKey(typ)
+		}
 	}
-	if key.Type == "route" {
+
+	key := Key{
+		Type:    typ,
+		Subtype: subtype,
+		Value:   strings.TrimSpace(artifact.Value),
+		Active:  artifact.Active,
+	}
+
+	// Normalizar valor para tipos route/resource
+	if key.Type == "route" || key.Type == "resource" {
 		if canonical := canonicalRouteKey(key.Value); canonical != "" {
 			key.Value = canonical
 		}
 	}
+
 	if key.Type == "" {
 		key.Type = "?"
 	}
@@ -741,31 +797,6 @@ func canonicalRouteKey(value string) string {
 		return base
 	}
 	return result
-}
-
-func keyCategory(typ string) string {
-	trimmed := strings.TrimSpace(typ)
-	switch trimmed {
-	// Tipos que se agrupan como "route" (endpoints generales)
-	// Incluye html, js, css, pdf, doc, font, video, archive, xml porque son recursos web
-	case "", "route", "html", "js", "css", "pdf", "doc", "font", "video", "archive", "xml", "crawl", "meta-route":
-		return "route"
-
-	// Imágenes y formatos visuales
-	case "image", "svg":
-		return "image"
-
-	// APIs y datos estructurados
-	case "json", "api", "graphql":
-		return "api"
-
-	// Otros tipos especializados (mantienen su identidad)
-	case "maps", "wasm", "keyFinding", "gfFinding":
-		return trimmed
-
-	default:
-		return trimmed
-	}
 }
 
 func normalizeMetadata(metadata map[string]any) map[string]any {
@@ -928,5 +959,70 @@ func mergeRawMetadata(target map[string]any, incoming any) {
 		if _, ok := target["raw"]; !ok {
 			target["raw"] = src
 		}
+	}
+}
+
+// ============================================================================
+// Funciones de compatibilidad con el sistema legacy de tipos
+// ============================================================================
+
+// isLegacyType verifica si un tipo es del sistema legacy que necesita conversión.
+func isLegacyType(typ string) bool {
+	switch typ {
+	case "js", "html", "css", "image", "font", "video", "doc", "archive",
+		"json", "xml", "api", "graphql", "maps", "wasm", "svg", "crawl",
+		"meta-route", "keyFinding", "gfFinding":
+		return true
+	default:
+		return false
+	}
+}
+
+// convertLegacyTypeForKey convierte un tipo legacy a Type+Subtype para la key.
+// Esta función es similar a LegacyTypeToNew en types/registry.go pero está
+// aquí para evitar dependencias circulares (artifacts no debería depender de types).
+func convertLegacyTypeForKey(legacyType string) (typ, subtype string) {
+	switch legacyType {
+	case "js":
+		return "resource", "javascript"
+	case "html":
+		return "resource", "html"
+	case "css":
+		return "resource", "css"
+	case "image":
+		return "resource", "image"
+	case "font":
+		return "resource", "font"
+	case "video":
+		return "resource", "video"
+	case "doc":
+		return "resource", "document"
+	case "archive":
+		return "resource", "archive"
+	case "json":
+		return "data", "json"
+	case "xml":
+		return "data", "xml"
+	case "api":
+		return "endpoint", "rest"
+	case "graphql":
+		return "endpoint", "graphql"
+	case "maps":
+		return "meta", "sourcemap"
+	case "wasm":
+		return "meta", "wasm"
+	case "svg":
+		return "meta", "svg"
+	case "crawl":
+		return "meta", "crawl"
+	case "meta-route":
+		return "meta", "route"
+	case "gfFinding":
+		return "finding", "gf"
+	case "keyFinding":
+		return "finding", "secret"
+	default:
+		// Tipos base que no necesitan conversión
+		return legacyType, ""
 	}
 }

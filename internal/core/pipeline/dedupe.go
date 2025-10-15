@@ -2,6 +2,12 @@ package pipeline
 
 import "sync"
 
+// Deduplicator es la interfaz para sistemas de deduplicación.
+type Deduplicator interface {
+	// Seen marca una key como vista en un keyspace y retorna true si ya existía
+	Seen(keyspace, key string) bool
+}
+
 // Dedupe provides exact deduplication using an in-memory map.
 //
 // This implementation guarantees no false positives (every duplicate is caught)
@@ -68,6 +74,16 @@ const (
 	keyspaceCrawlActive   = "route:crawl:active"
 	keyspaceMetaRoutePass = "route:meta:passive"
 	keyspaceMetaRouteAct  = "route:meta:active"
+	keyspaceCSSPassive    = "route:css:passive"
+	keyspaceCSSActive     = "route:css:active"
+	keyspaceFontPassive   = "route:font:passive"
+	keyspaceFontActive    = "route:font:active"
+	keyspaceVideoPassive  = "route:video:passive"
+	keyspaceVideoActive   = "route:video:active"
+	keyspaceDocPassive    = "route:doc:passive"
+	keyspaceDocActive     = "route:doc:active"
+	keyspaceArchivePassive = "route:archive:passive"
+	keyspaceArchiveActive  = "route:archive:active"
 	keyspaceCertPassive   = "cert:passive"
 	keyspaceCertActive    = "cert:active"
 )
