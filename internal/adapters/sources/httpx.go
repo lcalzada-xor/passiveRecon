@@ -114,7 +114,7 @@ func collectHTTPXInputs(outdir string) ([]string, error) {
 
 	selectors := map[string]artifacts.ActiveState{
 		"domain": artifacts.AnyState,
-		"route":  artifacts.PassiveOnly,
+		"route":  artifacts.AnyState,
 	}
 
 	values, err := artifacts.CollectValuesByType(outdir, selectors)
@@ -262,6 +262,8 @@ func runHTTPXWorkers(
 						"-title",
 						"-content-type",
 						"-json",
+						"-nf",  // no-fallback: display both HTTP and HTTPS results
+						"-nfs", // no-fallback-scheme: respect input scheme (http/https)
 					}, intermediate)
 				}()
 				if err != nil {
