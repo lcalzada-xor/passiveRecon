@@ -16,6 +16,13 @@ func emitFindings(reports []report, out chan<- string) (emissionResult, error) {
 	seenHTML := make(map[string]struct{})
 	seenHTMLTargets := make(map[string]struct{})
 	seenImages := make(map[string]struct{})
+	seenCSS := make(map[string]struct{})
+	seenPDF := make(map[string]struct{})
+	seenDocs := make(map[string]struct{})
+	seenFonts := make(map[string]struct{})
+	seenVideos := make(map[string]struct{})
+	seenArchives := make(map[string]struct{})
+	seenXML := make(map[string]struct{})
 	seenCategories := make(map[routes.Category]map[string]struct{})
 	undetectedSet := make(map[string]struct{})
 
@@ -38,25 +45,49 @@ func emitFindings(reports []report, out chan<- string) (emissionResult, error) {
 			if link == "" {
 				continue
 			}
-			// Emit ruta base siempre
-			if _, seen := seenRoutes[link]; !seen {
-				addOnce(seenRoutes, link, "active: ", &result.Routes)
-			}
 
 			cls := classifyEndpoint(link)
-			if cls.isJS {
+
+			// Determinar tipo primario basado en clasificación
+			emitAsRoute := false
+
+			// Priorizar tipos más específicos sobre "route"
+			switch {
+			case cls.isJS:
 				addOnce(seenJS, link, "active: js: ", &result.JS)
-			}
-			if cls.isHTML || cls.isImage {
-				// marca que es HTML para potenciales consumidores
+			case cls.isCSS:
+				addOnce(seenCSS, link, "active: css: ", nil)
+			case cls.isPDF:
+				addOnce(seenPDF, link, "active: pdf: ", nil)
+			case cls.isDoc:
+				addOnce(seenDocs, link, "active: doc: ", nil)
+			case cls.isFont:
+				addOnce(seenFonts, link, "active: font: ", nil)
+			case cls.isVideo:
+				addOnce(seenVideos, link, "active: video: ", nil)
+			case cls.isArchive:
+				addOnce(seenArchives, link, "active: archive: ", nil)
+			case cls.isXML:
+				addOnce(seenXML, link, "active: xml: ", nil)
+			case cls.isHTML:
 				addOnce(seenHTML, link, "active: html: ", nil)
-				if cls.isHTML {
-					addOnce(seenHTMLTargets, link, "", &result.HTML)
-				}
-				if cls.isImage {
-					addOnce(seenImages, link, "", &result.Images)
+				addOnce(seenHTMLTargets, link, "", &result.HTML)
+			case cls.isImage:
+				addOnce(seenHTML, link, "active: html: ", nil) // legacy compatibility
+				addOnce(seenImages, link, "", &result.Images)
+			default:
+				// Si no tiene tipo específico, emitir como route
+				emitAsRoute = true
+			}
+
+			// Emitir ruta base si no tiene tipo específico
+			if emitAsRoute {
+				if _, seen := seenRoutes[link]; !seen {
+					addOnce(seenRoutes, link, "active: ", &result.Routes)
 				}
 			}
+
+			// Emitir categorías especializadas (API, WASM, Maps, etc.)
 			if len(cls.categories) > 0 {
 				for _, cat := range cls.categories {
 					prefix, ok := categoryPrefixes[cat]
@@ -76,6 +107,7 @@ func emitFindings(reports []report, out chan<- string) (emissionResult, error) {
 					result.Categories[cat] = append(result.Categories[cat], link)
 				}
 			}
+
 			if cls.undetected {
 				undetectedSet[link] = struct{}{}
 			}

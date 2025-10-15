@@ -20,9 +20,11 @@ func Wayback(ctx context.Context, targets []string, out chan<- string) error {
 	}
 
 	group, groupCtx := errgroup.WithContext(ctx)
-	concurrency := runtime.NumCPU()
+	// Wayback es I/O bound - podemos usar más concurrencia que CPUs
+	// Usa 4x CPUs para aprovechar mejor el paralelismo de red
+	concurrency := runtime.NumCPU() * 4
 	if concurrency <= 0 {
-		concurrency = 1
+		concurrency = 4
 	}
 	sem := make(chan struct{}, concurrency)
 

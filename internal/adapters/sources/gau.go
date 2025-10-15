@@ -26,10 +26,11 @@ func GAU(ctx context.Context, targets []string, out chan<- string) error {
 
 	group, groupCtx := errgroup.WithContext(ctx)
 
-	// Concurrency sensata
-	concurrency := runtime.NumCPU()
+	// GAU es I/O bound - podemos usar más concurrencia que CPUs
+	// Usa 4x CPUs para aprovechar mejor el paralelismo de red
+	concurrency := runtime.NumCPU() * 4
 	if concurrency <= 0 {
-		concurrency = 1
+		concurrency = 4
 	}
 	if n := len(targets); n < concurrency {
 		concurrency = n

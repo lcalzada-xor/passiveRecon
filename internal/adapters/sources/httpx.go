@@ -2,7 +2,9 @@ package sources
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"regexp"
@@ -27,7 +29,33 @@ const (
 	// httpxIntermediateBufferSize sets the channel buffer for httpx output forwarding.
 	// A generous buffer prevents blocking when processing bursts of responses.
 	httpxIntermediateBufferSize = 1024
+
+	// httpxMaxThreads límite máximo de threads para httpx
+	httpxMaxThreads = 150
+
+	// httpxRateLimit requests per second
+	httpxRateLimit = 400
 )
+
+// httpxJSONResponse representa la respuesta JSON de httpx con la nueva configuración
+type httpxJSONResponse struct {
+	Timestamp     string   `json:"timestamp"`
+	URL           string   `json:"url"`
+	Input         string   `json:"input"`
+	StatusCode    int      `json:"status_code"`
+	ContentType   string   `json:"content_type"`
+	ContentLength int      `json:"content_length"`
+	Title         string   `json:"title"`
+	Webserver     string   `json:"webserver"`
+	Tech          []string `json:"tech"`
+	Host          string   `json:"host"`
+	Port          string   `json:"port"`
+	Scheme        string   `json:"scheme"`
+	Path          string   `json:"path"`
+	Method        string   `json:"method"`
+	A             []string `json:"a"` // DNS A records
+	Failed        bool     `json:"failed"`
+}
 
 var (
 	httpxBinFinder = runner.HTTPXBin
@@ -213,15 +241,27 @@ func runHTTPXWorkers(
 					}
 					return err
 				}
+				// Usar directamente httpxMaxThreads - las herramientas de red pueden manejar
+				// muchos más threads que CPUs físicos debido a I/O bound operations
+				threads := httpxMaxThreads
+
 				// Asegurar cleanup incluso si runCmd falla
 				func() {
 					defer cleanup()
 					err = runCmd(groupCtx, bin, []string{
-						"-sc",
+						"-l", tmpPath,
+						"-silent",
+						"-no-color",
+						"-timeout", "7",
+						"-retries", "1",
+						"-follow-redirects",
+						"-threads", strconv.Itoa(threads),
+						"-rl", strconv.Itoa(httpxRateLimit),
+						"-x", "HEAD",
+						"-status-code",
 						"-title",
 						"-content-type",
-						"-silent",
-						"-l", tmpPath,
+						"-json",
 					}, intermediate)
 				}()
 				if err != nil {
@@ -242,6 +282,100 @@ func normalizeHTTPXLine(line string) []string {
 		return nil
 	}
 
+	// Intentar parsear como JSON primero
+	if strings.HasPrefix(line, "{") {
+		return processHTTPXJSON(line)
+	}
+
+	// Fallback a formato antiguo (legacy)
+	return processHTTPXLegacy(line)
+}
+
+func processHTTPXJSON(line string) []string {
+	var resp httpxJSONResponse
+	if err := json.Unmarshal([]byte(line), &resp); err != nil {
+		// Si falla el parseo, intentar con formato legacy
+		return processHTTPXLegacy(line)
+	}
+
+	// Si la request falló, no emitir nada
+	if resp.Failed {
+		return nil
+	}
+
+	var out []string
+
+	// Emitir la URL si tiene un status code válido
+	if shouldForwardHTTPXRoute(true, resp.StatusCode) && resp.URL != "" {
+		out = append(out, resp.URL)
+	}
+
+	// Emitir dominio
+	if domain := extractHTTPXDomain(resp.URL); domain != "" && shouldEmitHTTPXDomain(true, resp.StatusCode) {
+		out = append(out, domain)
+	}
+
+	// Emitir HTML si corresponde
+	hasHTMLContent := strings.Contains(strings.ToLower(resp.ContentType), "text/html")
+	if shouldEmitHTTPXHTML(hasHTMLContent, true, resp.StatusCode) && resp.URL != "" {
+		out = append(out, "html: "+resp.URL)
+	}
+
+	// Crear keyFindings con información relevante
+	keyFindings := extractKeyFindings(resp)
+	for _, finding := range keyFindings {
+		out = append(out, "keyFinding: "+finding)
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+
+	// Añadir prefijo "active: " a todos
+	for i := range out {
+		out[i] = "active: " + out[i]
+	}
+	return out
+}
+
+func extractKeyFindings(resp httpxJSONResponse) []string {
+	var findings []string
+
+	// Webserver/tecnología principal
+	if resp.Webserver != "" {
+		findings = append(findings, fmt.Sprintf(`{"type":"webserver","url":"%s","value":"%s"}`, resp.URL, resp.Webserver))
+	}
+
+	// Tecnologías detectadas
+	for _, tech := range resp.Tech {
+		if tech != "" {
+			findings = append(findings, fmt.Sprintf(`{"type":"technology","url":"%s","value":"%s"}`, resp.URL, tech))
+		}
+	}
+
+	// Content-Type interesante (no HTML estándar)
+	if resp.ContentType != "" && !strings.Contains(strings.ToLower(resp.ContentType), "text/html") {
+		// Solo emitir content-types no estándar o relevantes
+		lower := strings.ToLower(resp.ContentType)
+		if strings.Contains(lower, "application/") ||
+			strings.Contains(lower, "font") ||
+			strings.Contains(lower, "wasm") ||
+			strings.Contains(lower, "json") {
+			findings = append(findings, fmt.Sprintf(`{"type":"content-type","url":"%s","value":"%s"}`, resp.URL, resp.ContentType))
+		}
+	}
+
+	// Título de la página (si existe y no es la URL)
+	if resp.Title != "" && resp.Title != resp.URL {
+		// Escapar comillas en el título
+		escapedTitle := strings.ReplaceAll(resp.Title, `"`, `\"`)
+		findings = append(findings, fmt.Sprintf(`{"type":"title","url":"%s","value":"%s"}`, resp.URL, escapedTitle))
+	}
+
+	return findings
+}
+
+func processHTTPXLegacy(line string) []string {
 	var (
 		urlPart  = line
 		metaPart string

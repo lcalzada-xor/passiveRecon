@@ -20,7 +20,8 @@ var (
 	subjsFindBin      = runner.FindBin
 	subjsRunCmd       = runner.RunCommand
 	subjsValidator    = validateJSURLs
-	subjsWorkerCount  = runtime.NumCPU()
+	// SubJS validation es I/O bound - podemos usar más workers que CPUs
+	subjsWorkerCount  = runtime.NumCPU() * 4
 	subjsHTTPTimeout  = 15 * time.Second
 	subjsClientLoader = func() *http.Client {
 		transport := &http.Transport{

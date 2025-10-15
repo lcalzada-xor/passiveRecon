@@ -49,35 +49,112 @@ func TestClassifyEndpoint(t *testing.T) {
 		input      string
 		wantJS     bool
 		wantHTML   bool
+		wantCSS    bool
+		wantPDF    bool
+		wantDoc    bool
+		wantFont   bool
+		wantVideo  bool
+		wantArchive bool
+		wantXML    bool
 		undetected bool
 		wantImage  bool
 		wantCats   []routes.Category
 	}{
+		// JavaScript
 		{name: "javascript absolute", input: "https://example.com/app/main.js", wantJS: true, wantCats: []routes.Category{routes.CategoryJS}},
+		{name: "typescript", input: "https://example.com/app.ts", wantJS: true, wantCats: []routes.Category{}}, // TS no tiene categoria especial
+		{name: "module js", input: "https://example.com/app.mjs", wantJS: true, wantCats: []routes.Category{routes.CategoryJS}},
+
+		// HTML
 		{name: "html absolute", input: "https://example.com/index.html", wantHTML: true, wantCats: []routes.Category{routes.CategoryHTML}},
+		{name: "php", input: "https://example.com/index.php", wantHTML: true, wantCats: []routes.Category{}}, // PHP no tiene categoría especial
+		{name: "jsp", input: "https://example.com/page.jsp", wantHTML: true, wantCats: []routes.Category{}}, // JSP no tiene categoría especial
+
+		// CSS
+		{name: "css file", input: "https://example.com/style.css", wantCSS: true, wantCats: []routes.Category{routes.CategoryCSS}},
+		{name: "scss file", input: "https://example.com/style.scss", wantCSS: true, wantCats: []routes.Category{}}, // SCSS no tiene categoría especial
+		{name: "sass file", input: "https://example.com/style.sass", wantCSS: true, wantCats: []routes.Category{}}, // SASS no tiene categoría especial
+
+		// PDF
+		{name: "pdf document", input: "https://example.com/doc.pdf", wantPDF: true, wantCats: []routes.Category{routes.CategoryDocs}},
+		{name: "pdf with query", input: "https://example.com/report.pdf?v=1", wantPDF: true, wantCats: []routes.Category{routes.CategoryDocs}},
+
+		// Documentos
+		{name: "word doc", input: "https://example.com/file.docx", wantDoc: true, wantCats: []routes.Category{routes.CategoryDocs}},
+		{name: "excel", input: "https://example.com/data.xlsx", wantDoc: true, wantCats: []routes.Category{routes.CategoryDocs}},
+		{name: "powerpoint", input: "https://example.com/presentation.pptx", wantDoc: true, wantCats: []routes.Category{routes.CategoryDocs}},
+		{name: "text file", input: "https://example.com/readme.txt", wantDoc: true, wantCats: []routes.Category{routes.CategoryDocs}},
+
+		// Fuentes
+		{name: "woff font", input: "https://example.com/font.woff", wantFont: true, wantCats: []routes.Category{routes.CategoryFonts}},
+		{name: "woff2 font", input: "https://example.com/font.woff2", wantFont: true, wantCats: []routes.Category{routes.CategoryFonts}},
+		{name: "ttf font", input: "https://example.com/font.ttf", wantFont: true, wantCats: []routes.Category{routes.CategoryFonts}},
+
+		// Video
+		{name: "mp4 video", input: "https://example.com/video.mp4", wantVideo: true, wantCats: []routes.Category{routes.CategoryVideo}},
+		{name: "webm video", input: "https://example.com/clip.webm", wantVideo: true, wantCats: []routes.Category{routes.CategoryVideo}},
+
+		// Archivos comprimidos
+		{name: "zip archive", input: "https://example.com/data.zip", wantArchive: true, wantCats: []routes.Category{routes.CategoryArchives}},
+		{name: "tar.gz archive", input: "https://example.com/backup.tar.gz", wantArchive: true, wantCats: []routes.Category{routes.CategoryArchives, routes.CategoryMeta}}, // .gz también es meta
+		{name: "rar archive", input: "https://example.com/files.rar", wantArchive: true, wantCats: []routes.Category{routes.CategoryArchives}},
+
+		// XML
+		{name: "xml file", input: "https://example.com/sitemap.xml", wantXML: true, wantCats: []routes.Category{routes.CategoryCrawl}},
+		{name: "rss feed", input: "https://example.com/feed", wantXML: false, wantCats: []routes.Category{routes.CategoryFeeds}}, // /feed path es detectado como feed
+
+		// Imágenes
 		{name: "image absolute", input: "https://example.com/static/logo.png", wantImage: true, wantCats: []routes.Category{routes.CategoryImages}},
-		{name: "relative path", input: "api/v1/users", undetected: true, wantCats: []routes.Category{routes.CategoryAPI}},
+		{name: "jpg image", input: "https://example.com/photo.jpg", wantImage: true, wantCats: []routes.Category{routes.CategoryImages}},
+		{name: "webp image", input: "https://example.com/modern.webp", wantImage: true, wantCats: []routes.Category{routes.CategoryImages}},
 		{name: "svg relative", input: "logo.svg", undetected: true, wantImage: true, wantCats: []routes.Category{routes.CategorySVG}},
+		{name: "svg absolute", input: "https://example.com/icon.svg", wantImage: true, wantCats: []routes.Category{routes.CategorySVG}},
+
+		// Casos especiales
+		{name: "relative path", input: "api/v1/users", undetected: true, wantCats: []routes.Category{routes.CategoryAPI}},
 		{name: "wasm", input: "https://example.com/app.wasm", wantCats: []routes.Category{routes.CategoryWASM}},
+		{name: "json config", input: "https://example.com/config.json", wantCats: []routes.Category{routes.CategoryJSON, routes.CategoryMeta}},
+		{name: "openapi spec", input: "https://example.com/openapi.json", wantCats: []routes.Category{routes.CategoryAPI}}, // openapi es API, el JSON ya está implícito
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := classifyEndpoint(tt.input)
 			if got.isJS != tt.wantJS {
-				t.Fatalf("isJS mismatch: got %v want %v", got.isJS, tt.wantJS)
+				t.Errorf("isJS mismatch: got %v want %v", got.isJS, tt.wantJS)
 			}
 			if got.isHTML != tt.wantHTML {
-				t.Fatalf("isHTML mismatch: got %v want %v", got.isHTML, tt.wantHTML)
+				t.Errorf("isHTML mismatch: got %v want %v", got.isHTML, tt.wantHTML)
+			}
+			if got.isCSS != tt.wantCSS {
+				t.Errorf("isCSS mismatch: got %v want %v", got.isCSS, tt.wantCSS)
+			}
+			if got.isPDF != tt.wantPDF {
+				t.Errorf("isPDF mismatch: got %v want %v", got.isPDF, tt.wantPDF)
+			}
+			if got.isDoc != tt.wantDoc {
+				t.Errorf("isDoc mismatch: got %v want %v", got.isDoc, tt.wantDoc)
+			}
+			if got.isFont != tt.wantFont {
+				t.Errorf("isFont mismatch: got %v want %v", got.isFont, tt.wantFont)
+			}
+			if got.isVideo != tt.wantVideo {
+				t.Errorf("isVideo mismatch: got %v want %v", got.isVideo, tt.wantVideo)
+			}
+			if got.isArchive != tt.wantArchive {
+				t.Errorf("isArchive mismatch: got %v want %v", got.isArchive, tt.wantArchive)
+			}
+			if got.isXML != tt.wantXML {
+				t.Errorf("isXML mismatch: got %v want %v", got.isXML, tt.wantXML)
 			}
 			if got.undetected != tt.undetected {
-				t.Fatalf("undetected mismatch: got %v want %v", got.undetected, tt.undetected)
+				t.Errorf("undetected mismatch: got %v want %v", got.undetected, tt.undetected)
 			}
 			if got.isImage != tt.wantImage {
-				t.Fatalf("isImage mismatch: got %v want %v", got.isImage, tt.wantImage)
+				t.Errorf("isImage mismatch: got %v want %v", got.isImage, tt.wantImage)
 			}
 			if diff := cmp.Diff(tt.wantCats, got.categories); diff != "" {
-				t.Fatalf("categories mismatch (-want +got):\n%s", diff)
+				t.Errorf("categories mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -113,17 +190,17 @@ func TestEmitLinkfinderFindingsFeedsCategories(t *testing.T) {
 		"active: https://example.com/app.wasm",
 		"active: https://example.com/config.json",
 		"active: https://example.com/openapi.json",
-		"active: https://example.com/sitemap.xml",
-		"active: https://example.com/static/app.js",
+		// sitemap.xml ya no se emite como "active: " porque tiene tipo específico xml
+		// app.js ya no se emite como "active: " porque tiene tipo específico js
 		"active: api: https://example.com/openapi.json",
 		"active: crawl: https://example.com/sitemap.xml",
 		"active: html: logo.svg",
 		"active: js: https://example.com/static/app.js",
 		"active: json: https://example.com/config.json",
 		"active: meta-route: https://example.com/config.json",
-		"active: logo.svg",
 		"active: svg: logo.svg",
 		"active: wasm: https://example.com/app.wasm",
+		"active: xml: https://example.com/sitemap.xml",
 	}
 
 	sort.Strings(wantLines)
@@ -136,13 +213,11 @@ func TestEmitLinkfinderFindingsFeedsCategories(t *testing.T) {
 		t.Fatalf("unexpected undetected entries (-want +got):\n%s", diff)
 	}
 
+	// Routes ya no incluye archivos con tipos específicos (js, xml, image)
 	if diff := cmp.Diff([]string{
 		"https://example.com/app.wasm",
 		"https://example.com/config.json",
 		"https://example.com/openapi.json",
-		"https://example.com/sitemap.xml",
-		"https://example.com/static/app.js",
-		"logo.svg",
 	}, sortedCopy(result.Routes)); diff != "" {
 		t.Fatalf("unexpected routes list (-want +got):\n%s", diff)
 	}

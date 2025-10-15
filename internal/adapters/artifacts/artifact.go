@@ -744,11 +744,27 @@ func canonicalRouteKey(value string) string {
 }
 
 func keyCategory(typ string) string {
-	switch strings.TrimSpace(typ) {
-	case "", "route", "html", "js", "image", "maps", "json", "api", "wasm", "svg", "crawl", "meta-route":
+	trimmed := strings.TrimSpace(typ)
+	switch trimmed {
+	// Tipos que se agrupan como "route" (endpoints generales)
+	// Incluye html, js, css, pdf, doc, font, video, archive, xml porque son recursos web
+	case "", "route", "html", "js", "css", "pdf", "doc", "font", "video", "archive", "xml", "crawl", "meta-route":
 		return "route"
+
+	// Imágenes y formatos visuales
+	case "image", "svg":
+		return "image"
+
+	// APIs y datos estructurados
+	case "json", "api", "graphql":
+		return "api"
+
+	// Otros tipos especializados (mantienen su identidad)
+	case "maps", "wasm", "keyFinding", "gfFinding":
+		return trimmed
+
 	default:
-		return strings.TrimSpace(typ)
+		return trimmed
 	}
 }
 
