@@ -1271,6 +1271,89 @@ func TestHandleRelationParsesDNSRecords(t *testing.T) {
 	}
 }
 
+func TestHandleDNSXRecordsParsed(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink, err := NewSink(dir, true, "example.com", "subdomains", LineBufferSize(1))
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	sink.Start(1)
+
+	// Simulate dnsx output with JSON records
+	dnsRecordA := `{"host":"example.com","type":"A","value":"93.184.216.34","raw":"example.com. 86400 IN A 93.184.216.34"}`
+	dnsRecordCNAME := `{"host":"www.example.com","type":"CNAME","value":"example.com","raw":"www.example.com. 3600 IN CNAME example.com"}`
+
+	sink.In() <- "active: dns: " + dnsRecordA
+	sink.In() <- "active: dns: " + dnsRecordCNAME
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	artifacts := readArtifactsFile(t, filepath.Join(dir, "artifacts.jsonl"))
+
+	// Verify A record artifact
+	aArtifact := findDNSXArtifact(t, artifacts, "A", "93.184.216.34", "example.com", true)
+	if !aArtifact.Up {
+		t.Fatalf("expected A record artifact to be valid")
+	}
+	// Check that Value is clean (not double-encoded JSON)
+	expectedAValue := "example.com [A] 93.184.216.34"
+	if aArtifact.Value != expectedAValue {
+		t.Fatalf("unexpected A record value: got %q, want %q", aArtifact.Value, expectedAValue)
+	}
+	// Verify metadata contains detailed info
+	if aArtifact.Metadata["host"] != "example.com" {
+		t.Fatalf("unexpected A record host metadata: %#v", aArtifact.Metadata["host"])
+	}
+	if aArtifact.Metadata["type"] != "A" {
+		t.Fatalf("unexpected A record type metadata: %#v", aArtifact.Metadata["type"])
+	}
+	if aArtifact.Metadata["value"] != "93.184.216.34" {
+		t.Fatalf("unexpected A record value metadata: %#v", aArtifact.Metadata["value"])
+	}
+	if aArtifact.Metadata["raw"] != "example.com. 86400 IN A 93.184.216.34" {
+		t.Fatalf("unexpected A record raw metadata: %#v", aArtifact.Metadata["raw"])
+	}
+
+	// Verify CNAME record artifact
+	cnameArtifact := findDNSXArtifact(t, artifacts, "CNAME", "example.com", "www.example.com", true)
+	if !cnameArtifact.Up {
+		t.Fatalf("expected CNAME record artifact to be valid")
+	}
+	expectedCNAMEValue := "www.example.com [CNAME] example.com"
+	if cnameArtifact.Value != expectedCNAMEValue {
+		t.Fatalf("unexpected CNAME record value: got %q, want %q", cnameArtifact.Value, expectedCNAMEValue)
+	}
+}
+
+func findDNSXArtifact(t *testing.T, artifacts []Artifact, recordType, value, host string, active bool) Artifact {
+	t.Helper()
+	for _, art := range artifacts {
+		if art.Type != "dns" || art.Active != active {
+			continue
+		}
+		if art.Metadata == nil {
+			continue
+		}
+		if art.Metadata["type"] != recordType {
+			continue
+		}
+		if art.Metadata["value"] != value {
+			continue
+		}
+		if art.Metadata["host"] != host {
+			continue
+		}
+		return art
+	}
+	t.Fatalf("DNS artifact not found: type=%q value=%q host=%q active=%v", recordType, value, host, active)
+	return Artifact{}
+}
+
 func findDNSArtifact(artifacts []Artifact, recordType, value string) (Artifact, bool) {
 	for _, art := range artifacts {
 		if art.Type != "dns" || art.Active {
