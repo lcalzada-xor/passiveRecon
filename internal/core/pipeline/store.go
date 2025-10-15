@@ -52,8 +52,6 @@ func (rec *artifactRecord) addTool(tool string) {
 		rec.Tools = make(map[string]struct{})
 	}
 	rec.Tools[tool] = struct{}{}
-	// DEBUG
-	// fmt.Printf("addTool: %s, tools now: %v\n", tool, rec.Tools)
 }
 
 type jsonlStore struct {
@@ -394,13 +392,13 @@ type artifactMessage struct {
 
 // asyncStore envuelve un ArtifactStore y procesa Records de forma asíncrona.
 type asyncStore struct {
-	inner      ArtifactStore
-	queue      chan artifactMessage
-	done       chan struct{}
-	wg         sync.WaitGroup
-	closed     bool
-	mu         sync.Mutex
-	queueSize  int32 // Contador atómico de mensajes en cola
+	inner     ArtifactStore
+	queue     chan artifactMessage
+	done      chan struct{}
+	wg        sync.WaitGroup
+	closed    bool
+	mu        sync.Mutex
+	queueSize int32 // Contador atómico de mensajes en cola
 }
 
 func newAsyncStore(inner ArtifactStore) *asyncStore {

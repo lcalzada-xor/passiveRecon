@@ -10,8 +10,14 @@ func normalizeScope(target string) string {
 	return urlutil.NormalizeScope(target)
 }
 
-func buildArgs(inputPath, target, rawPath, htmlPath, jsonPath string) []string {
-	args := []string{"-i", inputPath, "-d", "-max-depth", "2", "--insecure"}
+func buildArgs(inputPath, target, rawPath, htmlPath, jsonPath, inputType string) []string {
+	// Determinar el valor de recursive según el tipo de input
+	recursiveDepth := "2"
+	if inputType == "crawl" {
+		recursiveDepth = "4"
+	}
+
+	args := []string{"-i", inputPath, "-recursive", recursiveDepth, "--insecure"}
 	if scope := normalizeScope(target); scope != "" {
 		args = append(args, "-scope", scope, "--scope-include-subdomains")
 	}

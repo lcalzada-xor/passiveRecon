@@ -8,10 +8,10 @@ import (
 
 // Scope representa los límites canónicos de un escaneo.
 type Scope struct {
-	hostname      string // host normalizado tal cual lo dio el usuario (subdominios incluidos)
-	ip            net.IP // si el objetivo es una IP
-	mode          string // "domain" o "subdomains" (por defecto "subdomains")
-	strictDomain  bool   // true si mode == "domain", rechaza subdominios
+	hostname     string // host normalizado tal cual lo dio el usuario (subdominios incluidos)
+	ip           net.IP // si el objetivo es una IP
+	mode         string // "domain" o "subdomains" (por defecto "subdomains")
+	strictDomain bool   // true si mode == "domain", rechaza subdominios
 }
 
 // NewScope construye un Scope desde el target dado. Si no se puede

@@ -157,7 +157,7 @@ func Run(ctx context.Context, target string, outdir string, out chan<- string) e
 		htmlPath := filepath.Join(tmpDir, "findings.html")
 		jsonPath := filepath.Join(tmpDir, "findings.json")
 
-		args := buildArgs(absPath, target, rawPath, htmlPath, jsonPath)
+		args := buildArgs(absPath, target, rawPath, htmlPath, jsonPath, input.label)
 
 		// Drenaje de salida CLI para evitar bloqueo.
 		intermediate := make(chan string)

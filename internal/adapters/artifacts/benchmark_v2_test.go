@@ -16,16 +16,16 @@ func generateTestArtifacts(count int) []Artifact {
 
 	for i := 0; i < count; i++ {
 		artifacts[i] = Artifact{
-			Type:      "route",
-			Value:     "/api/v1/users/123",
-			Active:    true,
-			Up:        true,
-			Tool:      "linkfinderevo",
-			Tools:     []string{"linkfinderevo", "httpx"},
+			Type:        "route",
+			Value:       "/api/v1/users/123",
+			Active:      true,
+			Up:          true,
+			Tool:        "linkfinderevo",
+			Tools:       []string{"linkfinderevo", "httpx"},
 			Occurrences: 3,
-			FirstSeen: baseTime.Format(time.RFC3339),
-			LastSeen:  baseTime.Add(time.Second * 60).Format(time.RFC3339),
-			Version:   "1.0",
+			FirstSeen:   baseTime.Format(time.RFC3339),
+			LastSeen:    baseTime.Add(time.Second * 60).Format(time.RFC3339),
+			Version:     "1.0",
 			Metadata: map[string]any{
 				"source": "crawl",
 				"raw":    []string{"/api/v1/users/123 [200]", "/api/v1/users/123 [GET]"},

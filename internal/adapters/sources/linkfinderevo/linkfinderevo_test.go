@@ -256,7 +256,7 @@ func TestEmitLinkfinderGFFindings(t *testing.T) {
 }
 
 func TestBuildLinkfinderArgsIncludesGF(t *testing.T) {
-	args := buildArgs("input", "example.com", "raw", "html", "json")
+	args := buildArgs("input", "example.com", "raw", "html", "json", "html")
 	found := false
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--gf" && i+1 < len(args) && args[i+1] == "all" {
@@ -266,6 +266,36 @@ func TestBuildLinkfinderArgsIncludesGF(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected buildArgs to include --gf all, got %v", args)
+	}
+}
+
+func TestBuildArgsUsesCorrectRecursiveDepth(t *testing.T) {
+	tests := []struct {
+		inputType string
+		wantDepth string
+	}{
+		{inputType: "html", wantDepth: "2"},
+		{inputType: "js", wantDepth: "2"},
+		{inputType: "crawl", wantDepth: "4"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.inputType, func(t *testing.T) {
+			args := buildArgs("input", "example.com", "raw", "html", "json", tt.inputType)
+			found := false
+			for i := 0; i < len(args); i++ {
+				if args[i] == "-recursive" && i+1 < len(args) {
+					if args[i+1] != tt.wantDepth {
+						t.Fatalf("expected recursive depth %s for %s, got %s", tt.wantDepth, tt.inputType, args[i+1])
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("expected buildArgs to include -recursive for %s, got %v", tt.inputType, args)
+			}
+		})
 	}
 }
 
@@ -326,9 +356,9 @@ func TestPersistLinkfinderActiveOutputsMergesEntries(t *testing.T) {
 		HTML:   []string{"https://example.com/index.html"},
 		Images: []string{"https://example.com/logo.png"},
 		Categories: map[routes.Category][]string{
-			routes.CategoryJSON:  []string{"https://example.com/config.json"},
-			routes.CategorySVG:   []string{"https://example.com/icon.svg"},
-			routes.CategoryCrawl: []string{"https://example.com/sitemap.xml"},
+			routes.CategoryJSON:  {"https://example.com/config.json"},
+			routes.CategorySVG:   {"https://example.com/icon.svg"},
+			routes.CategoryCrawl: {"https://example.com/sitemap.xml"},
 		},
 	}
 

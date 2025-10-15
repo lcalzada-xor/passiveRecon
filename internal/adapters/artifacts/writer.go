@@ -10,11 +10,11 @@ import (
 
 // WriterV2 escribe artifacts en formato v2.0 (compacto).
 type WriterV2 struct {
-	path        string
-	baseTime    time.Time
+	path          string
+	baseTime      time.Time
 	headerWritten bool
-	target      string
-	tools       []string
+	target        string
+	tools         []string
 }
 
 // NewWriterV2 crea un nuevo writer para formato v2.

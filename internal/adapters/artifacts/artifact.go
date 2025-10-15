@@ -52,11 +52,11 @@ type Key struct {
 // HeaderV2 representa la primera línea del archivo artifacts v2.
 // Contiene metadata global del scan y configuración.
 type HeaderV2 struct {
-	Schema    string `json:"$"`              // Schema version (always "2.0")
-	Created   int64  `json:"@"`              // Unix timestamp (epoch seconds)
-	Target    string `json:"target"`         // Target domain/IP
-	Tools     []string `json:"tools,omitempty"` // Catálogo de tools usadas (opcional)
-	Aliases   map[string]string `json:"aliases,omitempty"` // Aliases para valores comunes (opcional)
+	Schema  string            `json:"$"`                 // Schema version (always "2.0")
+	Created int64             `json:"@"`                 // Unix timestamp (epoch seconds)
+	Target  string            `json:"target"`            // Target domain/IP
+	Tools   []string          `json:"tools,omitempty"`   // Catálogo de tools usadas (opcional)
+	Aliases map[string]string `json:"aliases,omitempty"` // Aliases para valores comunes (opcional)
 }
 
 // ArtifactV2 representa un hallazgo en formato v2 (compacto).
@@ -74,22 +74,22 @@ type ArtifactV2 struct {
 
 // CertificateV2 representa un certificado SSL/TLS en formato compacto.
 type CertificateV2 struct {
-	CN  string   `json:"cn"`            // Common Name
-	DNS []string `json:"dns,omitempty"` // DNS Names
-	Iss string   `json:"iss"`           // Issuer (puede ser alias o completo)
-	NB  string   `json:"nb"`            // Not Before (formato: YYYY-MM-DD o full timestamp)
-	NA  string   `json:"na"`            // Not After
-	SN  string   `json:"sn"`            // Serial Number (truncado a 16 chars si es muy largo)
+	CN  string   `json:"cn"`               // Common Name
+	DNS []string `json:"dns,omitempty"`    // DNS Names
+	Iss string   `json:"iss"`              // Issuer (puede ser alias o completo)
+	NB  string   `json:"nb"`               // Not Before (formato: YYYY-MM-DD o full timestamp)
+	NA  string   `json:"na"`               // Not After
+	SN  string   `json:"sn"`               // Serial Number (truncado a 16 chars si es muy largo)
 	Src string   `json:"source,omitempty"` // Source (opcional)
 }
 
 // GFFindingV2 representa un hallazgo de gf/pattern matching en formato compacto.
 type GFFindingV2 struct {
-	Res  string   `json:"res"`          // Resource (URL)
-	Ev   string   `json:"ev"`           // Evidence
-	L    int      `json:"l,omitempty"`  // Line number
-	Ctx  string   `json:"ctx,omitempty"` // Context (opcional, puede omitirse si es muy largo)
-	R    []string `json:"r,omitempty"`  // Rules matched
+	Res string   `json:"res"`           // Resource (URL)
+	Ev  string   `json:"ev"`            // Evidence
+	L   int      `json:"l,omitempty"`   // Line number
+	Ctx string   `json:"ctx,omitempty"` // Context (opcional, puede omitirse si es muy largo)
+	R   []string `json:"r,omitempty"`   // Rules matched
 }
 
 // ToV2 convierte un Artifact v1 a ArtifactV2 (formato compacto).
@@ -396,11 +396,11 @@ func gfFindingToCompact(value string, metadata map[string]any) GFFindingV2 {
 func compactIssuer(issuer string) string {
 	// Mapeo de issuers comunes a aliases cortos
 	commonIssuers := map[string]string{
-		"C=US, O=Google Trust Services, CN=WR3":                 "GTS_WR3",
-		"C=US, O=Google Trust Services LLC, CN=GTS CA 1D4":      "GTS_1D4",
-		"C=US, O=Google Trust Services, CN=GTS CA 1D2":          "GTS_1D2",
-		"C=US, O=Let's Encrypt, CN=Let's Encrypt Authority X3":  "LE_X3",
-		"C=US, O=Let's Encrypt, CN=R3":                          "LE_R3",
+		"C=US, O=Google Trust Services, CN=WR3":                "GTS_WR3",
+		"C=US, O=Google Trust Services LLC, CN=GTS CA 1D4":     "GTS_1D4",
+		"C=US, O=Google Trust Services, CN=GTS CA 1D2":         "GTS_1D2",
+		"C=US, O=Let's Encrypt, CN=Let's Encrypt Authority X3": "LE_X3",
+		"C=US, O=Let's Encrypt, CN=R3":                         "LE_R3",
 	}
 
 	if alias, ok := commonIssuers[issuer]; ok {
