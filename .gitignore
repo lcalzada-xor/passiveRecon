@@ -129,6 +129,18 @@ censys_*.txt
 shodan_*.txt
 
 ################################################################################
+# Configuration files
+################################################################################
+
+# User-specific configuration (keep examples)
+config.yaml
+config.yml
+config.json
+!config.example.yaml
+!config.example.yml
+!config.example.json
+
+################################################################################
 # Editor and IDE
 ################################################################################
 

@@ -208,7 +208,28 @@ func ParseFlags() *Config {
 		cfg.OutDir = "."
 	}
 
+	// Validar scope
+	if err := validateScope(cfg.Scope); err != nil {
+		log.Fatalf("configuración inválida: %v", err)
+	}
+
 	return cfg
+}
+
+// validateScope verifica que el valor de scope sea válido
+func validateScope(scope string) error {
+	scope = strings.ToLower(strings.TrimSpace(scope))
+	if scope == "" {
+		return errors.New("scope no puede estar vacío")
+	}
+	validScopes := map[string]bool{
+		"subdomains": true,
+		"domain":     true,
+	}
+	if !validScopes[scope] {
+		return fmt.Errorf("scope inválido: %q (valores permitidos: 'subdomains', 'domain')", scope)
+	}
+	return nil
 }
 
 func loadConfigFile(path string) (*fileConfig, error) {

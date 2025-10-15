@@ -1,0 +1,52 @@
+# passiveRecon Configuration Example
+# Copy to config.yaml and customize for your needs
+# CLI flags override these values
+
+# Target domain to enumerate (required)
+target: example.com
+
+# Output directory for results
+outdir: ./output
+
+# Number of concurrent workers
+workers: 6
+
+# Enable active verification (dnsx, httpx, linkfinderevo)
+active: false
+
+# Tools to execute (comma-separated or list format)
+tools:
+  - amass
+  - subfinder
+  - assetfinder
+  - rdap
+  - crtsh
+  - dedupe
+  - dnsx
+  - waybackurls
+  - gau
+  - httpx
+  - subjs
+  - linkfinderevo
+
+# Timeout per tool in seconds
+timeout: 120
+
+# Verbosity level (0=silent, 1=info, 2=debug, 3=trace)
+verbosity: 1
+
+# Generate HTML report
+report: false
+
+# Proxy configuration (optional)
+# proxy: http://127.0.0.1:8080
+
+# Custom CA certificate for MITM proxies (optional)
+# proxy_ca: ~/.config/burp/ca-cert.pem
+
+# Censys API credentials (optional, can use environment variables)
+# censys_api_id: "${CENSYS_API_ID}"
+# censys_api_secret: "${CENSYS_API_SECRET}"
+
+# Scope mode: 'subdomains' (includes subdomains) or 'domain' (exact domain only)
+scope: subdomains
