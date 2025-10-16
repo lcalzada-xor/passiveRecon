@@ -38,6 +38,10 @@ type Config struct {
 	Scope              string
 	Resume             bool // Reanudar desde checkpoint
 	CheckpointInterval int  // Intervalo de checkpoint en segundos
+	// Logging options
+	NoColor    bool
+	Compact    bool
+	LogWidth   int
 }
 
 type fileConfig struct {
@@ -125,6 +129,10 @@ func ParseFlags() *Config {
 	scope := flag.String("scope", "subdomains", "Modo de scope: 'subdomains' (incluye subdominios) o 'domain' (solo dominio exacto)")
 	resume := flag.Bool("resume", false, "Reanudar desde último checkpoint")
 	checkpointInterval := flag.Int("checkpoint-interval", 30, "Intervalo de checkpoint en segundos")
+	// Logging flags
+	noColor := flag.Bool("no-color", false, "Desactivar colores ANSI")
+	compact := flag.Bool("compact", false, "Modo de logs compacto")
+	logWidth := flag.Int("width", 120, "Ancho de salida para logs")
 
 	flag.Parse()
 
@@ -152,6 +160,9 @@ func ParseFlags() *Config {
 		Scope:              strings.TrimSpace(*scope),
 		Resume:             *resume,
 		CheckpointInterval: *checkpointInterval,
+		NoColor:            *noColor,
+		Compact:            *compact,
+		LogWidth:           *logWidth,
 	}
 
 	var fileCfg *fileConfig

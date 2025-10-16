@@ -13,7 +13,15 @@ import (
 func main() {
 	cfg := config.ParseFlags()
 
+	// Aplicar configuración de logging
 	logx.SetVerbosity(cfg.Verbosity)
+	logx.ApplyCliFlags(logx.CliFlags{
+		NoColor:   cfg.NoColor,
+		Compact:   cfg.Compact,
+		Verbosity: getVerbosityString(cfg.Verbosity),
+		Width:     cfg.LogWidth,
+	})
+
 	if err := config.ApplyProxy(cfg.Proxy); err != nil {
 		logx.Error("Error configurando proxy", logx.Fields{"error": err.Error()})
 		os.Exit(1)
@@ -47,4 +55,19 @@ func main() {
 		os.Exit(1)
 	}
 	logx.Info("Ejecución completada", logx.Fields{"outdir": cfg.OutDir})
+}
+
+func getVerbosityString(level int) string {
+	switch level {
+	case 0:
+		return "info"
+	case 1:
+		return "info"
+	case 2:
+		return "debug"
+	case 3:
+		return "trace"
+	default:
+		return "info"
+	}
 }
