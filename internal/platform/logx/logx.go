@@ -31,6 +31,7 @@ type Config struct {
 	formatter  *LogFormatter
 	level      Level
 	outputCfg  OutputConfig
+	output     io.Writer
 	groupTrack *GroupTracker
 }
 
@@ -43,6 +44,7 @@ var cfg = &Config{
 	formatter: NewLogFormatter(true),
 	level:     LevelInfo,
 	outputCfg: DetectOutput(os.Stderr),
+	output:    os.Stderr,
 }
 
 var sampleRates = map[string]int{
@@ -128,6 +130,7 @@ func SetOutput(w io.Writer) {
 		TimeFormat: "15:04:05",
 		NoColor:    false,
 	}).With().Timestamp().Logger()
+	cfg.output = w
 }
 
 // AddOutput no soportado directamente en zerolog, usar MultiLevelWriter en caller
@@ -150,6 +153,8 @@ func AddOutput(w io.Writer) {
 
 	cfg.logger = zerolog.New(multi).With().Timestamp().Logger()
 	SetLevel(cfg.level)
+	// Mantener os.Stderr como salida interactiva principal
+	cfg.output = os.Stderr
 }
 
 // EnableColors activa/desactiva colores ANSI
@@ -167,6 +172,7 @@ func EnableColors(enabled bool) {
 	// Actualizar formatter
 	cfg.formatter.EnableColors(enabled)
 	cfg.outputCfg.NoColor = !enabled
+	cfg.output = os.Stderr
 }
 
 // SetJSON habilita output JSON estructurado
@@ -183,6 +189,7 @@ func SetJSON(enabled bool) {
 			NoColor:    false,
 		}).With().Timestamp().Logger()
 	}
+	cfg.output = os.Stderr
 }
 
 // SetCaller habilita mostrar archivo:línea
@@ -193,6 +200,19 @@ func SetCaller(enabled bool) {
 	if enabled {
 		cfg.logger = cfg.logger.With().Caller().Logger()
 	}
+}
+
+// GetOutputWriter devuelve el writer actual asociado al logger.
+// Se utiliza por componentes auxiliares (como los spinners) para
+// respetar redirecciones temporales del output (ej. progress bar).
+func GetOutputWriter() io.Writer {
+	cfg.mu.RLock()
+	defer cfg.mu.RUnlock()
+
+	if cfg.output != nil {
+		return cfg.output
+	}
+	return os.Stderr
 }
 
 // SetTimeFormat cambia formato de timestamp (no-op en zerolog, usa formato fijo)
