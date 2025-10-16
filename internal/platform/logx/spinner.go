@@ -8,15 +8,6 @@ import (
 	"time"
 )
 
-// ANSI escape codes
-const (
-	ansiClearLine     = "\r\033[K"
-	ansiHideCursor    = "\033[?25l"
-	ansiShowCursor    = "\033[?25h"
-	ansiSaveCursor    = "\0337"
-	ansiRestoreCursor = "\0338"
-)
-
 // Spinner gestiona un indicador de progreso animado
 type Spinner struct {
 	mu          sync.Mutex
@@ -27,9 +18,9 @@ type Spinner struct {
 	stoppedCh   chan struct{}
 	writer      io.Writer
 	prefix      string
-	lastLine    string
 	isTTY       bool
 	refreshRate time.Duration
+	manager     *spinnerManager
 }
 
 // NewSpinner crea un nuevo spinner
@@ -37,16 +28,22 @@ func NewSpinner(prefix string) *Spinner {
 	// Detectar si estamos en TTY
 	isTTY := IsTerminal(os.Stderr)
 
+	writer := GetOutputWriter()
+	if writer == nil {
+		writer = os.Stderr
+	}
+
 	return &Spinner{
 		frames:      SpinnerFrames,
 		frameIndex:  0,
 		active:      false,
 		stopCh:      make(chan struct{}),
 		stoppedCh:   make(chan struct{}),
-		writer:      os.Stderr,
+		writer:      writer,
 		prefix:      prefix,
 		isTTY:       isTTY,
 		refreshRate: 100 * time.Millisecond,
+		manager:     defaultSpinnerManager,
 	}
 }
 
@@ -63,10 +60,17 @@ func (s *Spinner) Start() {
 	// Si no es TTY, solo imprimir el primer frame y salir
 	if !s.isTTY {
 		s.mu.Lock()
-		fmt.Fprintf(s.writer, "%s %s\n", SpinnerFrames[0], s.prefix)
+		frame := SpinnerFrames[0]
+		formatter := GetFormatter()
+		frame = formatter.colored(colorBlue, frame)
+		fmt.Fprintf(s.writer, "%s %s\n", frame, s.prefix)
 		s.mu.Unlock()
 		close(s.stoppedCh)
 		return
+	}
+
+	if s.manager != nil {
+		s.manager.addSpinner(s)
 	}
 
 	go func() {
@@ -86,18 +90,12 @@ func (s *Spinner) Start() {
 					return
 				}
 
-				// Obtener formatter para aplicar colores
-				formatter := GetFormatter()
-				frame := formatter.colored(colorBlue, s.frames[s.frameIndex])
-
-				// Limpiar línea y escribir nuevo frame
-				line := fmt.Sprintf("\r%s %s", frame, s.prefix)
-				fmt.Fprint(s.writer, line)
-				s.lastLine = line
-
-				// Siguiente frame
 				s.frameIndex = (s.frameIndex + 1) % len(s.frames)
 				s.mu.Unlock()
+
+				if s.manager != nil {
+					s.manager.render()
+				}
 			}
 		}
 	}()
@@ -119,16 +117,18 @@ func (s *Spinner) Stop(finalMsg string) {
 	// Esperar a que termine la goroutine
 	<-s.stoppedCh
 
-	// Escribir mensaje final
 	s.mu.Lock()
-	if s.isTTY {
-		// Limpiar la línea y escribir mensaje final
-		fmt.Fprintf(s.writer, "\r\033[K%s\n", finalMsg)
-	} else {
-		// En modo no-TTY, simplemente imprimir el mensaje en una nueva línea
+	isTTY := s.isTTY
+	s.mu.Unlock()
+
+	if isTTY && s.manager != nil {
+		s.manager.finishSpinner(s, finalMsg)
+		return
+	}
+
+	if finalMsg != "" {
 		fmt.Fprintf(s.writer, "%s\n", finalMsg)
 	}
-	s.mu.Unlock()
 }
 
 // StopSuccess detiene con mensaje de éxito
@@ -148,6 +148,108 @@ func (s *Spinner) StopError(msg string) {
 // UpdatePrefix actualiza el texto del spinner sin detenerlo
 func (s *Spinner) UpdatePrefix(prefix string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.prefix = prefix
+	s.mu.Unlock()
+	if s.isTTY && s.manager != nil {
+		s.manager.render()
+	}
+}
+
+type spinnerManager struct {
+	mu           sync.Mutex
+	renderMu     sync.Mutex
+	spinners     []*Spinner
+	lastRendered int
+}
+
+var defaultSpinnerManager = &spinnerManager{}
+
+func (m *spinnerManager) addSpinner(s *Spinner) {
+	m.mu.Lock()
+	m.spinners = append(m.spinners, s)
+	m.mu.Unlock()
+	m.render()
+}
+
+func (m *spinnerManager) finishSpinner(s *Spinner, finalMsg string) {
+	m.mu.Lock()
+	for i, candidate := range m.spinners {
+		if candidate == s {
+			m.spinners = append(m.spinners[:i], m.spinners[i+1:]...)
+			break
+		}
+	}
+	m.mu.Unlock()
+
+	m.render()
+
+	if finalMsg == "" {
+		return
+	}
+
+	m.renderMu.Lock()
+	defer m.renderMu.Unlock()
+
+	writer := GetOutputWriter()
+	if writer == nil {
+		writer = os.Stderr
+	}
+	fmt.Fprintf(writer, "%s\n", finalMsg)
+}
+
+func (m *spinnerManager) render() {
+	m.mu.Lock()
+	spinners := make([]*Spinner, len(m.spinners))
+	copy(spinners, m.spinners)
+	prevLines := m.lastRendered
+	m.lastRendered = len(spinners)
+	m.mu.Unlock()
+
+	writer := GetOutputWriter()
+	if writer == nil {
+		writer = os.Stderr
+	}
+
+	formatter := GetFormatter()
+
+	var lines []string
+	for _, sp := range spinners {
+		sp.mu.Lock()
+		frame := sp.frames[sp.frameIndex]
+		prefix := sp.prefix
+		sp.mu.Unlock()
+
+		colored := formatter.colored(colorBlue, frame)
+		lines = append(lines, fmt.Sprintf("%s %s", colored, prefix))
+	}
+
+	m.renderMu.Lock()
+	defer m.renderMu.Unlock()
+
+	m.renderLines(writer, lines, prevLines)
+}
+
+func (m *spinnerManager) renderLines(w io.Writer, lines []string, prevLines int) {
+	if prevLines > 0 {
+		for i := 0; i < prevLines; i++ {
+			fmt.Fprint(w, "\033[F")
+		}
+	}
+
+	for _, line := range lines {
+		fmt.Fprint(w, "\r\033[2K")
+		fmt.Fprint(w, line)
+		fmt.Fprint(w, "\n")
+	}
+
+	if prevLines > len(lines) {
+		remaining := prevLines - len(lines)
+		for i := 0; i < remaining; i++ {
+			fmt.Fprint(w, "\r\033[2K\n")
+		}
+	}
+
+	if len(lines) == 0 {
+		fmt.Fprint(w, "\r\033[2K")
+	}
 }
