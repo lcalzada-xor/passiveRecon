@@ -31,6 +31,7 @@ type Config struct {
 	formatter  *LogFormatter
 	level      Level
 	outputCfg  OutputConfig
+	writer     io.Writer
 	groupTrack *GroupTracker
 }
 
@@ -43,6 +44,7 @@ var cfg = &Config{
 	formatter: NewLogFormatter(true),
 	level:     LevelInfo,
 	outputCfg: DetectOutput(os.Stderr),
+	writer:    os.Stderr,
 }
 
 var sampleRates = map[string]int{
@@ -128,6 +130,22 @@ func SetOutput(w io.Writer) {
 		TimeFormat: "15:04:05",
 		NoColor:    false,
 	}).With().Timestamp().Logger()
+	cfg.writer = w
+	prevOutput := cfg.outputCfg
+	detected := DetectOutput(w)
+	if !detected.IsTTY {
+		if _, ok := w.(*os.File); !ok {
+			detected.IsTTY = prevOutput.IsTTY
+			detected.NoColor = prevOutput.NoColor
+		}
+	}
+	cfg.outputCfg = detected
+
+	// Actualizar formatter con la configuración de colores acorde al nuevo writer
+	cfg.formatter.EnableColors(!cfg.outputCfg.NoColor)
+
+	// Informar al administrador de spinners sobre el nuevo writer
+	globalSpinnerManager.SetWriter(w, cfg.outputCfg)
 }
 
 // AddOutput no soportado directamente en zerolog, usar MultiLevelWriter en caller
@@ -167,6 +185,21 @@ func EnableColors(enabled bool) {
 	// Actualizar formatter
 	cfg.formatter.EnableColors(enabled)
 	cfg.outputCfg.NoColor = !enabled
+}
+
+func getOutputWriter() io.Writer {
+	cfg.mu.RLock()
+	defer cfg.mu.RUnlock()
+	if cfg.writer != nil {
+		return cfg.writer
+	}
+	return os.Stderr
+}
+
+func getOutputConfig() OutputConfig {
+	cfg.mu.RLock()
+	defer cfg.mu.RUnlock()
+	return cfg.outputCfg
 }
 
 // SetJSON habilita output JSON estructurado
