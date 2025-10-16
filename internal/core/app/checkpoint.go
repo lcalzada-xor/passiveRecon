@@ -152,7 +152,7 @@ func (m *CheckpointManager) StartAutoSave() {
 				if err := m.Save(); err != nil {
 					logx.Warn("Checkpoint auto-save falló", logx.Fields{"error": err.Error()})
 				} else {
-					logx.Debug("Checkpoint guardado", logx.Fields{
+					logx.Trace("Checkpoint guardado", logx.Fields{
 						"tools": len(m.GetCompletedTools()),
 						"artifacts": m.GetArtifactCount(),
 					})
@@ -167,7 +167,7 @@ func (m *CheckpointManager) StartAutoSave() {
 		}
 	}()
 
-	logx.Debug("Checkpoint auto-save iniciado", logx.Fields{"interval": m.interval.String()})
+	logx.Trace("Checkpoint auto-save iniciado", logx.Fields{"interval": m.interval.String()})
 }
 
 // StopAutoSave detiene el guardado automático.

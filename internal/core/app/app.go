@@ -144,18 +144,18 @@ func Run(cfg *config.Config) error {
 		}
 	}
 	buildStepsDuration := time.Since(buildStepsStart)
-	logx.Debug("Orquestador: armado de steps", logx.Fields{
+	logx.Trace("Orquestador: armado de steps", logx.Fields{
 		"duration_ms": buildStepsDuration.Milliseconds(),
 		"steps_count": len(steps),
 	})
 
 	// Informar al usuario sobre optimización de scope
 	if strings.ToLower(strings.TrimSpace(cfg.Scope)) == "domain" {
-		logx.Info("Scope configurado como 'domain'", logx.Fields{
+		logx.Debug("Scope configurado como 'domain'", logx.Fields{
 			"skip_tools": "amass, subfinder, assetfinder, rdap",
 			"reason": "herramientas de enumeración de subdominios",
 		})
-		logx.Debug("Certificados del dominio exacto", logx.Fields{
+		logx.Trace("Certificados del dominio exacto", logx.Fields{
 			"tools": "crtsh, censys",
 		})
 		// Inyectar el dominio target para que las herramientas restantes tengan algo que procesar
@@ -203,7 +203,7 @@ func Run(cfg *config.Config) error {
 		if err := checkpointMgr.Remove(); err != nil {
 			logx.Warn("Fallo eliminar checkpoint", logx.Fields{"error": err.Error()})
 		} else {
-			logx.Debug("Checkpoint eliminado", logx.Fields{"status": "exitoso"})
+			logx.Trace("Checkpoint eliminado", logx.Fields{"status": "exitoso"})
 		}
 	}
 

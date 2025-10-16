@@ -306,7 +306,7 @@ func logPipelineMetrics(metrics *pipelineMetrics, runHash string, pipelineDurati
 			if reason == "" {
 				reason = "sin motivo reportado"
 			}
-			logx.Info("pipeline_step_skipped", logx.Fields{
+			logx.Debug("pipeline_step_skipped", logx.Fields{
 				"step":        metric.Name,
 				"tool":        metric.Name,
 				"group":       metric.Group,
@@ -349,7 +349,7 @@ func logPipelineMetrics(metrics *pipelineMetrics, runHash string, pipelineDurati
 		if len(metric.Errors) > 0 {
 			fields["errors"] = metric.Errors
 		}
-		logx.Info("pipeline_step", fields)
+		logx.Debug("pipeline_step", fields)
 	}
 
 	if len(durations) == 0 {
@@ -374,7 +374,7 @@ func logPipelineMetrics(metrics *pipelineMetrics, runHash string, pipelineDurati
 		summaryFields["parallel_efficiency"] = round3(speedup / float64(maxConcurrency))
 		summaryFields["max_concurrency"] = maxConcurrency
 	}
-	logx.Info("pipeline_summary", summaryFields)
+	logx.Debug("pipeline_summary", summaryFields)
 }
 
 func writePipelineMetricsReport(outDir string, metrics *pipelineMetrics, pipelineDuration time.Duration) error {

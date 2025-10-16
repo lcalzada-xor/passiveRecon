@@ -3,6 +3,8 @@ package logx
 import (
 	"io"
 	"os"
+
+	"golang.org/x/term"
 )
 
 // OutputConfig gestiona la configuración de salida
@@ -43,7 +45,10 @@ func isTerminal(fd uintptr) bool {
 
 // checkIfTerminal es la implementación real (depende del SO)
 func checkIfTerminal(fd uintptr) bool {
-	// Esto se importaría de golang.org/x/sys/unix en producción
-	// Por ahora, simple heurística
-	return fd == 1 || fd == 2 // stdout o stderr
+	return term.IsTerminal(int(fd))
+}
+
+// IsTerminal verifica si el writer es un terminal (función exportada)
+func IsTerminal(w io.Writer) bool {
+	return isTTY(w)
 }

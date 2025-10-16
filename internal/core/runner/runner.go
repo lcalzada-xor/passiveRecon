@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -118,21 +119,31 @@ func runCommand(ctx context.Context, name string, args []string, out chan<- stri
 		deadlineInfo = logx.FormatDuration(remaining)
 	}
 
-	// Log inicio del comando con formato compacto
+	// Crear spinner para el comando
 	formatter := logx.GetFormatter()
 	cmdID := logx.ShortID("cmd", time.Now().UnixNano()%1000)
-	startLog := formatter.FormatCommandStart(cmdID, name, argsJoined, deadlineInfo)
-	logx.Debugf(startLog)
+
+	// Construir mensaje del spinner
+	idText := formatter.Colored(logx.ColorDimGray, cmdID)
+	cmdText := formatter.Colored(logx.ColorBoldCyan, name)
+	spinnerMsg := fmt.Sprintf("%s %-10s %s", idText, cmdText, argsJoined)
+	if deadlineInfo != "" {
+		spinnerMsg += fmt.Sprintf(" %s", formatter.Colored(logx.ColorDimGray, fmt.Sprintf("(deadline %s)", deadlineInfo)))
+	}
+
+	// Solo mostrar spinner en modo DEBUG
+	var spinner *logx.Spinner
+	if logx.GetLevel() >= logx.LevelDebug {
+		spinner = logx.NewSpinner(spinnerMsg)
+		spinner.Start()
+	}
 
 	// Detalles solo en trace
-	if cmd.Env != nil {
-		logx.Trace("Detalles del comando", logx.Fields{
-			"id": cmdID,
-			"path": cmd.Path,
-			"dir": cmd.Dir,
-			"env_vars": len(cmd.Env),
-		})
-	}
+	logx.Trace("Detalles del comando", logx.Fields{
+		"id": cmdID,
+		"path": cmd.Path,
+		"dir": cmd.Dir,
+	})
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -152,12 +163,12 @@ func runCommand(ctx context.Context, name string, args []string, out chan<- stri
 		return err
 	}
 
-	// Escucha de stderr (debug), con buffer ampliado.
+	// Escucha de stderr (trace), con buffer ampliado.
 	go func() {
 		sc := bufio.NewScanner(stderr)
 		sc.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
 		for sc.Scan() {
-			logx.Debug("Stderr", logx.Fields{"command": name, "output": sc.Text()})
+			logx.Trace("Stderr", logx.Fields{"command": name, "output": sc.Text()})
 		}
 		if e := sc.Err(); e != nil {
 			logx.Trace("Stderr scan error", logx.Fields{"command": name, "error": e.Error()})
@@ -176,7 +187,7 @@ readLoop:
 		// Envío "context-aware" para no quedar bloqueados si out no lee y el ctx se cancela.
 		select {
 		case <-ctx.Done():
-			logx.Warn("Context cancelado", logx.Fields{"command": name})
+			logx.Trace("Context cancelado", logx.Fields{"command": name})
 			break readLoop
 		case out <- line:
 			lines++
@@ -192,7 +203,7 @@ readLoop:
 	// Espera de finalización del proceso.
 	if err := cmd.Wait(); err != nil {
 		if ctx.Err() != nil {
-			logx.Debugf(formatter.FormatCommandError(cmdID, name, "context cancelled"))
+			logx.Tracef(formatter.FormatCommandError(cmdID, name, "context cancelled"))
 		} else {
 			logx.Errorf(formatter.FormatCommandError(cmdID, name, err.Error()))
 			return err
@@ -210,12 +221,31 @@ readLoop:
 		exitCode = state.ExitCode()
 	}
 
-	// Log finalización con formato compacto
-	finishLog := formatter.FormatCommandFinish(cmdID, name, exitCode, duration, lines)
-	if exitCode == 0 {
-		logx.Debugf(finishLog)
-	} else {
-		logx.Warnf(finishLog)
+	// Detener spinner y mostrar resultado
+	if spinner != nil {
+		// Construir mensaje final
+		idText := formatter.Colored(logx.ColorDimGray, cmdID)
+		cmdText := formatter.Colored(logx.ColorBoldCyan, name)
+		durationStr := logx.FormatDuration(duration)
+
+		var parts []string
+		parts = append(parts, fmt.Sprintf("done in %s", durationStr))
+		if exitCode == 0 {
+			parts = append(parts, formatter.Colored(logx.ColorGreen, fmt.Sprintf("exit=%d", exitCode)))
+		} else {
+			parts = append(parts, formatter.Colored(logx.ColorRed, fmt.Sprintf("exit=%d", exitCode)))
+		}
+		if lines > 0 {
+			parts = append(parts, fmt.Sprintf("out=%d", lines))
+		}
+
+		finalMsg := fmt.Sprintf("%s %-10s %s", idText, cmdText, strings.Join(parts, "  "))
+
+		if exitCode == 0 {
+			spinner.StopSuccess(finalMsg)
+		} else {
+			spinner.StopError(finalMsg)
+		}
 	}
 
 	return nil

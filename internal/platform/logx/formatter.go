@@ -9,15 +9,30 @@ import (
 
 // ANSI color codes
 const (
-	colorReset  = "\033[0m"
-	colorBold   = "\033[1m"
-	colorDim    = "\033[2m"
-	colorRed    = "\033[31m"
-	colorGreen  = "\033[32m"
-	colorYellow = "\033[33m"
-	colorBlue   = "\033[34m"
-	colorCyan   = "\033[36m"
-	colorGray   = "\033[37m"
+	colorReset   = "\033[0m"
+	colorBold    = "\033[1m"
+	colorDim     = "\033[2m"
+	colorRed     = "\033[31m"
+	colorGreen   = "\033[32m"
+	colorYellow  = "\033[33m"
+	colorBlue    = "\033[34m"
+	colorMagenta = "\033[35m"
+	colorCyan    = "\033[36m"
+	colorGray    = "\033[37m"
+
+	// Códigos exportados para uso externo
+	ColorReset    = colorReset
+	ColorBold     = colorBold
+	ColorDim      = colorDim
+	ColorRed      = colorRed
+	ColorGreen    = colorGreen
+	ColorYellow   = colorYellow
+	ColorBlue     = colorBlue
+	ColorMagenta  = colorMagenta
+	ColorCyan     = colorCyan
+	ColorGray     = colorGray
+	ColorDimGray  = colorDim + colorGray
+	ColorBoldCyan = colorBold + colorCyan
 )
 
 // LogFormatter gestiona el formato mejorado de logs
@@ -51,22 +66,22 @@ func (f *LogFormatter) Format(level, message string, fields map[string]interface
 	switch level {
 	case "ERR", "error":
 		icon = "⛔"
-		badge = f.colored(colorBold+colorRed, "ERR")
+		badge = f.colored(colorBold+colorRed, "[ERR]")
 	case "WRN", "warn":
 		icon = "⚠"
-		badge = f.colored(colorBold+colorYellow, "WRN")
+		badge = f.colored(colorBold+colorYellow, "[WRN]")
 	case "INF", "info":
 		icon = "✅"
-		badge = f.colored(colorBold+colorGreen, "INF")
+		badge = f.colored(colorBold+colorGreen, "[INF]")
 	case "DBG", "debug":
 		icon = "⚙"
-		badge = f.colored(colorBold+colorBlue, "DBG")
+		badge = f.colored(colorBold+colorMagenta, "[DBG]")
 	case "TRC", "trace":
 		icon = "🔍"
-		badge = f.colored(colorDim+colorGray, "TRC")
+		badge = f.colored(colorDim+colorGray, "[TRC]")
 	default:
 		icon = "•"
-		badge = f.colored(colorGray, "LOG")
+		badge = f.colored(colorGray, "[LOG]")
 	}
 
 	now := time.Now().Format(f.timeFormat)
@@ -197,6 +212,11 @@ func (f *LogFormatter) colored(codes, text string) string {
 	return codes + text + colorReset
 }
 
+// Colored es la versión exportada de colored
+func (f *LogFormatter) Colored(codes, text string) string {
+	return f.colored(codes, text)
+}
+
 // formatSummary formatea un resumen de ejecución
 func (f *LogFormatter) FormatSummary(title string, stats map[string]interface{}) string {
 	sep := f.colored(colorGreen, "─")
@@ -274,15 +294,19 @@ func (f *LogFormatter) FormatPhaseHeader(phase string, metadata map[string]inter
 	return header
 }
 
-// FormatCommandStart formatea el inicio de un comando
-// Ejemplo: ▶ subfinder   -d uvesa.es                 (deadline ~2m)
+// SpinnerFrames contiene los caracteres del spinner
+var SpinnerFrames = []string{"[|]", "[/]", "[-]", "[\\]"}
+
+// FormatCommandStart formatea el inicio de un comando con spinner
+// Ejemplo: [/] cmd#A3 subfinder   -d uvesa.es                 (deadline ~2m)
 func (f *LogFormatter) FormatCommandStart(cmdID, cmd, args string, deadline string) string {
-	arrow := f.colored(colorBlue, "▶")
+	// Usar primer frame del spinner
+	spinner := f.colored(colorBlue, SpinnerFrames[0])
 	cmdText := f.colored(colorBold+colorCyan, cmd)
 	idText := f.colored(colorDim+colorGray, cmdID)
 
 	// Alinear campos
-	line := fmt.Sprintf("%s %s %-10s %s", arrow, idText, cmdText, args)
+	line := fmt.Sprintf("%s %s %-10s %s", spinner, idText, cmdText, args)
 	if deadline != "" {
 		line += fmt.Sprintf(" %s", f.colored(colorDim+colorGray, fmt.Sprintf("(deadline %s)", deadline)))
 	}
@@ -291,9 +315,14 @@ func (f *LogFormatter) FormatCommandStart(cmdID, cmd, args string, deadline stri
 }
 
 // FormatCommandFinish formatea el fin de un comando
-// Ejemplo: ✔ subfinder   done in 18.9s   exit=0  out=3 lines
+// Ejemplo: [✔] cmd#A3 subfinder   done in 18.9s   exit=0  out=3 lines
 func (f *LogFormatter) FormatCommandFinish(cmdID, cmd string, exitCode int, duration time.Duration, output int) string {
-	checkmark := f.colored(colorGreen, "✔")
+	var status string
+	if exitCode == 0 {
+		status = f.colored(colorGreen, "[✔]")
+	} else {
+		status = f.colored(colorRed, "[✗]")
+	}
 	cmdText := f.colored(colorBold+colorCyan, cmd)
 	idText := f.colored(colorDim+colorGray, cmdID)
 	durationStr := FormatDuration(duration)
@@ -309,14 +338,14 @@ func (f *LogFormatter) FormatCommandFinish(cmdID, cmd string, exitCode int, dura
 		parts = append(parts, fmt.Sprintf("out=%d", output))
 	}
 
-	line := fmt.Sprintf("%s %s %-10s %s", checkmark, idText, cmdText, strings.Join(parts, "  "))
+	line := fmt.Sprintf("%s %s %-10s %s", status, idText, cmdText, strings.Join(parts, "  "))
 	return line
 }
 
 // FormatCommandError formatea un error de comando
-// Ejemplo: ✗ cmd#A1 subfinder   error: connection timeout
+// Ejemplo: [✗] cmd#A1 subfinder   error: connection timeout
 func (f *LogFormatter) FormatCommandError(cmdID, cmd, errMsg string) string {
-	cross := f.colored(colorRed, "✗")
+	cross := f.colored(colorRed, "[✗]")
 	cmdText := f.colored(colorBold+colorCyan, cmd)
 	idText := f.colored(colorDim+colorGray, cmdID)
 	errText := f.colored(colorRed, errMsg)

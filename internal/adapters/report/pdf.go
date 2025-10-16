@@ -45,7 +45,7 @@ func tryWkhtmltopdf(htmlPath, pdfPath string) error {
 		return fmt.Errorf("wkhtmltopdf not found")
 	}
 
-	logx.Infof("Generating PDF using wkhtmltopdf...")
+	logx.Debugf("Generating PDF using wkhtmltopdf...")
 
 	cmd := exec.Command("wkhtmltopdf",
 		"--enable-local-file-access",
@@ -64,7 +64,7 @@ func tryWkhtmltopdf(htmlPath, pdfPath string) error {
 		return fmt.Errorf("wkhtmltopdf failed: %w\nOutput: %s", err, string(output))
 	}
 
-	logx.Infof("PDF generated successfully with wkhtmltopdf")
+	logx.Debugf("PDF generated successfully with wkhtmltopdf")
 	return nil
 }
 
@@ -83,7 +83,7 @@ func tryChromium(htmlPath, pdfPath string) error {
 		return fmt.Errorf("chromium/chrome not found")
 	}
 
-	logx.Infof("Generating PDF using %s...", binary)
+	logx.Debugf("Generating PDF using %s...", binary)
 
 	// Convertir a file:// URL absoluta
 	absPath, err := filepath.Abs(htmlPath)
@@ -106,6 +106,6 @@ func tryChromium(htmlPath, pdfPath string) error {
 		return fmt.Errorf("chromium/chrome failed: %w\nOutput: %s", err, string(output))
 	}
 
-	logx.Infof("PDF generated successfully with %s", binary)
+	logx.Debugf("PDF generated successfully with %s", binary)
 	return nil
 }

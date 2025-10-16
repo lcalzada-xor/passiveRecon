@@ -410,6 +410,13 @@ func GetFormatter() *LogFormatter {
 	return cfg.formatter
 }
 
+// GetLevel retorna el nivel actual de logging
+func GetLevel() Level {
+	cfg.mu.RLock()
+	defer cfg.mu.RUnlock()
+	return cfg.level
+}
+
 // GetGroupTracker retorna el rastreador de grupos
 func GetGroupTracker() *GroupTracker {
 	cfg.mu.Lock()
