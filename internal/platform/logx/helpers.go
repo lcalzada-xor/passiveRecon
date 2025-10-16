@@ -167,3 +167,14 @@ func LogValidation(tool string, valid, total int, warnings int) {
 
 	LogTool(level, tool, "validation results", fields)
 }
+
+// LogGroupSummary loggea un resumen de grupo al cierre
+func LogGroupSummary(groupName string, tools int, artifacts int64, elapsed time.Duration) {
+	fields := Fields{
+		"group":     groupName,
+		"tools":     tools,
+		"artifacts": artifacts,
+		"elapsed":   Sprintf(elapsed.String()),
+	}
+	LogTool(LevelInfo, "orchestrator", "group summary", fields)
+}

@@ -124,13 +124,17 @@ func runCommand(ctx context.Context, name string, args []string, out chan<- stri
 		envInfo = fmt.Sprintf("custom (%d vars)", len(cmd.Env))
 	}
 
-	logx.Debugf("run: %s %s", name, argsJoined)
-	logx.Tracef("command details name=%s path=%q args=%q dir=%q deadline=%s env=%s",
-		name, cmd.Path, args, cmd.Dir, deadlineInfo, envInfo)
+	logx.Debug("Ejecutando comando", logx.Fields{"name": name, "args": argsJoined})
+	logx.Trace("Detalles del comando", logx.Fields{
+		"path": cmd.Path,
+		"dir": cmd.Dir,
+		"deadline": deadlineInfo,
+		"env": envInfo,
+	})
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		logx.Errorf("stdout pipe %s: %v", name, err)
+		logx.Error("Error stdout pipe", logx.Fields{"command": name, "error": err.Error()})
 		return err
 	}
 	stderr, _ := cmd.StderrPipe()
@@ -142,7 +146,7 @@ func runCommand(ctx context.Context, name string, args []string, out chan<- stri
 			searchPaths := os.Getenv("PATH")
 			return apperrors.NewMissingBinaryError(name, strings.Split(searchPaths, ":")...)
 		}
-		logx.Errorf("start %s: %v", name, err)
+		logx.Error("Error iniciar comando", logx.Fields{"command": name, "error": err.Error()})
 		return err
 	}
 
@@ -151,10 +155,10 @@ func runCommand(ctx context.Context, name string, args []string, out chan<- stri
 		sc := bufio.NewScanner(stderr)
 		sc.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
 		for sc.Scan() {
-			logx.Debugf("%s stderr: %s", name, sc.Text())
+			logx.Debug("Stderr", logx.Fields{"command": name, "output": sc.Text()})
 		}
 		if e := sc.Err(); e != nil {
-			logx.Tracef("%s stderr scan error: %v", name, e)
+			logx.Trace("Stderr scan error", logx.Fields{"command": name, "error": e.Error()})
 		}
 	}()
 
@@ -170,7 +174,7 @@ readLoop:
 		// Envío "context-aware" para no quedar bloqueados si out no lee y el ctx se cancela.
 		select {
 		case <-ctx.Done():
-			logx.Warnf("ctx cancel %s", name)
+			logx.Warn("Context cancelado", logx.Fields{"command": name})
 			break readLoop
 		case out <- line:
 			lines++
@@ -178,7 +182,7 @@ readLoop:
 	}
 	// Error del scanner (solo si no es por ctx cancel).
 	if err := sc.Err(); err != nil && ctx.Err() == nil {
-		logx.Errorf("scan %s: %v", name, err)
+		logx.Error("Error scan", logx.Fields{"command": name, "error": err.Error()})
 		_ = cmd.Wait() // asegurar recolección
 		return err
 	}
@@ -186,9 +190,9 @@ readLoop:
 	// Espera de finalización del proceso.
 	if err := cmd.Wait(); err != nil {
 		if ctx.Err() != nil {
-			logx.Debugf("wait after ctx cancel %s: %v", name, err)
+			logx.Debug("Wait after context cancel", logx.Fields{"command": name, "error": err.Error()})
 		} else {
-			logx.Errorf("wait %s: %v", name, err)
+			logx.Error("Error wait", logx.Fields{"command": name, "error": err.Error()})
 			return err
 		}
 	}
@@ -203,9 +207,12 @@ readLoop:
 	if state := cmd.ProcessState; state != nil {
 		exitCode = state.ExitCode()
 	}
-	logx.Debugf("done: %s", name)
-	logx.Tracef("command finished name=%s exit=%d duration=%s lines=%d",
-		name, exitCode, duration.Round(time.Millisecond), lines)
+	logx.Debug("Comando completado", logx.Fields{"command": name})
+	logx.Trace("Detalles del comando finalizado", logx.Fields{
+		"exit_code": exitCode,
+		"duration_ms": duration.Milliseconds(),
+		"lines": lines,
+	})
 
 	return nil
 }

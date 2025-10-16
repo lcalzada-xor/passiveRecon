@@ -22,7 +22,7 @@ type crtshEntry struct {
 }
 
 func CRTSH(ctx context.Context, domain string, out chan<- string) error {
-	logx.Debugf("crtsh query %s", domain)
+	logx.Debug("CRTSH query", logx.Fields{"domain": domain})
 
 	u, _ := url.Parse("https://crt.sh/")
 	q := url.Values{}
@@ -39,20 +39,20 @@ func CRTSH(ctx context.Context, domain string, out chan<- string) error {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		logx.Errorf("crtsh http: %v", err)
+		logx.Error("CRTSH HTTP error", logx.Fields{"error": err.Error()})
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		logx.Errorf("crtsh non-200: %d", resp.StatusCode)
+		logx.Error("CRTSH non-200", logx.Fields{"status_code": resp.StatusCode})
 		return errors.New("crt.sh non-200")
 	}
 
 	var arr []crtshEntry
 	dec := json.NewDecoder(resp.Body)
 	if err := dec.Decode(&arr); err != nil {
-		logx.Errorf("crtsh json: %v", err)
+		logx.Error("CRTSH JSON error", logx.Fields{"error": err.Error()})
 		return err
 	}
 
@@ -85,6 +85,6 @@ func CRTSH(ctx context.Context, domain string, out chan<- string) error {
 		out <- "cert: " + encoded
 	}
 
-	logx.Tracef("crtsh %s: %d certificados únicos", domain, len(seen))
+	logx.Trace("CRTSH completado", logx.Fields{"domain": domain, "certificados": len(seen)})
 	return nil
 }

@@ -93,7 +93,10 @@ func (m *CheckpointManager) Load() (*Checkpoint, error) {
 
 	// Validar versión
 	if checkpoint.Version != checkpointVersion {
-		logx.Warnf("checkpoint version mismatch: expected %s, got %s", checkpointVersion, checkpoint.Version)
+		logx.Warn("Checkpoint version mismatch", logx.Fields{
+			"expected": checkpointVersion,
+			"got": checkpoint.Version,
+		})
 	}
 
 	m.checkpoint = &checkpoint
@@ -147,22 +150,24 @@ func (m *CheckpointManager) StartAutoSave() {
 			select {
 			case <-ticker.C:
 				if err := m.Save(); err != nil {
-					logx.Warnf("checkpoint auto-save failed: %v", err)
+					logx.Warn("Checkpoint auto-save falló", logx.Fields{"error": err.Error()})
 				} else {
-					logx.Debugf("checkpoint saved (tools: %d, artifacts: %d)",
-						len(m.GetCompletedTools()), m.GetArtifactCount())
+					logx.Debug("Checkpoint guardado", logx.Fields{
+						"tools": len(m.GetCompletedTools()),
+						"artifacts": m.GetArtifactCount(),
+					})
 				}
 			case <-m.stopAutoSave:
 				// Guardar una última vez antes de salir
 				if err := m.Save(); err != nil {
-					logx.Warnf("checkpoint final save failed: %v", err)
+					logx.Warn("Checkpoint final save falló", logx.Fields{"error": err.Error()})
 				}
 				return
 			}
 		}
 	}()
 
-	logx.Infof("checkpoint auto-save started (interval: %s)", m.interval)
+	logx.Debug("Checkpoint auto-save iniciado", logx.Fields{"interval": m.interval.String()})
 }
 
 // StopAutoSave detiene el guardado automático.

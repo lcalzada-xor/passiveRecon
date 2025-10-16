@@ -26,20 +26,23 @@ type Fields map[string]any
 
 // Config gestiona la configuración global del logger
 type Config struct {
-	mu        sync.RWMutex
-	logger    zerolog.Logger
-	formatter *LogFormatter
-	level     Level
+	mu         sync.RWMutex
+	logger     zerolog.Logger
+	formatter  *LogFormatter
+	level      Level
+	outputCfg  OutputConfig
+	groupTrack *GroupTracker
 }
 
 var cfg = &Config{
 	logger: zerolog.New(zerolog.ConsoleWriter{
 		Out:        os.Stderr,
-		TimeFormat: "2006-01-02T15:04:05-07:00",
+		TimeFormat: "15:04:05",
 		NoColor:    false,
 	}).With().Timestamp().Logger(),
 	formatter: NewLogFormatter(true),
 	level:     LevelInfo,
+	outputCfg: DetectOutput(os.Stderr),
 }
 
 var sampleRates = map[string]int{
@@ -122,7 +125,7 @@ func SetOutput(w io.Writer) {
 	// Recrear logger con nuevo writer
 	cfg.logger = zerolog.New(zerolog.ConsoleWriter{
 		Out:        w,
-		TimeFormat: "2006-01-02T15:04:05-07:00",
+		TimeFormat: "15:04:05",
 		NoColor:    false,
 	}).With().Timestamp().Logger()
 }
@@ -139,7 +142,7 @@ func AddOutput(w io.Writer) {
 	multi := zerolog.MultiLevelWriter(
 		zerolog.ConsoleWriter{
 			Out:        os.Stderr,
-			TimeFormat: "2006-01-02T15:04:05-07:00",
+			TimeFormat: "15:04:05",
 			NoColor:    false,
 		},
 		w,
@@ -157,12 +160,13 @@ func EnableColors(enabled bool) {
 	// Recrear console writer con opción de color
 	cfg.logger = zerolog.New(zerolog.ConsoleWriter{
 		Out:        os.Stderr,
-		TimeFormat: "2006-01-02T15:04:05-07:00",
+		TimeFormat: "15:04:05",
 		NoColor:    !enabled,
 	}).With().Timestamp().Logger()
 
 	// Actualizar formatter
 	cfg.formatter.EnableColors(enabled)
+	cfg.outputCfg.NoColor = !enabled
 }
 
 // SetJSON habilita output JSON estructurado
@@ -175,7 +179,7 @@ func SetJSON(enabled bool) {
 	} else {
 		cfg.logger = zerolog.New(zerolog.ConsoleWriter{
 			Out:        os.Stderr,
-			TimeFormat: "2006-01-02T15:04:05-07:00",
+			TimeFormat: "15:04:05",
 			NoColor:    false,
 		}).With().Timestamp().Logger()
 	}
@@ -205,7 +209,7 @@ func SetTimestamps(enabled bool) {
 		defer cfg.mu.Unlock()
 		cfg.logger = zerolog.New(zerolog.ConsoleWriter{
 			Out:        os.Stderr,
-			TimeFormat: "",
+			TimeFormat: "15:04:05",
 			NoColor:    false,
 		})
 	}
@@ -404,4 +408,58 @@ func GetFormatter() *LogFormatter {
 	cfg.mu.RLock()
 	defer cfg.mu.RUnlock()
 	return cfg.formatter
+}
+
+// GetGroupTracker retorna el rastreador de grupos
+func GetGroupTracker() *GroupTracker {
+	cfg.mu.Lock()
+	defer cfg.mu.Unlock()
+
+	if cfg.groupTrack == nil {
+		cfg.groupTrack = NewGroupTracker(cfg.formatter)
+	}
+	return cfg.groupTrack
+}
+
+// ConfigureCliFlags configura los flags de CLI
+type CliFlags struct {
+	NoColor   bool
+	Compact   bool
+	Verbosity string
+	Width     int
+}
+
+// ApplyCliFlags aplica configuración desde flags de CLI
+func ApplyCliFlags(flags CliFlags) {
+	cfg.mu.Lock()
+	defer cfg.mu.Unlock()
+
+	if flags.NoColor {
+		cfg.formatter.EnableColors(false)
+		cfg.outputCfg.NoColor = true
+	}
+
+	if flags.Compact {
+		cfg.formatter.compact = true
+		cfg.outputCfg.Compact = true
+	}
+
+	if flags.Width > 0 {
+		cfg.formatter.width = flags.Width
+		cfg.outputCfg.Width = flags.Width
+	}
+
+	// Mapear verbosity
+	switch flags.Verbosity {
+	case "trace":
+		SetLevel(LevelTrace)
+	case "debug":
+		SetLevel(LevelDebug)
+	case "info":
+		SetLevel(LevelInfo)
+	case "warn":
+		SetLevel(LevelWarn)
+	case "error":
+		SetLevel(LevelError)
+	}
 }
