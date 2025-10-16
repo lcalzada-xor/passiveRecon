@@ -686,10 +686,10 @@ func executePostProcessing(ctx context.Context, cfg *config.Config, sink sink, b
 	notifyUnknownTools(sink, bar, unknown)
 
 	if cfg.Report {
-		if err := report.Generate(ctx, cfg); err != nil {
-			logx.Warnf("no se pudo generar report.html: %v", err)
+		if err := report.GenerateV2(ctx, cfg); err != nil {
+			logx.Warnf("no se pudo generar reportes: %v", err)
 		} else {
-			logx.Infof("Informe HTML generado en %s", filepath.Join(cfg.OutDir, "report.html"))
+			logx.Infof("Reportes generados en %s/reports/", cfg.OutDir)
 		}
 	}
 

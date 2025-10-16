@@ -141,9 +141,9 @@ type Infrastructure struct {
 
 	// RDAP
 	Registrar    string            `json:"registrar,omitempty"`
-	Registered   time.Time         `json:"registered,omitempty"`
-	Expires      time.Time         `json:"expires,omitempty"`
-	LastChanged  time.Time         `json:"last_changed,omitempty"`
+	Registered   *time.Time        `json:"registered,omitempty"`
+	Expires      *time.Time        `json:"expires,omitempty"`
+	LastChanged  *time.Time        `json:"last_changed,omitempty"`
 	Status       []string          `json:"status,omitempty"`
 
 	// Hosting

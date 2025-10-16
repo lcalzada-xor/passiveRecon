@@ -336,16 +336,16 @@ func writeTechStack(md *strings.Builder, stack *TechStack) {
 
 func writeInfrastructure(md *strings.Builder, infra *Infrastructure) {
 	// Domain Info
-	if !infra.Registered.IsZero() || !infra.Expires.IsZero() {
+	if infra.Registered != nil || infra.Expires != nil {
 		md.WriteString("### Domain Information\n\n")
 
-		if !infra.Registered.IsZero() {
-			ageYears := int(time.Since(infra.Registered).Hours() / 24 / 365)
+		if infra.Registered != nil {
+			ageYears := int(time.Since(*infra.Registered).Hours() / 24 / 365)
 			md.WriteString(fmt.Sprintf("- **Registered:** %s (%d years ago)\n", infra.Registered.Format("2006-01-02"), ageYears))
 		}
 
-		if !infra.Expires.IsZero() {
-			daysUntil := int(time.Until(infra.Expires).Hours() / 24)
+		if infra.Expires != nil {
+			daysUntil := int(time.Until(*infra.Expires).Hours() / 24)
 			expiryWarning := ""
 			if daysUntil < 30 {
 				expiryWarning = " ⚠️ **EXPIRING SOON**"
@@ -355,7 +355,7 @@ func writeInfrastructure(md *strings.Builder, infra *Infrastructure) {
 			md.WriteString(fmt.Sprintf("- **Expires:** %s (in %d days)%s\n", infra.Expires.Format("2006-01-02"), daysUntil, expiryWarning))
 		}
 
-		if !infra.LastChanged.IsZero() {
+		if infra.LastChanged != nil {
 			md.WriteString(fmt.Sprintf("- **Last Modified:** %s\n", infra.LastChanged.Format("2006-01-02")))
 		}
 
@@ -416,7 +416,13 @@ func writeInfrastructure(md *strings.Builder, infra *Infrastructure) {
 func writeAssetInventory(md *strings.Builder, assets *AssetInventory) {
 	md.WriteString("### Domains & Subdomains\n\n")
 	md.WriteString(fmt.Sprintf("- **Total Domains:** %d\n", assets.TotalDomains))
-	md.WriteString(fmt.Sprintf("- **Active Domains:** %d (%.1f%%)\n", assets.ActiveDomains, float64(assets.ActiveDomains)/float64(assets.TotalDomains)*100))
+
+	// Calcular porcentaje, evitar división por cero
+	percentage := 0.0
+	if assets.TotalDomains > 0 {
+		percentage = float64(assets.ActiveDomains) / float64(assets.TotalDomains) * 100
+	}
+	md.WriteString(fmt.Sprintf("- **Active Domains:** %d (%.1f%%)\n", assets.ActiveDomains, percentage))
 	md.WriteString(fmt.Sprintf("- **Subdomains:** %d\n\n", assets.TotalSubdomains))
 
 	md.WriteString("### Web Resources\n\n")

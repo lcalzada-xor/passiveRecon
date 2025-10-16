@@ -130,21 +130,21 @@ func (a *Analyzer) analyzeRDAP(infra *Infrastructure) {
 		if strings.Contains(value, "event=registration") {
 			timestamp := extractTimestamp(value)
 			if !timestamp.IsZero() {
-				infra.Registered = timestamp
+				infra.Registered = &timestamp
 			}
 		}
 
 		if strings.Contains(value, "event=expiration") {
 			timestamp := extractTimestamp(value)
 			if !timestamp.IsZero() {
-				infra.Expires = timestamp
+				infra.Expires = &timestamp
 			}
 		}
 
 		if strings.Contains(value, "event=last changed") {
 			timestamp := extractTimestamp(value)
 			if !timestamp.IsZero() {
-				infra.LastChanged = timestamp
+				infra.LastChanged = &timestamp
 			}
 		}
 

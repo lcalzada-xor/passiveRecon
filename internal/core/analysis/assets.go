@@ -29,8 +29,14 @@ func (a *Analyzer) buildAssetInventory() *AssetInventory {
 		}
 	}
 	inventory.ActiveDomains = activeDomains
-	inventory.TotalSubdomains = inventory.TotalDomains - 1 // Restar dominio principal
-	inventory.ActiveSubdomains = activeDomains - 1
+
+	// Calcular subdominios (restar dominio principal solo si hay dominios)
+	if inventory.TotalDomains > 0 {
+		inventory.TotalSubdomains = inventory.TotalDomains - 1
+	}
+	if activeDomains > 0 {
+		inventory.ActiveSubdomains = activeDomains - 1
+	}
 
 	// Contar recursos web
 	inventory.HTMLPages = len(a.FilterBySubtype("resource", "html"))

@@ -37,8 +37,8 @@ func (a *Analyzer) generateDomainInsights(report *Report) []Insight {
 	}
 
 	// Dominio próximo a expirar
-	if !report.Infrastructure.Expires.IsZero() {
-		daysUntilExpiration := int(time.Until(report.Infrastructure.Expires).Hours() / 24)
+	if report.Infrastructure.Expires != nil {
+		daysUntilExpiration := int(time.Until(*report.Infrastructure.Expires).Hours() / 24)
 
 		if daysUntilExpiration < 30 && daysUntilExpiration > 0 {
 			insights = append(insights, Insight{
@@ -71,8 +71,8 @@ func (a *Analyzer) generateDomainInsights(report *Report) []Insight {
 	}
 
 	// Dominio antiguo (puede ser positivo)
-	if !report.Infrastructure.Registered.IsZero() {
-		ageYears := int(time.Since(report.Infrastructure.Registered).Hours() / 24 / 365)
+	if report.Infrastructure.Registered != nil {
+		ageYears := int(time.Since(*report.Infrastructure.Registered).Hours() / 24 / 365)
 		if ageYears >= 20 {
 			insights = append(insights, Insight{
 				Type:        "info",
