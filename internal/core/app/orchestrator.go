@@ -373,11 +373,15 @@ func runConcurrentSteps(ctx context.Context, group string, steps []toolStep, sta
 	if opts.metrics != nil {
 		opts.metrics.RecordGroupStart(group, maxConc)
 	}
-	logx.Trace("Grupo iniciado", logx.Fields{
-		"group": group,
+
+	// Log cabecera de fase con formato visual
+	formatter := logx.GetFormatter()
+	metadata := map[string]interface{}{
 		"concurrency": maxConc,
-		"steps": len(steps),
-	})
+		"tools":       len(steps),
+	}
+	phaseHeader := formatter.FormatPhaseHeader(group, metadata, 0)
+	logx.Infof(phaseHeader)
 
 	var wg runnerWaitGroup
 	for _, st := range steps {
@@ -402,14 +406,26 @@ func runConcurrentSteps(ctx context.Context, group string, steps []toolStep, sta
 	}
 	wg.Wait()
 
-	elapsed := time.Since(start).Round(time.Millisecond)
-	logx.Trace("Grupo completado", logx.Fields{
-		"group": group,
-		"duration_ms": elapsed.Milliseconds(),
-	})
+	elapsed := time.Since(start)
 	if opts.metrics != nil {
 		opts.metrics.RecordGroupEnd(group)
 	}
+
+	// Calcular artifacts y herramientas ejecutadas
+	toolsRun := 0
+	for _, st := range steps {
+		if opts.requested[st.Name] {
+			toolsRun++
+		}
+	}
+
+	// Log resumen del grupo con formato compacto
+	summaryLog := fmt.Sprintf("group=%s tools=%d elapsed=%s",
+		group,
+		toolsRun,
+		logx.FormatDuration(elapsed),
+	)
+	logx.Infof(summaryLog)
 }
 
 func computeStepTimeout(step toolStep, state *pipelineState, opts orchestratorOptions) int {

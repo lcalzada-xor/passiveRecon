@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -113,24 +112,27 @@ func runCommand(ctx context.Context, name string, args []string, out chan<- stri
 		argsJoined = "<none>"
 	}
 
-	deadlineInfo := "none"
+	deadlineInfo := ""
 	if deadline, ok := ctx.Deadline(); ok {
 		remaining := time.Until(deadline)
-		deadlineInfo = fmt.Sprintf("%s (~%s)", deadline.Format(time.RFC3339), remaining.Round(time.Millisecond))
+		deadlineInfo = logx.FormatDuration(remaining)
 	}
 
-	envInfo := "inherit"
+	// Log inicio del comando con formato compacto
+	formatter := logx.GetFormatter()
+	cmdID := logx.ShortID("cmd", time.Now().UnixNano()%1000)
+	startLog := formatter.FormatCommandStart(cmdID, name, argsJoined, deadlineInfo)
+	logx.Debugf(startLog)
+
+	// Detalles solo en trace
 	if cmd.Env != nil {
-		envInfo = fmt.Sprintf("custom (%d vars)", len(cmd.Env))
+		logx.Trace("Detalles del comando", logx.Fields{
+			"id": cmdID,
+			"path": cmd.Path,
+			"dir": cmd.Dir,
+			"env_vars": len(cmd.Env),
+		})
 	}
-
-	logx.Debug("Ejecutando comando", logx.Fields{"name": name, "args": argsJoined})
-	logx.Trace("Detalles del comando", logx.Fields{
-		"path": cmd.Path,
-		"dir": cmd.Dir,
-		"deadline": deadlineInfo,
-		"env": envInfo,
-	})
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -190,9 +192,9 @@ readLoop:
 	// Espera de finalización del proceso.
 	if err := cmd.Wait(); err != nil {
 		if ctx.Err() != nil {
-			logx.Debug("Wait after context cancel", logx.Fields{"command": name, "error": err.Error()})
+			logx.Debugf(formatter.FormatCommandError(cmdID, name, "context cancelled"))
 		} else {
-			logx.Error("Error wait", logx.Fields{"command": name, "error": err.Error()})
+			logx.Errorf(formatter.FormatCommandError(cmdID, name, err.Error()))
 			return err
 		}
 	}
@@ -207,12 +209,14 @@ readLoop:
 	if state := cmd.ProcessState; state != nil {
 		exitCode = state.ExitCode()
 	}
-	logx.Debug("Comando completado", logx.Fields{"command": name})
-	logx.Trace("Detalles del comando finalizado", logx.Fields{
-		"exit_code": exitCode,
-		"duration_ms": duration.Milliseconds(),
-		"lines": lines,
-	})
+
+	// Log finalización con formato compacto
+	finishLog := formatter.FormatCommandFinish(cmdID, name, exitCode, duration, lines)
+	if exitCode == 0 {
+		logx.Debugf(finishLog)
+	} else {
+		logx.Warnf(finishLog)
+	}
 
 	return nil
 }
