@@ -291,9 +291,12 @@ func maybeSkipByCache(step toolStep, state *pipelineState, opts orchestratorOpti
 		return true
 	}
 
-	logx.Warnf("cache dedupe inválido, se vuelve a ejecutar paso")
+	logx.Warn("Cache de dedupe inválido", logx.Fields{"action": "re-ejecutando paso"})
 	if err := opts.cache.Invalidate(step.Name); err != nil {
-		logx.Warnf("no se pudo invalidar cache de %s: %v", step.Name, err)
+		logx.Warn("Fallo invalidar cache", logx.Fields{
+			"step": step.Name,
+			"error": err.Error(),
+		})
 	}
 	return false
 }
@@ -323,7 +326,10 @@ func prepareStepTask(ctx context.Context, step toolStep, state *pipelineState, o
 				// No propagamos error para no parar el pipeline (comportamiento actual)
 				return nil
 			}
-			logx.Warnf("source error: %v", err)
+			logx.Warn("Error en fuente", logx.Fields{
+				"step": step.Name,
+				"error": err.Error(),
+			})
 			return nil
 		}
 
@@ -334,7 +340,10 @@ func prepareStepTask(ctx context.Context, step toolStep, state *pipelineState, o
 
 		if opts.cache != nil && opts.runHash != "" {
 			if markErr := opts.cache.MarkComplete(step.Name, opts.runHash); markErr != nil {
-				logx.Warnf("no se pudo actualizar cache para %s: %v", step.Name, markErr)
+				logx.Warn("Fallo actualizar cache", logx.Fields{
+					"step": step.Name,
+					"error": markErr.Error(),
+				})
 			}
 		}
 		if step.Name == toolDedupe {
@@ -364,7 +373,11 @@ func runConcurrentSteps(ctx context.Context, group string, steps []toolStep, sta
 	if opts.metrics != nil {
 		opts.metrics.RecordGroupStart(group, maxConc)
 	}
-	logx.Tracef("grupo %s: inicio con concurrencia=%d, steps=%d", group, maxConc, len(steps))
+	logx.Trace("Grupo iniciado", logx.Fields{
+		"group": group,
+		"concurrency": maxConc,
+		"steps": len(steps),
+	})
 
 	var wg runnerWaitGroup
 	for _, st := range steps {
@@ -390,7 +403,10 @@ func runConcurrentSteps(ctx context.Context, group string, steps []toolStep, sta
 	wg.Wait()
 
 	elapsed := time.Since(start).Round(time.Millisecond)
-	logx.Tracef("grupo %s: fin en %s", group, elapsed)
+	logx.Trace("Grupo completado", logx.Fields{
+		"group": group,
+		"duration_ms": elapsed.Milliseconds(),
+	})
 	if opts.metrics != nil {
 		opts.metrics.RecordGroupEnd(group)
 	}
@@ -687,15 +703,18 @@ func executePostProcessing(ctx context.Context, cfg *config.Config, sink sink, b
 
 	if cfg.Report {
 		if err := report.GenerateV2(ctx, cfg); err != nil {
-			logx.Warnf("no se pudo generar reportes: %v", err)
+			logx.Warn("Fallo generar reportes", logx.Fields{"error": err.Error()})
 		} else {
-			logx.Infof("Reportes generados en %s/reports/", cfg.OutDir)
+			logx.Info("Reportes generados", logx.Fields{"directory": cfg.OutDir + "/reports/"})
 		}
 	}
 
 	if bar != nil {
 		if missing := bar.MissingTools(); len(missing) > 0 {
-			logx.Infof("Herramientas faltantes en el sistema: %s", strings.Join(missing, ", "))
+			logx.Info("Herramientas faltantes detectadas", logx.Fields{
+				"tools": strings.Join(missing, ", "),
+				"count": len(missing),
+			})
 		}
 	}
 }

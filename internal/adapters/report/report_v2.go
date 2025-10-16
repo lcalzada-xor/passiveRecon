@@ -34,7 +34,7 @@ func GenerateV2(ctx context.Context, cfg *config.Config) error {
 	}
 
 	// Leer artifacts
-	logx.Infof("Leyendo artifacts desde %s...", cfg.OutDir)
+	logx.Info("Leyendo artifacts", logx.Fields{"directory": cfg.OutDir})
 	manifestPath := filepath.Join(cfg.OutDir, "artifacts.jsonl")
 	file, err := os.Open(manifestPath)
 	if err != nil {
@@ -60,7 +60,7 @@ func GenerateV2(ctx context.Context, cfg *config.Config) error {
 		arts = append(arts, art)
 	}
 
-	logx.Infof("Cargados %d artifacts", len(arts))
+	logx.Info("Artifacts cargados", logx.Fields{"count": len(arts)})
 
 	// Inferir header si no está disponible
 	if header.Target == "" {
@@ -77,7 +77,7 @@ func GenerateV2(ctx context.Context, cfg *config.Config) error {
 	analyzer := analysis.NewAnalyzer(arts, header, opts)
 
 	// Ejecutar análisis
-	logx.Infof("Ejecutando análisis inteligente...")
+	logx.Debug("Ejecutando análisis", logx.Fields{"type": "inteligente"})
 	report, err := analyzer.Analyze()
 	if err != nil {
 		return fmt.Errorf("report: analyze: %w", err)
@@ -90,16 +90,16 @@ func GenerateV2(ctx context.Context, cfg *config.Config) error {
 	}
 
 	// Generar Markdown
-	logx.Infof("Generando reporte Markdown...")
+	logx.Info("Generando reporte", logx.Fields{"format": "markdown"})
 	mdReport := analysis.GenerateMarkdownReport(report)
 	mdPath := filepath.Join(reportsDir, "REPORT.md")
 	if err := os.WriteFile(mdPath, []byte(mdReport), 0644); err != nil {
 		return fmt.Errorf("report: write markdown: %w", err)
 	}
-	logx.Infof("✓ Reporte Markdown guardado en %s", mdPath)
+	logx.Info("Reporte guardado", logx.Fields{"format": "markdown", "path": mdPath})
 
 	// Generar JSON
-	logx.Infof("Generando reporte JSON...")
+	logx.Info("Generando reporte", logx.Fields{"format": "json"})
 	jsonData, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return fmt.Errorf("report: marshal json: %w", err)
@@ -108,22 +108,22 @@ func GenerateV2(ctx context.Context, cfg *config.Config) error {
 	if err := os.WriteFile(jsonPath, jsonData, 0644); err != nil {
 		return fmt.Errorf("report: write json: %w", err)
 	}
-	logx.Infof("✓ Reporte JSON guardado en %s", jsonPath)
+	logx.Info("Reporte guardado", logx.Fields{"format": "json", "path": jsonPath})
 
 	// Generar HTML
-	logx.Infof("Generando reporte HTML...")
+	logx.Info("Generando reporte", logx.Fields{"format": "html"})
 	if err := GenerateHTML(report, reportsDir); err != nil {
-		logx.Warnf("No se pudo generar HTML: %v", err)
+		logx.Warn("Fallo generar HTML", logx.Fields{"error": err.Error()})
 	} else {
-		logx.Infof("✓ Reporte HTML guardado en %s/report.html", reportsDir)
+		logx.Info("Reporte guardado", logx.Fields{"format": "html", "path": reportsDir + "/report.html"})
 	}
 
 	// Generar PDF
-	logx.Infof("Generando reporte PDF...")
+	logx.Info("Generando reporte", logx.Fields{"format": "pdf"})
 	if err := GeneratePDF(report, reportsDir); err != nil {
-		logx.Warnf("No se pudo generar PDF: %v", err)
+		logx.Warn("Fallo generar PDF", logx.Fields{"error": err.Error()})
 	} else {
-		logx.Infof("✓ Reporte PDF guardado en %s/report.pdf", reportsDir)
+		logx.Info("Reporte guardado", logx.Fields{"format": "pdf", "path": reportsDir + "/report.pdf"})
 	}
 
 	return nil

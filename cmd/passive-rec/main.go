@@ -15,21 +15,27 @@ func main() {
 
 	logx.SetVerbosity(cfg.Verbosity)
 	if err := config.ApplyProxy(cfg.Proxy); err != nil {
-		logx.Errorf("%v", err)
+		logx.Error("Error configurando proxy", logx.Fields{"error": err.Error()})
 		os.Exit(1)
 	}
 	if cfg.Proxy != "" {
-		logx.Infof("Usando proxy %s", cfg.Proxy)
+		logx.Info("Proxy configurado", logx.Fields{"proxy": cfg.Proxy})
 	}
 	if err := config.ConfigureRootCAs(cfg.ProxyCACert); err != nil {
-		logx.Errorf("%v", err)
+		logx.Error("Error configurando certificado CA", logx.Fields{"error": err.Error()})
 		os.Exit(1)
 	}
 	if cfg.ProxyCACert != "" {
-		logx.Infof("Certificado CA adicional cargado desde %s", cfg.ProxyCACert)
+		logx.Info("Certificado CA cargado", logx.Fields{"path": cfg.ProxyCACert})
 	}
-	logx.Infof("Iniciando passive-rec target=%s outdir=%s tools=%v workers=%d active=%v report=%v",
-		cfg.Target, cfg.OutDir, cfg.Tools, cfg.Workers, cfg.Active, cfg.Report)
+	logx.Info("Iniciando passive-rec", logx.Fields{
+		"target":  cfg.Target,
+		"outdir":  cfg.OutDir,
+		"tools":   cfg.Tools,
+		"workers": cfg.Workers,
+		"active":  cfg.Active,
+		"report":  cfg.Report,
+	})
 
 	if cfg.Target == "" {
 		fmt.Fprintln(os.Stderr, "uso: -target example.com")
@@ -37,8 +43,8 @@ func main() {
 		os.Exit(1)
 	}
 	if err := app.Run(cfg); err != nil {
-		logx.Errorf("%v", err)
+		logx.Error("Error ejecutando aplicación", logx.Fields{"error": err.Error()})
 		os.Exit(1)
 	}
-	logx.Infof("Listo. Archivos .passive creados en: %s", cfg.OutDir)
+	logx.Info("Ejecución completada", logx.Fields{"outdir": cfg.OutDir})
 }

@@ -26,9 +26,10 @@ type Fields map[string]any
 
 // Config gestiona la configuración global del logger
 type Config struct {
-	mu     sync.RWMutex
-	logger zerolog.Logger
-	level  Level
+	mu        sync.RWMutex
+	logger    zerolog.Logger
+	formatter *LogFormatter
+	level     Level
 }
 
 var cfg = &Config{
@@ -37,7 +38,8 @@ var cfg = &Config{
 		TimeFormat: "2006-01-02T15:04:05-07:00",
 		NoColor:    false,
 	}).With().Timestamp().Logger(),
-	level: LevelInfo,
+	formatter: NewLogFormatter(true),
+	level:     LevelInfo,
 }
 
 var sampleRates = map[string]int{
@@ -158,6 +160,9 @@ func EnableColors(enabled bool) {
 		TimeFormat: "2006-01-02T15:04:05-07:00",
 		NoColor:    !enabled,
 	}).With().Timestamp().Logger()
+
+	// Actualizar formatter
+	cfg.formatter.EnableColors(enabled)
 }
 
 // SetJSON habilita output JSON estructurado
@@ -392,4 +397,11 @@ func logFields(lvl Level, msg string, fields Fields) {
 	case LevelTrace:
 		Trace(msg, fields)
 	}
+}
+
+// GetFormatter retorna el formatter global (para uso en otros módulos)
+func GetFormatter() *LogFormatter {
+	cfg.mu.RLock()
+	defer cfg.mu.RUnlock()
+	return cfg.formatter
 }

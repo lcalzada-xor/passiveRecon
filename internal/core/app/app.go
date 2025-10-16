@@ -74,11 +74,11 @@ func Run(cfg *config.Config) error {
 	cachePath := cachePathFor(cfg.OutDir)
 	execCache, err := loadExecutionCache(cachePath)
 	if err != nil {
-		logx.Warnf("no se pudo cargar cache de ejecución: %v", err)
+		logx.Warn("Fallo cargar cache de ejecución", logx.Fields{"error": err.Error()})
 	}
 	if execCache != nil {
 		if err := execCache.Prune(cacheMaxAge); err != nil {
-			logx.Warnf("no se pudo depurar cache de ejecución: %v", err)
+			logx.Warn("Fallo depurar cache de ejecución", logx.Fields{"error": err.Error()})
 		}
 	}
 
@@ -100,14 +100,16 @@ func Run(cfg *config.Config) error {
 		// Si resume está habilitado, intentar cargar checkpoint previo
 		if cfg.Resume {
 			if loaded, err := checkpointMgr.Load(); err != nil {
-				logx.Warnf("no se pudo cargar checkpoint: %v", err)
+				logx.Warn("Fallo cargar checkpoint", logx.Fields{"error": err.Error()})
 			} else if loaded != nil {
 				// Validar que el checkpoint corresponde al mismo target y runHash
 				if loaded.Target == cfg.Target && loaded.RunHash == runHash {
-					logx.Infof("resumiendo desde checkpoint: %d tools completadas", len(loaded.CompletedTools))
-					logx.Infof("checkpoint: %s", checkpointMgr.GetProgress())
+					logx.Info("Resumiendo desde checkpoint", logx.Fields{
+						"tools_completadas": len(loaded.CompletedTools),
+						"progreso": checkpointMgr.GetProgress(),
+					})
 				} else {
-					logx.Warnf("checkpoint inválido: target o configuración no coinciden")
+					logx.Warn("Checkpoint inválido", logx.Fields{"reason": "target o configuración no coinciden"})
 					checkpointMgr = NewCheckpointManager(cfg.OutDir, runHash, cfg.Target, interval)
 				}
 			}
@@ -142,16 +144,24 @@ func Run(cfg *config.Config) error {
 		}
 	}
 	buildStepsDuration := time.Since(buildStepsStart)
-	logx.Infof("orquestador: armado de steps en %s", buildStepsDuration.Round(time.Millisecond))
+	logx.Debug("Orquestador: armado de steps", logx.Fields{
+		"duration_ms": buildStepsDuration.Milliseconds(),
+		"steps_count": len(steps),
+	})
 
 	// Informar al usuario sobre optimización de scope
 	if strings.ToLower(strings.TrimSpace(cfg.Scope)) == "domain" {
-		logx.Infof("scope=domain: se omitirán herramientas de enumeración de subdominios (amass, subfinder, assetfinder, rdap)")
-		logx.Infof("scope=domain: crtsh y censys se ejecutarán para obtener certificados del dominio exacto")
+		logx.Info("Scope configurado como 'domain'", logx.Fields{
+			"skip_tools": "amass, subfinder, assetfinder, rdap",
+			"reason": "herramientas de enumeración de subdominios",
+		})
+		logx.Debug("Certificados del dominio exacto", logx.Fields{
+			"tools": "crtsh, censys",
+		})
 		// Inyectar el dominio target para que las herramientas restantes tengan algo que procesar
 		sink.In() <- cfg.Target
 		sink.Flush()
-		logx.Infof("dominio target inyectado: %s", cfg.Target)
+		logx.Trace("Dominio target inyectado", logx.Fields{"target": cfg.Target})
 	}
 
 	metrics := newPipelineMetrics()
@@ -168,12 +178,15 @@ func Run(cfg *config.Config) error {
 	pipelineStart := time.Now()
 	runPipeline(ctx, steps, opts)
 	pipelineDuration := time.Since(pipelineStart)
-	logx.Infof("orquestador: pipeline ejecutado en %s", pipelineDuration.Round(time.Millisecond))
+	logx.Info("Pipeline ejecutado", logx.Fields{
+		"duration_ms": pipelineDuration.Milliseconds(),
+		"steps": len(steps),
+	})
 
 	if metrics != nil {
 		logPipelineMetrics(metrics, runHash, pipelineDuration)
 		if err := writePipelineMetricsReport(cfg.OutDir, metrics, pipelineDuration); err != nil {
-			logx.Warnf("no se pudo escribir metrics: %v", err)
+			logx.Warn("Fallo escribir métricas", logx.Fields{"error": err.Error()})
 		}
 	}
 
@@ -188,13 +201,13 @@ func Run(cfg *config.Config) error {
 	// Eliminar checkpoint al completar exitosamente
 	if checkpointMgr != nil {
 		if err := checkpointMgr.Remove(); err != nil {
-			logx.Warnf("no se pudo eliminar checkpoint: %v", err)
+			logx.Warn("Fallo eliminar checkpoint", logx.Fields{"error": err.Error()})
 		} else {
-			logx.Debugf("checkpoint eliminado después de completar exitosamente")
+			logx.Debug("Checkpoint eliminado", logx.Fields{"status": "exitoso"})
 		}
 	}
 
-	logx.Infof("modo active=%v; terminado", cfg.Active)
+	logx.Info("Ejecución completada", logx.Fields{"active_mode": cfg.Active})
 	return nil
 }
 
@@ -275,7 +288,7 @@ func (w *runnerWaitGroup) Wait() {
 			if errors.Is(err, runner.ErrMissingBinary) {
 				continue
 			}
-			logx.Warnf("source error: %v", err)
+			logx.Warn("Error en fuente", logx.Fields{"error": err.Error()})
 		}
 	}
 }
