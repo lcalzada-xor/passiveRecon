@@ -106,7 +106,7 @@ func Run(cfg *config.Config) error {
 				if loaded.Target == cfg.Target && loaded.RunHash == runHash {
 					logx.Info("Resumiendo desde checkpoint", logx.Fields{
 						"tools_completadas": len(loaded.CompletedTools),
-						"progreso": checkpointMgr.GetProgress(),
+						"progreso":          checkpointMgr.GetProgress(),
 					})
 				} else {
 					logx.Warn("Checkpoint inválido", logx.Fields{"reason": "target o configuración no coinciden"})
@@ -153,7 +153,7 @@ func Run(cfg *config.Config) error {
 	if strings.ToLower(strings.TrimSpace(cfg.Scope)) == "domain" {
 		logx.Debug("Scope configurado como 'domain'", logx.Fields{
 			"skip_tools": "amass, subfinder, assetfinder, rdap",
-			"reason": "herramientas de enumeración de subdominios",
+			"reason":     "herramientas de enumeración de subdominios",
 		})
 		logx.Trace("Certificados del dominio exacto", logx.Fields{
 			"tools": "crtsh, censys",
@@ -180,7 +180,7 @@ func Run(cfg *config.Config) error {
 	pipelineDuration := time.Since(pipelineStart)
 	logx.Info("Pipeline ejecutado", logx.Fields{
 		"duration_ms": pipelineDuration.Milliseconds(),
-		"steps": len(steps),
+		"steps":       len(steps),
 	})
 
 	if metrics != nil {

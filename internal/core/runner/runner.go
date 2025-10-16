@@ -140,9 +140,9 @@ func runCommand(ctx context.Context, name string, args []string, out chan<- stri
 
 	// Detalles solo en trace
 	logx.Trace("Detalles del comando", logx.Fields{
-		"id": cmdID,
+		"id":   cmdID,
 		"path": cmd.Path,
-		"dir": cmd.Dir,
+		"dir":  cmd.Dir,
 	})
 
 	stdout, err := cmd.StdoutPipe()
@@ -203,9 +203,9 @@ readLoop:
 	// Espera de finalización del proceso.
 	if err := cmd.Wait(); err != nil {
 		if ctx.Err() != nil {
-			logx.Tracef(formatter.FormatCommandError(cmdID, name, "context cancelled"))
+			logx.Tracef("%s", formatter.FormatCommandError(cmdID, name, "context cancelled"))
 		} else {
-			logx.Errorf(formatter.FormatCommandError(cmdID, name, err.Error()))
+			logx.Errorf("%s", formatter.FormatCommandError(cmdID, name, err.Error()))
 			return err
 		}
 	}

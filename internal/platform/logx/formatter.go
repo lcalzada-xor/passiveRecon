@@ -141,20 +141,20 @@ func (f *LogFormatter) formatFields(fields map[string]interface{}) string {
 // extractMainFields extrae los fields más importantes a mostrar
 func (f *LogFormatter) extractMainFields(fields map[string]interface{}) map[string]interface{} {
 	important := map[string]bool{
-		"target":      true,
-		"tool":        true,
-		"status":      true,
-		"duration_ms": true,
-		"outputs":     true,
-		"errors":      true,
-		"timeout_sec": true,
-		"workers":     true,
-		"scope":       true,
-		"active":      true,
-		"report":      true,
+		"target":       true,
+		"tool":         true,
+		"status":       true,
+		"duration_ms":  true,
+		"outputs":      true,
+		"errors":       true,
+		"timeout_sec":  true,
+		"workers":      true,
+		"scope":        true,
+		"active":       true,
+		"report":       true,
 		"concurrencia": true,
-		"steps":       true,
-		"reason":      true,
+		"steps":        true,
+		"reason":       true,
 	}
 
 	result := make(map[string]interface{})
@@ -169,20 +169,20 @@ func (f *LogFormatter) extractMainFields(fields map[string]interface{}) map[stri
 // extractSecondaryFields extrae los fields secundarios
 func (f *LogFormatter) extractSecondaryFields(fields map[string]interface{}) map[string]interface{} {
 	important := map[string]bool{
-		"target":      true,
-		"tool":        true,
-		"status":      true,
-		"duration_ms": true,
-		"outputs":     true,
-		"errors":      true,
-		"timeout_sec": true,
-		"workers":     true,
-		"scope":       true,
-		"active":      true,
-		"report":      true,
+		"target":       true,
+		"tool":         true,
+		"status":       true,
+		"duration_ms":  true,
+		"outputs":      true,
+		"errors":       true,
+		"timeout_sec":  true,
+		"workers":      true,
+		"scope":        true,
+		"active":       true,
+		"report":       true,
 		"concurrencia": true,
-		"steps":       true,
-		"reason":      true,
+		"steps":        true,
+		"reason":       true,
 	}
 
 	result := make(map[string]interface{})

@@ -9,10 +9,10 @@ import (
 
 // GroupTracker rastrea información de grupos
 type GroupTracker struct {
-	mu       sync.Mutex
-	groups   map[string]*GroupInfo
-	nextID   int
-	dedup    *MessageDeduplicator
+	mu        sync.Mutex
+	groups    map[string]*GroupInfo
+	nextID    int
+	dedup     *MessageDeduplicator
 	formatter *LogFormatter
 }
 
@@ -58,7 +58,7 @@ func (gt *GroupTracker) StartGroup(name string, metadata map[string]interface{})
 	// Loggear cabecera
 	elapsed := time.Since(group.StartTime)
 	header := gt.formatter.FormatPhaseHeader(name, metadata, elapsed)
-	Infof(header)
+	Infof("%s", header)
 
 	return id
 }
@@ -84,7 +84,7 @@ func (gt *GroupTracker) EndGroup(groupID string) {
 		group.Artifacts,
 		FormatDuration(elapsed),
 	)
-	Infof(summary)
+	Infof("%s", summary)
 }
 
 // RegisterTool registra una herramienta en un grupo

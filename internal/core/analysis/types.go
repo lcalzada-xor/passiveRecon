@@ -9,24 +9,24 @@ import (
 // Report representa un reporte completo de análisis de reconocimiento pasivo.
 type Report struct {
 	// Metadata del scan
-	Target       string    `json:"target"`
-	ScanDate     time.Time `json:"scan_date"`
-	Duration     string    `json:"duration,omitempty"`
-	ReportDate   time.Time `json:"report_date"`
+	Target     string    `json:"target"`
+	ScanDate   time.Time `json:"scan_date"`
+	Duration   string    `json:"duration,omitempty"`
+	ReportDate time.Time `json:"report_date"`
 
 	// Estadísticas generales
-	Summary      Summary           `json:"summary"`
+	Summary Summary `json:"summary"`
 
 	// Análisis detallados
-	TechStack    *TechStack        `json:"tech_stack,omitempty"`
-	AttackSurface *AttackSurface   `json:"attack_surface,omitempty"`
-	Infrastructure *Infrastructure `json:"infrastructure,omitempty"`
-	Assets       *AssetInventory   `json:"assets,omitempty"`
-	Security     *SecurityFindings `json:"security,omitempty"`
+	TechStack      *TechStack        `json:"tech_stack,omitempty"`
+	AttackSurface  *AttackSurface    `json:"attack_surface,omitempty"`
+	Infrastructure *Infrastructure   `json:"infrastructure,omitempty"`
+	Assets         *AssetInventory   `json:"assets,omitempty"`
+	Security       *SecurityFindings `json:"security,omitempty"`
 
 	// Insights y recomendaciones
-	Insights     []Insight         `json:"insights,omitempty"`
-	Timeline     []TimelineEvent   `json:"timeline,omitempty"`
+	Insights []Insight       `json:"insights,omitempty"`
+	Timeline []TimelineEvent `json:"timeline,omitempty"`
 }
 
 // Summary contiene estadísticas generales del scan.
@@ -49,25 +49,25 @@ type ToolStat struct {
 // TechStack representa el stack tecnológico detectado.
 type TechStack struct {
 	// Frontend
-	JavaScript  []Technology `json:"javascript,omitempty"`
-	CSS         []Technology `json:"css,omitempty"`
-	Frameworks  []Technology `json:"frameworks,omitempty"`
-	Libraries   []Technology `json:"libraries,omitempty"`
+	JavaScript []Technology `json:"javascript,omitempty"`
+	CSS        []Technology `json:"css,omitempty"`
+	Frameworks []Technology `json:"frameworks,omitempty"`
+	Libraries  []Technology `json:"libraries,omitempty"`
 
 	// Backend (inferido)
-	Languages   []Technology `json:"languages,omitempty"`
-	Servers     []Technology `json:"servers,omitempty"`
-	CMS         []Technology `json:"cms,omitempty"`
+	Languages []Technology `json:"languages,omitempty"`
+	Servers   []Technology `json:"servers,omitempty"`
+	CMS       []Technology `json:"cms,omitempty"`
 
 	// Infraestructura
-	CDN         []Technology `json:"cdn,omitempty"`
-	Analytics   []Technology `json:"analytics,omitempty"`
+	CDN       []Technology `json:"cdn,omitempty"`
+	Analytics []Technology `json:"analytics,omitempty"`
 
 	// Tecnologías obsoletas (riesgo)
-	Deprecated  []Technology `json:"deprecated,omitempty"`
+	Deprecated []Technology `json:"deprecated,omitempty"`
 
 	// Confianza del análisis
-	Confidence  string       `json:"confidence"` // high, medium, low
+	Confidence string `json:"confidence"` // high, medium, low
 }
 
 // Technology representa una tecnología detectada.
@@ -82,10 +82,10 @@ type Technology struct {
 
 // AttackSurface representa el análisis de superficie de ataque.
 type AttackSurface struct {
-	Score          float64           `json:"score"`           // 0-100
-	Level          string            `json:"level"`           // minimal, low, medium, high, critical
-	TotalEndpoints int               `json:"total_endpoints"`
-	ActiveEndpoints int              `json:"active_endpoints"`
+	Score           float64 `json:"score"` // 0-100
+	Level           string  `json:"level"` // minimal, low, medium, high, critical
+	TotalEndpoints  int     `json:"total_endpoints"`
+	ActiveEndpoints int     `json:"active_endpoints"`
 
 	// Categorización de endpoints
 	SensitiveEndpoints []SensitiveEndpoint `json:"sensitive_endpoints,omitempty"`
@@ -94,21 +94,21 @@ type AttackSurface struct {
 	AuthEndpoints      []string            `json:"auth_endpoints,omitempty"`
 
 	// Exposiciones
-	ExposedFiles       []ExposedFile       `json:"exposed_files,omitempty"`
-	ExposedTech        []string            `json:"exposed_tech,omitempty"`
+	ExposedFiles []ExposedFile `json:"exposed_files,omitempty"`
+	ExposedTech  []string      `json:"exposed_tech,omitempty"`
 
 	// Factores de riesgo
-	RiskFactors        []RiskFactor        `json:"risk_factors,omitempty"`
+	RiskFactors []RiskFactor `json:"risk_factors,omitempty"`
 }
 
 // SensitiveEndpoint representa un endpoint potencialmente sensible.
 type SensitiveEndpoint struct {
-	URL        string   `json:"url"`
-	Category   string   `json:"category"` // admin, auth, api, config, backup, etc.
-	Risk       string   `json:"risk"`     // critical, high, medium, low
-	Reason     string   `json:"reason"`
-	Active     bool     `json:"active"`
-	StatusCode int      `json:"status_code,omitempty"`
+	URL        string `json:"url"`
+	Category   string `json:"category"` // admin, auth, api, config, backup, etc.
+	Risk       string `json:"risk"`     // critical, high, medium, low
+	Reason     string `json:"reason"`
+	Active     bool   `json:"active"`
+	StatusCode int    `json:"status_code,omitempty"`
 }
 
 // ExposedFile representa un archivo expuesto que podría ser sensible.
@@ -122,7 +122,7 @@ type ExposedFile struct {
 
 // RiskFactor representa un factor de riesgo detectado.
 type RiskFactor struct {
-	Category    string   `json:"category"`    // tech, exposure, config, etc.
+	Category    string   `json:"category"` // tech, exposure, config, etc.
 	Title       string   `json:"title"`
 	Description string   `json:"description"`
 	Severity    string   `json:"severity"` // critical, high, medium, low
@@ -133,22 +133,22 @@ type RiskFactor struct {
 // Infrastructure representa información de infraestructura.
 type Infrastructure struct {
 	// DNS
-	Nameservers  []string          `json:"nameservers,omitempty"`
-	DNSRecords   map[string][]string `json:"dns_records,omitempty"` // A, AAAA, MX, NS, TXT, etc.
+	Nameservers []string            `json:"nameservers,omitempty"`
+	DNSRecords  map[string][]string `json:"dns_records,omitempty"` // A, AAAA, MX, NS, TXT, etc.
 
 	// IPs
-	IPs          []IPInfo          `json:"ips,omitempty"`
+	IPs []IPInfo `json:"ips,omitempty"`
 
 	// RDAP
-	Registrar    string            `json:"registrar,omitempty"`
-	Registered   *time.Time        `json:"registered,omitempty"`
-	Expires      *time.Time        `json:"expires,omitempty"`
-	LastChanged  *time.Time        `json:"last_changed,omitempty"`
-	Status       []string          `json:"status,omitempty"`
+	Registrar   string     `json:"registrar,omitempty"`
+	Registered  *time.Time `json:"registered,omitempty"`
+	Expires     *time.Time `json:"expires,omitempty"`
+	LastChanged *time.Time `json:"last_changed,omitempty"`
+	Status      []string   `json:"status,omitempty"`
 
 	// Hosting
-	HostingProvider string         `json:"hosting_provider,omitempty"`
-	EmailProvider   string         `json:"email_provider,omitempty"`
+	HostingProvider string `json:"hosting_provider,omitempty"`
+	EmailProvider   string `json:"email_provider,omitempty"`
 }
 
 // IPInfo representa información de una IP.
@@ -166,46 +166,46 @@ type AssetInventory struct {
 	Domains       []Domain `json:"domains,omitempty"`
 
 	// Subdominios
-	TotalSubdomains  int      `json:"total_subdomains"`
-	ActiveSubdomains int      `json:"active_subdomains"`
+	TotalSubdomains  int `json:"total_subdomains"`
+	ActiveSubdomains int `json:"active_subdomains"`
 
 	// Recursos web
-	HTMLPages     int      `json:"html_pages"`
-	JavaScripts   int      `json:"javascripts"`
-	Stylesheets   int      `json:"stylesheets"`
-	Images        int      `json:"images"`
-	Documents     int      `json:"documents"`
-	OtherResources int     `json:"other_resources"`
+	HTMLPages      int `json:"html_pages"`
+	JavaScripts    int `json:"javascripts"`
+	Stylesheets    int `json:"stylesheets"`
+	Images         int `json:"images"`
+	Documents      int `json:"documents"`
+	OtherResources int `json:"other_resources"`
 
 	// APIs
-	RestAPIs      []string `json:"rest_apis,omitempty"`
-	GraphQLAPIs   []string `json:"graphql_apis,omitempty"`
+	RestAPIs    []string `json:"rest_apis,omitempty"`
+	GraphQLAPIs []string `json:"graphql_apis,omitempty"`
 
 	// Certificados
-	Certificates  int      `json:"certificates"`
+	Certificates int `json:"certificates"`
 }
 
 // Domain representa un dominio descubierto.
 type Domain struct {
-	Name      string `json:"name"`
-	Active    bool   `json:"active"`
-	Verified  bool   `json:"verified"`
-	Source    string `json:"source,omitempty"`
+	Name     string `json:"name"`
+	Active   bool   `json:"active"`
+	Verified bool   `json:"verified"`
+	Source   string `json:"source,omitempty"`
 }
 
 // SecurityFindings representa hallazgos de seguridad.
 type SecurityFindings struct {
-	TotalFindings    int               `json:"total_findings"`
-	Critical         int               `json:"critical"`
-	High             int               `json:"high"`
-	Medium           int               `json:"medium"`
-	Low              int               `json:"low"`
+	TotalFindings int `json:"total_findings"`
+	Critical      int `json:"critical"`
+	High          int `json:"high"`
+	Medium        int `json:"medium"`
+	Low           int `json:"low"`
 
 	// Hallazgos por categoría
-	Findings         []Finding         `json:"findings,omitempty"`
+	Findings []Finding `json:"findings,omitempty"`
 
 	// Patrones detectados por GoLinkFinder
-	GFFindings       []GFFinding       `json:"gf_findings,omitempty"`
+	GFFindings []GFFinding `json:"gf_findings,omitempty"`
 }
 
 // Finding representa un hallazgo de seguridad.
@@ -235,11 +235,11 @@ type GFFinding struct {
 
 // Insight representa un insight o recomendación.
 type Insight struct {
-	Type        string   `json:"type"`        // info, warning, critical, recommendation
-	Category    string   `json:"category"`    // technology, security, infrastructure, business
+	Type        string   `json:"type"`     // info, warning, critical, recommendation
+	Category    string   `json:"category"` // technology, security, infrastructure, business
 	Title       string   `json:"title"`
 	Description string   `json:"description"`
-	Priority    int      `json:"priority"`    // 1-5 (1=highest)
+	Priority    int      `json:"priority"` // 1-5 (1=highest)
 	Evidence    []string `json:"evidence,omitempty"`
 	Action      string   `json:"action,omitempty"` // Acción recomendada
 }
@@ -256,19 +256,19 @@ type TimelineEvent struct {
 // AnalysisOptions configura las opciones del análisis.
 type AnalysisOptions struct {
 	// Qué análisis ejecutar
-	EnableTechDetection      bool
-	EnableAttackSurface      bool
-	EnableInfrastructure     bool
-	EnableAssetInventory     bool
-	EnableSecurityFindings   bool
-	EnableInsights           bool
-	EnableTimeline           bool
+	EnableTechDetection    bool
+	EnableAttackSurface    bool
+	EnableInfrastructure   bool
+	EnableAssetInventory   bool
+	EnableSecurityFindings bool
+	EnableInsights         bool
+	EnableTimeline         bool
 
 	// Configuraciones
-	MinConfidence            string // low, medium, high
-	IncludePassiveOnly       bool
-	IncludeActiveOnly        bool
-	MaxDepth                 int
+	MinConfidence      string // low, medium, high
+	IncludePassiveOnly bool
+	IncludeActiveOnly  bool
+	MaxDepth           int
 }
 
 // DefaultAnalysisOptions retorna las opciones por defecto.
@@ -290,14 +290,14 @@ func DefaultAnalysisOptions() AnalysisOptions {
 
 // ArtifactStats representa estadísticas básicas de artefactos.
 type ArtifactStats struct {
-	Total        int
-	Active       int
-	Passive      int
-	ByType       map[string]int
-	BySubtype    map[string]int
-	ByStatus     map[string]int
-	ByTool       map[string]int
-	UniqueTools  []string
+	Total       int
+	Active      int
+	Passive     int
+	ByType      map[string]int
+	BySubtype   map[string]int
+	ByStatus    map[string]int
+	ByTool      map[string]int
+	UniqueTools []string
 }
 
 // ComputeStats calcula estadísticas de un conjunto de artefactos.

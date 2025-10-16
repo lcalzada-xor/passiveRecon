@@ -29,9 +29,9 @@ const (
 // Artifact representa un hallazgo generado por el pipeline (formato interno v1).
 type Artifact struct {
 	Type        string         `json:"type"`
-	Subtype     string         `json:"subtype,omitempty"`    // Subtipo específico (nuevo sistema)
-	Types       []string       `json:"types,omitempty"`      // Tipos secundarios (sistema legacy)
-	Tags        []string       `json:"tags,omitempty"`       // Tags adicionales (nuevo sistema)
+	Subtype     string         `json:"subtype,omitempty"` // Subtipo específico (nuevo sistema)
+	Types       []string       `json:"types,omitempty"`   // Tipos secundarios (sistema legacy)
+	Tags        []string       `json:"tags,omitempty"`    // Tags adicionales (nuevo sistema)
 	Value       string         `json:"value"`
 	Active      bool           `json:"active"`
 	Up          bool           `json:"up"`
@@ -64,17 +64,17 @@ type HeaderV2 struct {
 
 // ArtifactV2 representa un hallazgo en formato v2 (compacto).
 type ArtifactV2 struct {
-	T   string         `json:"t"`              // Type (domain, certificate, route, etc.)
-	St  string         `json:"st,omitempty"`   // Subtype (javascript, html, rest, etc.) - Nuevo sistema
-	V   interface{}    `json:"v"`              // Value (string o object según tipo)
-	S   string         `json:"s"`              // State (up, down, active_up, active_down)
-	Tl  string         `json:"tl,omitempty"`   // Tool name (primary)
-	Tls []string       `json:"tls,omitempty"`  // Tools array (all tools that found this artifact)
-	N   int            `json:"n,omitempty"`    // Occurrences count
-	Ts  []int64        `json:"ts,omitempty"`   // Timestamps relativos en milisegundos [first_seen] o [first_seen, last_seen]
-	Ty  []string       `json:"ty,omitempty"`   // Secondary types (legacy, opcional)
-	Tags []string      `json:"tags,omitempty"` // Tags adicionales (opcional)
-	M   map[string]any `json:"m,omitempty"`    // Metadata adicional (opcional)
+	T    string         `json:"t"`              // Type (domain, certificate, route, etc.)
+	St   string         `json:"st,omitempty"`   // Subtype (javascript, html, rest, etc.) - Nuevo sistema
+	V    interface{}    `json:"v"`              // Value (string o object según tipo)
+	S    string         `json:"s"`              // State (up, down, active_up, active_down)
+	Tl   string         `json:"tl,omitempty"`   // Tool name (primary)
+	Tls  []string       `json:"tls,omitempty"`  // Tools array (all tools that found this artifact)
+	N    int            `json:"n,omitempty"`    // Occurrences count
+	Ts   []int64        `json:"ts,omitempty"`   // Timestamps relativos en milisegundos [first_seen] o [first_seen, last_seen]
+	Ty   []string       `json:"ty,omitempty"`   // Secondary types (legacy, opcional)
+	Tags []string       `json:"tags,omitempty"` // Tags adicionales (opcional)
+	M    map[string]any `json:"m,omitempty"`    // Metadata adicional (opcional)
 }
 
 // CertificateV2 representa un certificado SSL/TLS en formato compacto.

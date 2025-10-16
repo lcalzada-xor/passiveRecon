@@ -3,9 +3,9 @@ package analysis
 // buildAssetInventory construye el inventario de assets.
 func (a *Analyzer) buildAssetInventory() *AssetInventory {
 	inventory := &AssetInventory{
-		Domains:      []Domain{},
-		RestAPIs:     []string{},
-		GraphQLAPIs:  []string{},
+		Domains:     []Domain{},
+		RestAPIs:    []string{},
+		GraphQLAPIs: []string{},
 	}
 
 	// Contar dominios

@@ -17,9 +17,9 @@ import (
 )
 
 var (
-	subjsFindBin      = runner.FindBin
-	subjsRunCmd       = runner.RunCommand
-	subjsValidator    = validateJSURLs
+	subjsFindBin   = runner.FindBin
+	subjsRunCmd    = runner.RunCommand
+	subjsValidator = validateJSURLs
 	// SubJS validation es I/O bound - podemos usar más workers que CPUs
 	subjsWorkerCount  = runtime.NumCPU() * 4
 	subjsHTTPTimeout  = 15 * time.Second

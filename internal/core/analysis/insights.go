@@ -314,8 +314,8 @@ func (a *Analyzer) generateBusinessInsights(report *Report) []Insight {
 	hasContactForm := false
 	for _, art := range routes {
 		if strings.Contains(strings.ToLower(art.Value), "formulario") ||
-		   strings.Contains(strings.ToLower(art.Value), "form") ||
-		   strings.Contains(strings.ToLower(art.Value), "contacto") {
+			strings.Contains(strings.ToLower(art.Value), "form") ||
+			strings.Contains(strings.ToLower(art.Value), "contacto") {
 			hasContactForm = true
 			break
 		}

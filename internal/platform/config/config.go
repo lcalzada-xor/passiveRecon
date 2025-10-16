@@ -39,28 +39,28 @@ type Config struct {
 	Resume             bool // Reanudar desde checkpoint
 	CheckpointInterval int  // Intervalo de checkpoint en segundos
 	// Logging options
-	NoColor    bool
-	Compact    bool
-	LogWidth   int
+	NoColor  bool
+	Compact  bool
+	LogWidth int
 }
 
 type fileConfig struct {
-	Target             *string         `json:"target" yaml:"target"`
-	OutDir             *string         `json:"outdir" yaml:"outdir"`
-	Workers            *int            `json:"workers" yaml:"workers"`
-	Active             *bool           `json:"active" yaml:"active"`
-	Tools              *stringList     `json:"tools" yaml:"tools"`
-	TimeoutS           *int            `json:"timeout" yaml:"timeout"`
-	ToolTimeouts       map[string]int  `json:"tool_timeouts" yaml:"tool_timeouts"`
-	Verbosity          *int            `json:"verbosity" yaml:"verbosity"`
-	Report             *bool           `json:"report" yaml:"report"`
-	Proxy              *string         `json:"proxy" yaml:"proxy"`
-	ProxyCACert        *string         `json:"proxy_ca" yaml:"proxy_ca"`
-	CensysAPIID        *string         `json:"censys_api_id" yaml:"censys_api_id"`
-	CensysAPISecret    *string         `json:"censys_api_secret" yaml:"censys_api_secret"`
-	Scope              *string         `json:"scope" yaml:"scope"`
-	Resume             *bool           `json:"resume" yaml:"resume"`
-	CheckpointInterval *int            `json:"checkpoint_interval" yaml:"checkpoint_interval"`
+	Target             *string        `json:"target" yaml:"target"`
+	OutDir             *string        `json:"outdir" yaml:"outdir"`
+	Workers            *int           `json:"workers" yaml:"workers"`
+	Active             *bool          `json:"active" yaml:"active"`
+	Tools              *stringList    `json:"tools" yaml:"tools"`
+	TimeoutS           *int           `json:"timeout" yaml:"timeout"`
+	ToolTimeouts       map[string]int `json:"tool_timeouts" yaml:"tool_timeouts"`
+	Verbosity          *int           `json:"verbosity" yaml:"verbosity"`
+	Report             *bool          `json:"report" yaml:"report"`
+	Proxy              *string        `json:"proxy" yaml:"proxy"`
+	ProxyCACert        *string        `json:"proxy_ca" yaml:"proxy_ca"`
+	CensysAPIID        *string        `json:"censys_api_id" yaml:"censys_api_id"`
+	CensysAPISecret    *string        `json:"censys_api_secret" yaml:"censys_api_secret"`
+	Scope              *string        `json:"scope" yaml:"scope"`
+	Resume             *bool          `json:"resume" yaml:"resume"`
+	CheckpointInterval *int           `json:"checkpoint_interval" yaml:"checkpoint_interval"`
 }
 
 type stringList []string

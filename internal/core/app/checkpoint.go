@@ -24,27 +24,27 @@ const (
 
 // Checkpoint representa el estado de una ejecución que puede ser resumida.
 type Checkpoint struct {
-	Version       string            `json:"version"`
-	RunHash       string            `json:"run_hash"`
-	Target        string            `json:"target"`
-	StartedAt     time.Time         `json:"started_at"`
-	LastUpdate    time.Time         `json:"last_update"`
-	CompletedTools []string         `json:"completed_tools"`
-	ToolProgress  map[string]int64  `json:"tool_progress"` // Tool -> outputs count
-	ArtifactCount int64             `json:"artifact_count"`
-	Metadata      map[string]string `json:"metadata,omitempty"`
+	Version        string            `json:"version"`
+	RunHash        string            `json:"run_hash"`
+	Target         string            `json:"target"`
+	StartedAt      time.Time         `json:"started_at"`
+	LastUpdate     time.Time         `json:"last_update"`
+	CompletedTools []string          `json:"completed_tools"`
+	ToolProgress   map[string]int64  `json:"tool_progress"` // Tool -> outputs count
+	ArtifactCount  int64             `json:"artifact_count"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
 }
 
 // CheckpointManager gestiona la persistencia y recuperación de checkpoints.
 type CheckpointManager struct {
-	mu               sync.RWMutex
-	checkpoint       *Checkpoint
-	path             string
-	interval         time.Duration
-	lastSave         time.Time
-	autoSaveEnabled  bool
-	stopAutoSave     chan struct{}
-	autoSaveStopped  chan struct{}
+	mu              sync.RWMutex
+	checkpoint      *Checkpoint
+	path            string
+	interval        time.Duration
+	lastSave        time.Time
+	autoSaveEnabled bool
+	stopAutoSave    chan struct{}
+	autoSaveStopped chan struct{}
 }
 
 // NewCheckpointManager crea un nuevo manager de checkpoints.
@@ -57,14 +57,14 @@ func NewCheckpointManager(outdir string, runHash string, target string, interval
 
 	return &CheckpointManager{
 		checkpoint: &Checkpoint{
-			Version:       checkpointVersion,
-			RunHash:       runHash,
-			Target:        target,
-			StartedAt:     time.Now(),
-			LastUpdate:    time.Now(),
+			Version:        checkpointVersion,
+			RunHash:        runHash,
+			Target:         target,
+			StartedAt:      time.Now(),
+			LastUpdate:     time.Now(),
 			CompletedTools: []string{},
-			ToolProgress:  make(map[string]int64),
-			Metadata:      make(map[string]string),
+			ToolProgress:   make(map[string]int64),
+			Metadata:       make(map[string]string),
 		},
 		path:            path,
 		interval:        interval,
@@ -95,7 +95,7 @@ func (m *CheckpointManager) Load() (*Checkpoint, error) {
 	if checkpoint.Version != checkpointVersion {
 		logx.Warn("Checkpoint version mismatch", logx.Fields{
 			"expected": checkpointVersion,
-			"got": checkpoint.Version,
+			"got":      checkpoint.Version,
 		})
 	}
 
@@ -153,7 +153,7 @@ func (m *CheckpointManager) StartAutoSave() {
 					logx.Warn("Checkpoint auto-save falló", logx.Fields{"error": err.Error()})
 				} else {
 					logx.Trace("Checkpoint guardado", logx.Fields{
-						"tools": len(m.GetCompletedTools()),
+						"tools":     len(m.GetCompletedTools()),
 						"artifacts": m.GetArtifactCount(),
 					})
 				}

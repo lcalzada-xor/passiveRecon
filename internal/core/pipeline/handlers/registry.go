@@ -22,8 +22,8 @@ func NewRegistry() *Registry {
 
 			// Handlers sin prefijo (prioridad baja, orden importa)
 			NewRelationHandler(), // Debe ir antes de RouteHandler
-			NewRouteHandler(),     // Maneja rutas y categorías
-			NewDomainHandler(),    // Debe ir al final como fallback
+			NewRouteHandler(),    // Maneja rutas y categorías
+			NewDomainHandler(),   // Debe ir al final como fallback
 		},
 	}
 }

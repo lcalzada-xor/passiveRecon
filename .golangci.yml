@@ -1,0 +1,233 @@
+# golangci-lint configuration for production-ready code
+run:
+  timeout: 5m
+  tests: true
+  build-tags: []
+  skip-dirs:
+    - vendor
+    - third_party
+  skip-files: []
+  modules-download-mode: readonly
+  allow-parallel-runners: true
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  uniq-by-line: false
+  sort-results: true
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+    exclude-functions:
+      - (*database/sql.Rows).Close
+      - (*database/sql.DB).Close
+
+  govet:
+    enable-all: true
+    disable:
+      - shadow # too noisy for now
+      - fieldalignment # optimization, not critical
+
+  gocyclo:
+    min-complexity: 15
+
+  dupl:
+    threshold: 100
+
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+    ignore-tests: true
+
+  misspell:
+    locale: US
+    ignore-words:
+      - passive
+
+  lll:
+    line-length: 140
+    tab-width: 4
+
+  unused:
+    check-exported: false
+
+  unparam:
+    check-exported: false
+
+  nakedret:
+    max-func-lines: 30
+
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: true
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+      - experimental
+      - opinionated
+    disabled-checks:
+      - whyNoLint
+      - unnamedResult
+
+  gofmt:
+    simplify: true
+
+  goimports:
+    local-prefixes: passive-rec
+
+  revive:
+    severity: warning
+    enable-all-rules: false
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+        disabled: true # too noisy
+      - name: if-return
+      - name: increment-decrement
+      - name: var-naming
+      - name: var-declaration
+      - name: package-comments
+        disabled: true # will add later
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+      - name: empty-block
+      - name: superfluous-else
+      - name: unused-parameter
+        disabled: true # interface implementations
+      - name: unreachable-code
+      - name: redefines-builtin-id
+
+  gosec:
+    severity: medium
+    confidence: medium
+    excludes:
+      - G104 # errors not checked (covered by errcheck)
+      - G204 # subprocess with variable (expected for tool execution)
+    config:
+      G301: "0750"
+      G302: "0640"
+      G306: "0640"
+
+  gomodguard:
+    blocked:
+      modules: []
+
+  godot:
+    scope: declarations
+    exclude: []
+    capital: false
+
+  stylecheck:
+    checks: ["all", "-ST1000", "-ST1003"]
+    dot-import-whitelist: []
+    http-status-code-whitelist: []
+
+linters:
+  disable-all: true
+  enable:
+    # Enabled by default
+    - errcheck      # Check for unchecked errors
+    - gosimple      # Simplify code
+    - govet         # Standard Go linter
+    - ineffassign   # Detect ineffectual assignments
+    - staticcheck   # Go static analysis
+    - typecheck     # Type checking
+    - unused        # Check for unused code
+
+    # Additional important linters
+    - gocyclo       # Cyclomatic complexity
+    - gofmt         # Code formatting
+    - goimports     # Import formatting
+    - revive        # Fast linter (replaces golint)
+    - gosec         # Security checks
+    - misspell      # Spelling mistakes
+    - unconvert     # Unnecessary type conversions
+    - unparam       # Unused function parameters
+    - nakedret      # Naked returns in long functions
+    - prealloc      # Slice preallocation
+    - goconst       # Repeated strings that could be constants
+    - gocritic      # Comprehensive Go linter
+    - gocognit      # Cognitive complexity
+    - bodyclose     # HTTP response body closure
+    - noctx         # HTTP request without context
+    - rowserrcheck  # SQL rows.Err check
+    - sqlclosecheck # SQL Close() check
+    - dogsled       # Too many blank identifiers
+    - dupl          # Code duplication
+    - exportloopref # Exporting loop variables
+    - whitespace    # Whitespace issues
+    - stylecheck    # Style checks
+
+    # Performance
+    - nolintlint    # Ill-formed nolint directives
+
+  fast: false
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+        - goconst
+
+    # Exclude known linters from partially hard-vendored code
+    - path: internal/adapters/sources/linkfinderevo/
+      linters:
+        - stylecheck
+        - gocritic
+        - revive
+
+    # Exclude TODOs from linting (allow technical debt tracking)
+    - linters:
+        - godot
+      source: "TODO"
+
+    # Allow long lines in tables and complex data structures
+    - path: internal/core/analysis/tech_detector\.go
+      linters:
+        - lll
+
+  # Show all issues from a linter
+  max-issues-per-linter: 0
+
+  # Show all issues with the same text
+  max-same-issues: 0
+
+  # Independently from option `exclude` we use default exclude patterns
+  exclude-use-default: false
+
+  # Show issues in the entirety of the file
+  new: false
+  new-from-rev: ""
+  new-from-patch: ""
+
+severity:
+  default-severity: warning
+  case-sensitive: false
+  rules:
+    - linters:
+        - errcheck
+        - gosec
+        - govet
+      severity: error

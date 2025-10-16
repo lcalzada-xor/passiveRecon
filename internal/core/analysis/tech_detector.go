@@ -365,15 +365,15 @@ func (a *Analyzer) detectCDN(stack *TechStack) {
 	detectedCDN := make(map[string]*Technology)
 
 	cdnPatterns := map[string]string{
-		"cloudflare":  "Cloudflare",
-		"akamai":      "Akamai",
-		"fastly":      "Fastly",
-		"cdn.":        "Generic CDN",
-		"cloudfront":  "Amazon CloudFront",
-		"googleapis":  "Google Cloud CDN",
-		"jsdelivr":    "jsDelivr",
-		"unpkg":       "unpkg",
-		"cdnjs":       "cdnjs",
+		"cloudflare": "Cloudflare",
+		"akamai":     "Akamai",
+		"fastly":     "Fastly",
+		"cdn.":       "Generic CDN",
+		"cloudfront": "Amazon CloudFront",
+		"googleapis": "Google Cloud CDN",
+		"jsdelivr":   "jsDelivr",
+		"unpkg":      "unpkg",
+		"cdnjs":      "cdnjs",
 	}
 
 	for _, art := range routes {

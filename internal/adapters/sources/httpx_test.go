@@ -667,7 +667,7 @@ func TestProcessHTTPXJSON(t *testing.T) {
 		want  []string
 	}{
 		{
-			name: "completo con webserver y tecnologías",
+			name:  "completo con webserver y tecnologías",
 			input: `{"timestamp":"2025-10-15T19:13:27.27475621+02:00","port":"443","url":"https://booking.avanzabus.com/comun/css/fonts/opensans-bold-webfont.woff","input":"http://booking.avanzabus.com/comun/css/fonts/opensans-bold-webfont.woff","scheme":"https","webserver":"nginx/1.18.0 (Ubuntu)","content_type":"application/font-woff","method":"HEAD","host":"52.51.81.104","path":"/comun/css/fonts/opensans-bold-webfont.woff","time":"161.824534ms","a":["52.209.141.168","52.51.81.104"],"tech":["Nginx:1.18.0","Ubuntu"],"words":0,"lines":0,"status_code":200,"content_length":25708,"failed":false,"knowledgebase":{"PageType":"other","pHash":0},"resolvers":["8.8.4.4:53"]}`,
 			want: []string{
 				"active: https://booking.avanzabus.com/comun/css/fonts/opensans-bold-webfont.woff",
@@ -679,7 +679,7 @@ func TestProcessHTTPXJSON(t *testing.T) {
 			},
 		},
 		{
-			name: "HTML con título",
+			name:  "HTML con título",
 			input: `{"timestamp":"2025-10-15T19:13:27.27475621+02:00","port":"443","url":"https://example.com/index.html","input":"http://example.com/index.html","scheme":"https","webserver":"Apache/2.4.41","content_type":"text/html; charset=utf-8","method":"GET","host":"93.184.216.34","path":"/index.html","status_code":200,"title":"Example Domain","failed":false}`,
 			want: []string{
 				"active: https://example.com/index.html",
@@ -690,12 +690,12 @@ func TestProcessHTTPXJSON(t *testing.T) {
 			},
 		},
 		{
-			name: "request fallida",
+			name:  "request fallida",
 			input: `{"url":"https://down.example.com","status_code":0,"failed":true}`,
-			want: nil,
+			want:  nil,
 		},
 		{
-			name: "404 no genera HTML",
+			name:  "404 no genera HTML",
 			input: `{"url":"https://example.com/missing","status_code":404,"content_type":"text/html","failed":false}`,
 			want: []string{
 				"active: example.com",

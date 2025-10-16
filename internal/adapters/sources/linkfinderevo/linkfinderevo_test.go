@@ -45,20 +45,20 @@ func sortedCopy(values []string) []string {
 
 func TestClassifyEndpoint(t *testing.T) {
 	tests := []struct {
-		name       string
-		input      string
-		wantJS     bool
-		wantHTML   bool
-		wantCSS    bool
-		wantPDF    bool
-		wantDoc    bool
-		wantFont   bool
-		wantVideo  bool
+		name        string
+		input       string
+		wantJS      bool
+		wantHTML    bool
+		wantCSS     bool
+		wantPDF     bool
+		wantDoc     bool
+		wantFont    bool
+		wantVideo   bool
 		wantArchive bool
-		wantXML    bool
-		undetected bool
-		wantImage  bool
-		wantCats   []routes.Category
+		wantXML     bool
+		undetected  bool
+		wantImage   bool
+		wantCats    []routes.Category
 	}{
 		// JavaScript
 		{name: "javascript absolute", input: "https://example.com/app/main.js", wantJS: true, wantCats: []routes.Category{routes.CategoryJS}},
@@ -68,7 +68,7 @@ func TestClassifyEndpoint(t *testing.T) {
 		// HTML
 		{name: "html absolute", input: "https://example.com/index.html", wantHTML: true, wantCats: []routes.Category{routes.CategoryHTML}},
 		{name: "php", input: "https://example.com/index.php", wantHTML: true, wantCats: []routes.Category{}}, // PHP no tiene categoría especial
-		{name: "jsp", input: "https://example.com/page.jsp", wantHTML: true, wantCats: []routes.Category{}}, // JSP no tiene categoría especial
+		{name: "jsp", input: "https://example.com/page.jsp", wantHTML: true, wantCats: []routes.Category{}},  // JSP no tiene categoría especial
 
 		// CSS
 		{name: "css file", input: "https://example.com/style.css", wantCSS: true, wantCats: []routes.Category{routes.CategoryCSS}},

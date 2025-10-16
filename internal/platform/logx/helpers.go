@@ -174,7 +174,7 @@ func LogGroupSummary(groupName string, tools int, artifacts int64, elapsed time.
 		"group":     groupName,
 		"tools":     tools,
 		"artifacts": artifacts,
-		"elapsed":   Sprintf(elapsed.String()),
+		"elapsed":   elapsed.String(),
 	}
 	LogTool(LevelInfo, "orchestrator", "group summary", fields)
 }

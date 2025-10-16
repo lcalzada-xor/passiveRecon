@@ -294,7 +294,7 @@ func maybeSkipByCache(step toolStep, state *pipelineState, opts orchestratorOpti
 	logx.Warn("Cache de dedupe inválido", logx.Fields{"action": "re-ejecutando paso"})
 	if err := opts.cache.Invalidate(step.Name); err != nil {
 		logx.Warn("Fallo invalidar cache", logx.Fields{
-			"step": step.Name,
+			"step":  step.Name,
 			"error": err.Error(),
 		})
 	}
@@ -327,7 +327,7 @@ func prepareStepTask(ctx context.Context, step toolStep, state *pipelineState, o
 				return nil
 			}
 			logx.Warn("Error en fuente", logx.Fields{
-				"step": step.Name,
+				"step":  step.Name,
 				"error": err.Error(),
 			})
 			return nil
@@ -341,7 +341,7 @@ func prepareStepTask(ctx context.Context, step toolStep, state *pipelineState, o
 		if opts.cache != nil && opts.runHash != "" {
 			if markErr := opts.cache.MarkComplete(step.Name, opts.runHash); markErr != nil {
 				logx.Warn("Fallo actualizar cache", logx.Fields{
-					"step": step.Name,
+					"step":  step.Name,
 					"error": markErr.Error(),
 				})
 			}
@@ -381,7 +381,7 @@ func runConcurrentSteps(ctx context.Context, group string, steps []toolStep, sta
 		"tools":       len(steps),
 	}
 	phaseHeader := formatter.FormatPhaseHeader(group, metadata, 0)
-	logx.Infof(phaseHeader)
+	logx.Infof("%s", phaseHeader)
 
 	var wg runnerWaitGroup
 	for _, st := range steps {
@@ -425,7 +425,7 @@ func runConcurrentSteps(ctx context.Context, group string, steps []toolStep, sta
 		toolsRun,
 		logx.FormatDuration(elapsed),
 	)
-	logx.Infof(summaryLog)
+	logx.Infof("%s", summaryLog)
 }
 
 func computeStepTimeout(step toolStep, state *pipelineState, opts orchestratorOptions) int {

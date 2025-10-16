@@ -22,8 +22,8 @@ type InputSanitizer struct {
 // NewInputSanitizer crea un nuevo sanitizador con configuración por defecto.
 func NewInputSanitizer() *InputSanitizer {
 	return &InputSanitizer{
-		maxInputLength: 8192,  // 8KB max input
-		maxURLLength:   2048,  // 2KB max URL
+		maxInputLength: 8192, // 8KB max input
+		maxURLLength:   2048, // 2KB max URL
 		allowedSchemes: map[string]bool{
 			"http":  true,
 			"https": true,
