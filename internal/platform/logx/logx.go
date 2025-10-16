@@ -55,11 +55,11 @@ var sampleState = struct {
 	counters map[string]int64
 }{counters: make(map[string]int64)}
 
-// SetVerbosity configura el nivel según la API antigua: 0=errors, 1=info, 2=debug, 3=trace
+// SetVerbosity configura el nivel según la API antigua: 0=info, 1=info, 2=debug, 3=trace
 func SetVerbosity(v int) {
 	switch {
 	case v <= 0:
-		SetLevel(LevelError)
+		SetLevel(LevelInfo)
 	case v == 1:
 		SetLevel(LevelInfo)
 	case v == 2:
@@ -431,14 +431,11 @@ type CliFlags struct {
 
 // ApplyCliFlags aplica configuración desde flags de CLI
 func ApplyCliFlags(flags CliFlags) {
-	cfg.mu.Lock()
-	defer cfg.mu.Unlock()
-
 	if flags.NoColor {
-		cfg.formatter.EnableColors(false)
-		cfg.outputCfg.NoColor = true
+		EnableColors(false)
 	}
 
+	cfg.mu.Lock()
 	if flags.Compact {
 		cfg.formatter.compact = true
 		cfg.outputCfg.Compact = true
@@ -448,8 +445,9 @@ func ApplyCliFlags(flags CliFlags) {
 		cfg.formatter.width = flags.Width
 		cfg.outputCfg.Width = flags.Width
 	}
+	cfg.mu.Unlock()
 
-	// Mapear verbosity
+	// Mapear verbosity (sin lock para evitar deadlock)
 	switch flags.Verbosity {
 	case "trace":
 		SetLevel(LevelTrace)
